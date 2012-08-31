@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <style type="text/css">
+      html { height: 100% }
+      body { height: 100%; margin: 0; padding: 0 }
+      #map_canvas { height: 100% }
+    </style>
+    <script type="text/javascript"
+      src="http://maps.googleapis.com/maps/api/js?key=AIzaSyAmuwgB4SyjfWRqpXtgbyFCYeLADMEx2rE&sensor=false">
+    </script>
+    <script type="text/javascript"
+      src="map_list.js">
+    </script>
+    <script type="text/javascript">
+    
+    	/// Developer guide: https://developers.google.com/maps/documentation/javascript/overlays#OverlaysOverview
+    	
+	function initialize() {
+	
+		var myLatlng = new google.maps.LatLng(40.2083, -84.8603);
+		
+		var mapOptions = {
+			center: myLatlng,
+			zoom: 8,
+			mapTypeId: google.maps.MapTypeId.ROADMAP
+		};
+		var map = new google.maps.Map(document.getElementById("map_canvas"), mapOptions);
+		
+		for(var i=0; i<map_list.length; i++)
+			add_marker(map_list[i], map);
+	};
+	
+	function add_marker(nodeInfo, map)
+	{
+		var nodeLatlng = new google.maps.LatLng(nodeInfo.lat, nodeInfo.lng);
+		
+		var marker = new google.maps.Marker({
+			position: nodeLatlng,
+			title: nodeInfo.name+"\n "+nodeInfo.geo,
+		});
+		
+		// To add the marker to the map, call setMap();
+		marker.setMap(map);
+		
+		
+		for(var linknum in nodeInfo.links)
+		{
+			var linkInfo = nodeInfo.links[linknum];
+			
+			var coords = [
+				new google.maps.LatLng(linkInfo.lat, linkInfo.lng),
+				nodeLatlng,
+			];
+			
+			var path = new google.maps.Polyline({
+				path: coords,
+				strokeColor: "#FF0000",
+				strokeOpacity: 1.0,
+				strokeWeight: 2
+			});
+			
+			path.setMap(map);
+		}
+	};
+
+		
+// 		var goldStar = {
+// 			path: 'M 125,5 155,90 245,90 175,145 200,230 125,180 50,230 75,145 5,90 95,90 z',
+// 			fillColor: "yellow",
+// 			fillOpacity: 0.8,
+// 			scale: 1,
+// 			strokeColor: "gold",
+// 			strokeWeight: 14
+// 		};
+// 		
+// 		var marker = new google.maps.Marker({
+// 			position: myLatlng, //new google.maps.LatLng(-25.363, 131.044),
+// 			icon: goldStar,
+// 			map: map
+// 		});
+    
+    </script>
+  </head>
+  <body onload="initialize()">
+    <div id="map_canvas" style="width:100%; height:100%"></div>
+  </body>
+</html>

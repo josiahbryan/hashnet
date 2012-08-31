@@ -1,0 +1,52 @@
+Request: http://freedns.afraid.org/api/?action=getdyndns&sha=3290e8f83d003c0845d67bf872ebbaf8083a21e0
+The SHA-1 string is your SHA hashed "username|password" (without quotes).
+
+Gives:
+tollanadenver.crabdance.com|65.28.241.60|http://freedns.afraid.org/dynamic/update.php?RlpwMVRPdXZDWW5jUFVJZE8yeks6ODA2ODIwMw==
+bryannet.na.tl|65.28.241.60|http://freedns.afraid.org/dynamic/update.php?RlpwMVRPdXZDWW5jUFVJZE8yeks6ODE5NjU1Mw==
+
+If IP changed, request: http://freedns.afraid.org/dynamic/update.php?RlpwMVRPdXZDWW5jUFVJZE8yeks6ODE5NjU1Mw==
+
+
+Get public IP from:
+# cat getwanip.pl
+#!/usr/bin/perl -w
+#Owner                    :latheefp@gmail.com
+#Purpose                  :Getting Public IP from Linux/Unix"
+#Packages Required: Perl and wget
+my $external_ip;
+$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
+if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+        print "My Wan IP is $1\n";
+}
+
+
+OR:
+get-current-ip() {
+
+xc=1
+until (( xc == 0 )) ; do
+
+     case $(( RANDOM % 6 )) in
+
+          0) ip=$(wget -t 2 -T 5 -q -O- http://showip.codebrainz.ca/) ;;
+          1) ip=$(wget -t 2 -T 5 -q -O- http://www.whatismyip.com/automation/n09230945.asp) ;;
+          2) ip=$(wget -t 2 -T 5 -q -O- http://www.showmyip.com/simple/) ;;
+          3) ip=$(wget -t 2 -T 5 -q -O- http://cfaj.freeshell.org/ipaddr.cgi) ;;
+          4) ip=$(wget -t 2 -T 5 -q -O- https://secure.informaction.com/ipecho/) ;;
+          5) ip=$(wget -t 2 -T 5 -q -O- http://icanhazip.com/) ;;
+
+     esac
+
+     xc=$?
+
+done
+
+echo -n "${ip//[^0-9.]}"   #if you don't want a trailing newline
+#echo "$ip"                #if you want or don't mind newlines
+}
+
+get-current-ip
+
+OR:
+whatismyip.org
