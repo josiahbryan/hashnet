@@ -1,0 +1,5 @@
+-Mouse offset when draging (so point doesnt 'snap' to mouse)
+-Merge warp image code right into render() so we dont create multiple unecessary QImages
+-Either re-enable offset vertex movement or create some sort of brush model
+-Need to be able to undo or 'reset' the poly grid for an image
+-General undo might be good

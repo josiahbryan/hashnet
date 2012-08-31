@@ -1,0 +1,165 @@
+#include <QtGui>
+
+#ifdef OPENCV_ENABLED
+#include <opencv/cv.h>
+#endif
+
+QImage render(QImage source, QRect sourceRect, QPolygonF destPoly)
+{
+	if(sourceRect.isNull())
+		sourceRect = source.rect();
+
+	//qDebug() << "Original painting sourceRect: "<<sourceRect;
+
+	//we need our points as opencv points
+	//be nice to do this without opencv?
+	CvPoint2D32f cvsrc[4];
+	CvPoint2D32f cvdst[4];
+
+	// Warp source coordinates
+	cvsrc[0].x = sourceRect.left();
+	cvsrc[0].y = sourceRect.top();
+	cvsrc[1].x = sourceRect.right();
+	cvsrc[1].y = sourceRect.top();
+	cvsrc[2].x = sourceRect.right();
+	cvsrc[2].y = sourceRect.bottom();
+	cvsrc[3].x = sourceRect.left();
+	cvsrc[3].y = sourceRect.bottom();
+
+	// Warp destination coordinates
+// 	cvdst[0].x = sourceRect.left()	+ 25;
+// 	cvdst[0].y = sourceRect.top()	+ 25;
+// 	
+// 	cvdst[1].x = sourceRect.right()	- 50;
+// 	cvdst[1].y = sourceRect.top()	+ 50;
+// 	
+// 	cvdst[2].x = sourceRect.right()	- 75;
+// 	cvdst[2].y = sourceRect.bottom()- 75;
+// 	
+// 	cvdst[3].x = sourceRect.left()	+ 100;
+// 	cvdst[3].y = sourceRect.bottom()- 100;
+
+	cvdst[0].x = sourceRect.left()	+ 0;
+	cvdst[0].y = sourceRect.top()	+ 0;
+
+	cvdst[1].x = sourceRect.right()	- 0;
+	cvdst[1].y = sourceRect.top()	+ 0;
+
+	cvdst[2].x = sourceRect.right()	- 0;
+	cvdst[2].y = sourceRect.bottom()- 0;
+
+	cvdst[3].x = sourceRect.left()	+ 0;
+	cvdst[3].y = sourceRect.bottom()- 0;
+
+	
+	//we create a matrix that will store the results
+	//from openCV - this is a 3x3 2D matrix that is
+	//row ordered
+	CvMat * translate = cvCreateMat(3,3,CV_32FC1);
+
+	//this is the slightly easier - but supposidly less
+	//accurate warping method
+	//cvWarpPerspectiveQMatrix(cvsrc, cvdst, translate);
+
+	//for the more accurate method we need to create
+	//a couple of matrixes that just act as containers
+	//to store our points  - the nice thing with this
+	//method is you can give it more than four points!
+	CvMat* src_mat = cvCreateMat( 4, 2, CV_32FC1 );
+	CvMat* dst_mat = cvCreateMat( 4, 2, CV_32FC1 );
+
+	//copy our points into the matrixes
+	cvSetData( src_mat, cvsrc, sizeof(CvPoint2D32f));
+	cvSetData( dst_mat, cvdst, sizeof(CvPoint2D32f));
+
+	qDebug() << "render(): cvFindHomography ...";
+	//figure out the warping!
+	//warning - older versions of openCV had a bug
+	//in this function.
+	cvFindHomography(src_mat, dst_mat, translate);
+
+	//get the matrix as a list of floats
+	float *matrix = translate->data.fl;
+
+	//imageTmp = QImage((const uchar*)curFrame->pointer(),curFrame->size().width(),curFrame->size().height(),QImage::Format_RGB32);
+
+	qDebug() << "render(): Creating input IplImage...";
+
+	if(source.format() != QImage::Format_ARGB32)
+		source = source.convertToFormat(QImage::Format_ARGB32);
+
+	IplImage* frame = 0;
+	frame = cvCreateImageHeader( cvSize(source.width(), source.height()), IPL_DEPTH_8U, 4);
+	frame->imageData = (char*) source.bits();
+
+	qDebug() << "render(): Creating output IplImage...";
+	IplImage *frameOut;
+	frameOut = cvCreateImageHeader( cvSize(source.width(), source.height()), IPL_DEPTH_8U, 4);
+	frameOut->imageData = (char*) malloc( source.byteCount() );
+
+	qDebug() << "render(): Creating output cvWarpPerspective...";
+	cvWarpPerspective(frame, frameOut, translate);
+
+	qDebug() << "render(): Copying imageOut...";
+	QImage imageOut( (uchar*)frameOut->imageData, source.width(), source.height(), source.format() );
+	dest = imageOut.copy();
+	
+	//QImage img = IplImage2QImage(frameOut);
+	
+	//we need to copy these values
+	//from the 3x3 2D openCV matrix which is row ordered
+	//
+	// ie:   [0][1][2] x
+	//       [3][4][5] y
+	//       [6][7][8] w
+
+	//to openGL's 4x4 3D column ordered matrix
+	//        x  y  z  w
+	// ie:   [0][3][ ][6]   [1-4]
+	//       [1][4][ ][7]   [5-8]
+	//	 [ ][ ][ ][ ]   [9-12]
+	//       [2][5][ ][9]   [13-16]
+	//
+
+
+// 	m_warpMatrix[0][0] = matrix[0];
+// 	m_warpMatrix[0][1] = matrix[3];
+// 	m_warpMatrix[0][2] = 0.;
+// 	m_warpMatrix[0][3] = matrix[6];
+// 
+// 	m_warpMatrix[1][0] = matrix[1];
+// 	m_warpMatrix[1][1] = matrix[4];
+// 	m_warpMatrix[1][2] = 0.;
+// 	m_warpMatrix[1][3] = matrix[7];
+// 
+// 	m_warpMatrix[2][0] = 0.;
+// 	m_warpMatrix[2][1] = 0.;
+// 	m_warpMatrix[2][2] = 0.;
+// 	m_warpMatrix[2][3] = 0.;
+// 
+// 	m_warpMatrix[3][0] = matrix[2];
+// 	m_warpMatrix[3][1] = matrix[5];
+// 	m_warpMatrix[3][2] = 0.;
+// 	m_warpMatrix[3][3] = matrix[8];
+
+	cvReleaseMat(&translate);
+	cvReleaseMat(&src_mat);
+	cvReleaseMat(&dst_mat);
+	
+	return dest;
+}
+
+
+int main(int argc, char **argv)
+{
+	QApplication app(argc, argv);
+
+	QLabel label;
+
+	QImage output = render();
+	label.setPixmap(QPixmap::fromImage(output));
+	label.show();
+	label.adjustSize();
+
+	return app.exec();
+}

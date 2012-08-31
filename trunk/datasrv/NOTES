@@ -1,0 +1,5 @@
+-Need transaction queue for pull mode
+-Need to handle reconnects (get list of all TRs from last time connected)
+-Figure out how to handle check version timer and software upgrades
+-Generic 'server id' independent of peer url
+-Key meta data (e.g. creation host, lifespan, hosts its on, etc)

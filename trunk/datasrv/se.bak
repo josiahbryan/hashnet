@@ -1,0 +1,329 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+package HashNet::Cipher;
+{
+	use Crypt::Blowfish_PP;
+	use Crypt::CBC;
+
+	# TODO Make key more secure, user configurable
+	my $cipher = Crypt::CBC->new( -key    => 'HashNet', #`cat key`,
+				      -cipher => 'Blowfish_PP'
+				);
+
+	sub cipher { return $cipher; }
+};
+
+package HashNet::StorageEngine;
+{
+	# Storage Engine has to do two things:
+	# - Take in transactions, write to disk (and do the opposite)
+	# - Make sure transactions get replicated
+
+	# Transactions:
+	#	- Function calls
+	#	- Internally, wraps non-query calls in a TransactionRecord that can be replayed (and replicated, and logged, ...)
+
+	# Replication:
+	#	- Keeps list of Replicants (HashNet::StorageEngine::Peer) objects that can receive transactions
+	#	- If receive query for keys that dont exist, check Replicants
+	# 	- Replicants objects should wrap the network comms so they're transparent to StorageEngine
+	#		- Consider using Object::Event
+	
+	use base qw/Object::Event/;
+	use Storable qw/freeze thaw store retrieve/;
+	use File::Path qw/mkpath/;
+	use Data::Dumper;
+	use Net::Ping;
+	use Time::HiRes qw/time sleep alarm/;
+	
+	use HashNet::StorageEngine::PeerDiscovery;
+	use HashNet::StorageEngine::PeerServer;
+	use HashNet::StorageEngine::Peer;
+	use HashNet::StorageEngine::TransactionRecord;
+	
+	our $VERSION = 0.0202;
+	
+	our $PING_TIMEOUT =  1.75;
+	
+	my $pinger = Net::Ping->new('tcp');
+	$pinger->hires(1);
+	
+	our $PEERS_CONFIG_FILE = 'peers.cfg';
+	
+#public:
+	sub new
+	{
+		my $class = shift;
+		my $self = $class->SUPER::new();
+
+		my %args = @_;
+
+		$self->{db_root} = $args{db_root} || '/var/lib/hashnet/db';
+		mkpath($self->{db_root}) if !-d $self->{db_root};
+
+		#$self->{txqueue} = [];
+
+		#$self->{peer_server} = HashNet::StorageEngine::PeerServer->new($self);
+
+		# TODO make user configurable
+		my @peers;
+		#push @peers, qw{http://bryanhq.homelinux.com:8031/db};
+		#push @peers, qw{http://dts.homelinux.com/hashnet/db};
+		#push @peers, qw{http://10.10.9.90:8031/db};
+		#push @peers, qw{http://10.1.5.168:8031/db};
+		
+		@peers = $self->load_peers();
+		
+		@peers = HashNet::StorageEngine::PeerDiscovery->discover_peers() 
+			if ! @peers;
+	
+		my @peer_tmp;
+		foreach my $url (@peers)
+		{
+			push @peer_tmp, HashNet::StorageEngine::Peer->new($url);
+		}
+		$self->{peers} = \@peer_tmp;
+	
+		$self->_sort_peers();
+		$self->_list_peers();
+		
+		$self->save_peers();
+		
+		#die Dumper $self->{peers};
+		
+		return $self;
+	};
+	
+	sub load_peers
+	{
+		my $self = shift;
+		my $file = shift || $PEERS_CONFIG_FILE;
+		
+		my @list;
+		return @list if !-f $file;
+		
+		open(F, "<$file") || die "Cannot read $file: $!";
+		push @list, $_ while $_ = <F>;
+		close(F);
+		
+		# Trim whitespace and EOLs
+		s/(^\s+|\s+$|[\r\n])//g foreach @list;
+		
+		return @list;
+	}
+	
+	sub save_peers
+	{
+		my $self = shift;
+		my $file = shift || $PEERS_CONFIG_FILE;
+		
+		my @list = @{ $self->peers };
+		return if !@list;
+		
+		open(F, ">$file") || die "Cannot write $file: $!";
+		print F $_->{url}, "\n" foreach @list;
+		close(F);
+		
+		return @list;
+	}
+	
+	sub add_peer
+	{
+		# TODO I've seen 127.0.0.1 wind up in peers.cfg (even though the LAN IP is also there) - so eventually we need to trace and figure out where that's coming from
+		# But for now, it's not causing any problems, thanks to other checks and stops in the code
+	
+		my $self = shift;
+		my $url = shift;
+		my $bulk_mode = shift || 0;
+		
+		my $peer = HashNet::StorageEngine::Peer->new($url);
+		
+		my $uri  = URI->new($url)->canonical;
+		my $host = $uri->host;
+		my $url_ip =
+			# NOTE Yes, I know - this regex doesn't define a 'valid' IPv4 address, and ignores IPv6 completely...
+			$host =~ /^(\d+\.\d+\.\d+\.\d+)$/ ? $host :
+			inet_ntoa(gethostbyname($host));
+			
+		if(!$pinger->ping($url_ip, $PING_TIMEOUT))
+		{
+			print STDERR "[WARN]  StorageEngine: add_peer(): Not adding peer '$url' because cannot ping $url_ip within $PING_TIMEOUT seconds\n";
+			return 0; 
+		}
+		
+		push @{ $self->peers }, $peer;
+
+		if(!$bulk_mode)
+		{
+			$self->_sort_peers();
+
+			$self->save_peers();
+		}
+		
+		return 1;
+	}
+
+	sub _sort_peers
+	{
+		my $self = shift;
+		
+		my @peer_tmp = @{ $self->peers };
+		@peer_tmp = sort { $a->distance_metric <=> $b->distance_metric } @peer_tmp;
+		$self->{peers} = \@peer_tmp;
+	}
+	
+	sub _list_peers
+	{
+		my $self = shift;
+		my $num = 0;
+		my @peer_tmp = @{ $self->peers };
+		foreach my $peer (@peer_tmp)
+		{
+			next if $peer->host_down;
+			
+			$num ++;
+			print "[TRACE] StorageEngine: Peer $num: $peer->{url} ($peer->{distance_metric} sec)\n";
+		}
+		
+	}
+	
+	sub peers
+	{
+		my $self = shift;
+		$self->{peers} ||= [];
+		return $self->{peers};
+	}
+		
+	
+	sub put
+	{
+		my $t = shift;
+		my $key = shift;
+		my $val = shift;
+
+		$t->_put_peers($key, $val);
+		$t->_put_local($key, $val);
+	}
+		
+	sub _put_peers
+	{
+		my $t = shift;
+		my $key = shift;
+		my $val = shift;
+		
+		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
+		$t->_push_tr($tr);
+	}
+	
+	sub _push_tr
+	{
+		my $t = shift;
+		my $tr = shift;
+		my $skip_peer_url = shift;
+		#push @{$t->{txqueue}}, $tr;
+
+		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
+
+		foreach my $p (@{$t->{peers}})
+		{
+			next if $p->host_down;
+			
+			print STDERR "[TRACE] StorageEngine: _push_tr(): Peer: ", $p->url, ", tr: ", $tr->uuid, "\n";
+			if(defined $peer_server &&
+			   $peer_server->is_this_peer($p->url))
+			{
+				print STDERR "[TRACE] StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+				next;
+			}
+			
+			if(defined $skip_peer_url &&
+			   $p->url eq $skip_peer_url)
+			{
+				print STDERR "[TRACE] StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
+				next;
+			}
+			
+			$p->push($tr);
+		}
+	}
+
+	sub _put_local
+	{
+		my $t = shift;
+		my $key = shift;
+		my $val = shift;
+		
+		# TODO: Purge cache/age items in ram
+		#$t->{cache}->{$key} = $val;
+
+		# TODO: Sanatize key to remove any '..' or other potentially invalid file path values
+		my $key_path = $t->{db_root} . $key;
+		mkpath($key_path) if !-d $key_path;
+
+		my $key_file = $key_path . '/data';
+		store({ data => $val}, $key_file);
+
+		print STDERR "[TRACE] StorageEngine: put(): key_file: $key_file\n";
+
+		return $t;
+	}
+
+	sub get
+	{
+		my $t = shift;
+		my $key = shift;
+
+# 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, undef, 'TYPE_READ');
+# 		push @{$t->{txqueue}}, $tr;
+
+		# TODO Update timestamp fo $key in cache for aging purposes
+		#print STDERR "[TRACE] get($key): Checking {cache} for $key\n";
+		#return $t->{cache}->{$key} if defined $t->{cache}->{$key};
+
+		# TODO: Sanatize key to remove any '..' or other potentially invalid file path values
+		my $key_path = $t->{db_root} . $key;
+		my $key_file = $key_path . '/data';
+
+		print STDERR "[TRACE] StorageEngine: get(): Checking key_file $key_file\n";
+		my $val = undef;
+		$val = retrieve($key_file)->{data} if -f $key_file;
+
+		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
+		
+		if(!defined $val)
+		{
+			my $checked_peers_count = 0;
+			PEER: foreach my $p (@{$t->{peers}})
+			{
+				next if $p->host_down;
+
+				$checked_peers_count ++;
+				
+				if(defined $peer_server &&
+				   $peer_server->is_this_peer($p->url))
+				{
+					print STDERR "[TRACE] StorageEngine: get(): Not checking ", $p->url, " for $key - it's our local peer and local server is active.\n";
+					next;
+				}
+		
+				print STDERR "[TRACE] StorageEngine: get(): Checking peer $p->{url} for $key\n";
+				if(defined ($val = $p->pull($key)))
+				{
+					$t->_put_local($key, $val);
+					last;
+				}
+			}
+
+			if($checked_peers_count <= 0)
+			{
+				print STDERR "[TRACE] StorageEngine: get(): No peers available to check for missing key: $key\n";
+			}
+		}
+
+		return $val;
+	}
+
+};
+1;

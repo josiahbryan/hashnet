@@ -1,0 +1,20 @@
+ <!DOCTYPE RCC><RCC version="1.0">
+ <qresource>
+	<file>data/images/ap-marker.png</file>
+	<file>data/images/32x32/stock-preferences.png</file>
+	<file>data/images/32x32/stock-media-rec.png</file>
+	<file>data/images/32x32/stock-cancel.png</file>
+	<file>data/images/64x64/stock-preferences.png</file>
+	<file>data/images/64x64/stock-media-rec.png</file>
+	<file>data/images/64x64/stock-cancel.png</file>
+	<file>data/images/icon.png</file>
+	<file>data/images/android-zoom-minus-button.png</file>
+	<file>data/images/android-zoom-plus-button.png</file>
+	<file>data/images/android-checkbox-off.png</file>
+	<file>data/images/android-checkbox-on.png</file>
+	<file>data/images/android-checkbox-empty.png</file>
+	<file>data/images/zoom-minus-button.png</file>
+	<file>data/images/zoom-plus-button.png</file>
+	<file>data/android/styles.qss</file>
+ </qresource>
+ </RCC>

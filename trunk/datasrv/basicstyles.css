@@ -1,0 +1,10 @@
+body, table td, table th { font-family: Tahoma, verdana, Arial, Sans-Serif; }
+table td { font-size: 85% }
+table th { background: black; color: white; }
+a.url { color: gray; text-decoration: none; }
+a.url .host { color: black; font-weight: bold; }
+a.url .port { font-style:italic; color: black }
+.key       { background: rgb(220,220,220); color: rgb(80,80,80); font-family: Monospace }
+.key .odd  { background: rgb(180,220,180); color: black }
+.key .even { background: rgb(220,180,220); color: black }
+tr.divider-top td { border-top: 3px solid black; }
