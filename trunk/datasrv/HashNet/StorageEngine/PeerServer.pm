@@ -291,6 +291,7 @@ package HashNet::StorageEngine::PeerServer;
 		return 0 if !$uri->can('host');
 		
 		my $host = $uri->host;
+		$host = '127.0.0.1' if $host eq 'localhost';
 		
 		# Multiple servers can be run on same machine, just different ports
 		return 0 if $uri->port != peer_port();
@@ -694,7 +695,7 @@ package HashNet::StorageEngine::PeerServer;
 
 					$peer->update_end();
 					
-					$peer->put_peer_stats(); #$engine);
+					#$peer->put_peer_stats(); #$engine);
 					
 					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric}\n" # \t '$peer->{host_down}'\n"
 						unless $peer->{host_down};
@@ -707,82 +708,73 @@ package HashNet::StorageEngine::PeerServer;
 					{
 						#$self->update_software($peer)
 						my $last_tx = $peer->{last_tx_sent} || 0;
-						logmsg 'TRACE', "PeerServer: Last tx sent: $last_tx\n";
-						if($last_tx > -1)
+						#logmsg 'TRACE', "PeerServer: Last tx sent: $last_tx\n";
+
+						my $db = $engine->tx_db;
+						my $cur_len = $db->length() || 0;
+
+						# Logically, this shouldn't happen - if it does, it means the txlog was probably
+						# deleted but the peer state was not. So, try to auto-fix the peer state.
+						if(($peer->{last_tx_sent}||0) > $cur_len)
 						{
-							logmsg 'TRACE', "PeerServer: Locking db\n";
-							my $db = $engine->tx_db;
-							my $cur_len = $db->length();
-							
-							# Logically, this shouldn't happen - if it does, it means the txlog was probably
-							# deleted but the peer state was not. So, try to auto-fix the peer state.
-							if($peer->{last_tx_sent} > $cur_len)
+							my $lock = $peer->update_begin();
+							$peer->{last_tx_sent} = $cur_len;
+							undef $lock; # calls update_end
+						}
+
+						my $length = $cur_len - $last_tx;
+						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (last sent: $last_tx, current num: $cur_len)\n" if $length > 0;
+
+						for my $idx ($last_tx .. $cur_len-1)
+						{
+							next if $peer->host_down;
+
+							my $data = $db->[$idx];
+							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
+							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
 							{
-								my $lock = $peer->update_begin();
-								$peer->{last_tx_sent} = $cur_len;
-								undef $lock; # calls update_end
+								$tr->{rel_id} = $idx;
 							}
+
+							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
+							$tr->_dump_route_hist;
 							
-							my $length = $cur_len - $last_tx;
-							logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (last sent: $last_tx, current num: $cur_len)\n";
-							
-							for my $idx ($last_tx .. $cur_len-1)
+							if($tr->has_been_here($peer->node_uuid))
 							{
-								next if $peer->host_down;
-								
-								my $data = $db->[$idx];
-								my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
-								if(!$tr->{rel_id} || $tr->{rel_id} < 0)
-								{
-									$tr->{rel_id} = $idx;
-								}
-								
-# 								logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
-# 								$tr->_dump_route_hist;
-								if($tr->has_been_here($peer->node_uuid))
-								{
-									#logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx (relid ".($tr->{rel_id} || -1).")\n";
-									next;
-								}
-								
-								#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_len) (relid ".($tr->{rel_id} || -1).")\n";
-								logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_len: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
-								
-								#logmsg 'TRACE', "Mark1\n"; 
-								#my $lock = $peer->update_begin();
-								#if($lock)
-								$peer->update_begin();
-								{
-									#logmsg 'TRACE', "Mark2\n";
-									$peer->{_changed} = 0;
-									
-									if($peer->push($tr))
-									{
-										#logmsg 'TRACE', "Mark3\n";
-										$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
-										$peer->{_changed}     = 1;
-									}
-									else
-									{
-										# TODO: Replay transactions for this peer when it comes back up
-										$peer->{host_down} = 1;
-										$peer->{_changed}  = 1;
-									}
-								}
-								#logmsg 'TRACE', "Mark4\n";
-								$peer->update_end($peer->{_changed});
-								#logmsg 'TRACE', "Mark5\n";
-								
-								#last TX_SEND if $peer->host_down;
-								
+								#logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx (relid ".($tr->{rel_id} || -1).")\n";
+								next;
 							}
-# 									else
-# 									{
-# 										logmsg 'WARN', "PeerServer: Unable to lock peer '$peer->{url}' for updates\n";
-# 									}
-							
-							
-							
+
+							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_len) (relid ".($tr->{rel_id} || -1).")\n";
+							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_len: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
+
+							#logmsg 'TRACE', "Mark1\n";
+							#my $lock = $peer->update_begin();
+							#if($lock)
+							$peer->update_begin();
+							{
+								#logmsg 'TRACE', "Mark2\n";
+								$peer->{_changed} = 0;
+
+								if($peer->push($tr))
+								{
+									#logmsg 'TRACE', "Mark3\n";
+									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
+									$peer->{_changed}     = 1;
+								}
+								else
+								{
+									# TODO: Replay transactions for this peer when it comes back up
+									$peer->{host_down} = 1;
+									$peer->{_changed}  = 1;
+								}
+							}
+							#logmsg 'TRACE', "Mark4\n";
+							$peer->update_end($peer->{_changed});
+							#logmsg 'TRACE', "Mark5\n";
+
+							#last TX_SEND if $peer->host_down;
+
 						}
 					}
 				}
@@ -1070,36 +1062,36 @@ package HashNet::StorageEngine::PeerServer;
 		#logmsg "DEBUG", "PeerServer: Saving config to $CONFIG_FILE\n";
 		YAML::Tiny::DumpFile($CONFIG_FILE, $config);
 		
-		# Setup a timer to push our node_info into the database after a second or so
-		# to allow the server to init and register
-		if($self->engine)
-		{
-			# engine() won't be set if the server is not actually running, so we cant 
-			# push values in that case.
-			#logmsg "TRACE", "PeerServer: Scheduling timer to push node_info into cloud\n";
-			
-			# Push node info before trying to register with peers so that peers have our info before we register...?
-			my $timer; $timer = AnyEvent->timer(after => 0.5, cb => sub
-			{
-				my $inf = $self->{node_info};
-				my $uuid = $inf->{uuid};
-				my $key_path = '/global/nodes/'. $uuid;
-				#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-				foreach my $key (keys %$inf)
-				{
-					my $put_key = $key_path . '/' . $key;
-					my $val = $inf->{$key};
-					#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-					$self->engine->put($put_key, $val); 
-				}
-				
-				undef $timer;
-			});
-		}
-		else
-		{
-			#logmsg "DEBUG", "PeerServer: engine() not set, unable to put values into cloud\n";
-		}
+# 		# Setup a timer to push our node_info into the database after a second or so
+# 		# to allow the server to init and register
+# 		if($self->engine)
+# 		{
+# 			# engine() won't be set if the server is not actually running, so we cant 
+# 			# push values in that case.
+# 			#logmsg "TRACE", "PeerServer: Scheduling timer to push node_info into cloud\n";
+# 			
+# 			# Push node info before trying to register with peers so that peers have our info before we register...?
+# 			my $timer; $timer = AnyEvent->timer(after => 0.5, cb => sub
+# 			{
+# 				my $inf = $self->{node_info};
+# 				my $uuid = $inf->{uuid};
+# 				my $key_path = '/global/nodes/'. $uuid;
+# 				#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+# 				foreach my $key (keys %$inf)
+# 				{
+# 					my $put_key = $key_path . '/' . $key;
+# 					my $val = $inf->{$key};
+# 					#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+# 					$self->engine->put($put_key, $val); 
+# 				}
+# 				
+# 				undef $timer;
+# 			});
+# 		}
+# 		else
+# 		{
+# 			#logmsg "DEBUG", "PeerServer: engine() not set, unable to put values into cloud\n";
+# 		}
 	}
 	
 	sub check_node_info
