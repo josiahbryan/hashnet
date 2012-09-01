@@ -587,9 +587,16 @@ package HashNet::StorageEngine::Peer;
 			my $rx_uuid = $result;
 			$rx_uuid =~ s/[\r\n]//g;
 			$rx_uuid =~ s/(^\s+|\s+$)//g;
+			
+			if(!$rx_uuid)
+			{
+				debug "Peer: push($url): No data received from transaction push\n";
+				return 0;
+			}
+			
 			if($rx_uuid ne $tr->uuid)
 			{
-				debug "Peer: push($url): Error pushing: UUID returned ($rx_uuid) does not match the UUID we pushed ($tr->{uuid})\n";
+				debug "Peer: push($url): Error pushing: value returned ($rx_uuid) does not match the UUID we pushed ($tr->{uuid})\n";
 				return 0;
 			}
 			

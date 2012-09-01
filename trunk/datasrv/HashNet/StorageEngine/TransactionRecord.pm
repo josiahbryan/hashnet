@@ -65,13 +65,22 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub local_timestamp { shift->{local_timestamp} }
 	sub is_valid { shift->{is_valid} }
 	sub rel_id { shift->{rel_id} }
+
+	sub host_uuid()
+	{
+		HashNet::StorageEngine::PeerServer->node_info->{uuid}
+# 		join('::',
+# 			HashNet::StorageEngine::PeerServer->peer_port(),
+# 			HashNet::StorageEngine::PeerServer->node_info->{uuid}
+# 		);
+	}
 	
 	# Update route history, done before transmitting
 	sub update_route_history
 	{
 		my $self = shift;
 		push @{$self->{route_hist}}, {
-			uuid => HashNet::StorageEngine::PeerServer->node_info->{uuid},
+			uuid => host_uuid(),
 			ts   => time(),
 		};
 	}
@@ -79,7 +88,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub has_been_here
 	{
 		my $self = shift;
-		my $uuid = shift || HashNet::StorageEngine::PeerServer->node_info->{uuid};
+		my $uuid = shift || host_uuid();
 		my @hist = @{$self->{route_hist} || []};
 		foreach my $hist (@hist)
 		{
@@ -91,7 +100,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub _dump_route_hist
 	{
 		my $self = shift;
-		my $uuid = shift || HashNet::StorageEngine::PeerServer->node_info->{uuid};
+		my $uuid = shift || host_uuid();
 		my @hist = @{$self->{route_hist} || []};
 		logmsg 'TRACE', "_dump_route_hist(): Host uuid: $uuid, tr uuid: ", $self->uuid, ": \n";
 		foreach my $hist (@hist)

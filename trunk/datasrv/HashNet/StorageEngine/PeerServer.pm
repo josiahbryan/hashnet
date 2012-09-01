@@ -316,6 +316,34 @@ package HashNet::StorageEngine::PeerServer;
 		return 0;
 	}
 
+	sub is_this_host
+	{
+		#my $class = shift;
+		my $url = shift;
+		my $uri  = URI->new($url)->canonical;
+		#debug "PeerServer: is_this_host('$url'): \$uri->can('host'): ", ($uri->can('host') ? 1:0), "\n";
+		return 0 if !$uri->can('host');
+
+		my $host = $uri->host;
+		#debug "PeerServer: is_this_host('$url'): \$host='$host'\n";
+
+		# Even if they are using a different hostname for local host,
+		# they will be flaged it as the local peer if the ports match
+		return 1 if ($host eq '127.0.0.1' || $host eq 'localhost');
+
+		# Check all our addresses to see if the $url matches any of our IPs
+		my @ip_list = my_ip_list();
+		#debug "PeerServer: is_this_host('$url'): \@ip_list=(",join('|',@ip_list),")\n";
+		foreach my $ip (@ip_list)
+		{
+			#debug "PeerServer: is_this_host('$url'): \t testing $ip == $host\n";
+			return 1 if $ip eq $host;
+		}
+
+		#debug "PeerServer: is_this_host('$url'): no match, returning 0\n";
+		return 0;
+	}
+
 	my HashNet::StorageEngine::PeerServer $ActivePeerServer = undef;
 	sub active_server { $ActivePeerServer }
 	
@@ -741,6 +769,8 @@ package HashNet::StorageEngine::PeerServer;
 							
 							if($tr->has_been_here($peer->node_uuid))
 							{
+								my $lock = $peer->update_begin();
+								$peer->{last_tx_sent} = $idx;
 								#logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx (relid ".($tr->{rel_id} || -1).")\n";
 								next;
 							}
@@ -1460,14 +1490,14 @@ of software available.
 		
 		#my $tr = HashNet::StorageEngine::TransactionRecord->from_bytes($data);
 		my $tr = HashNet::StorageEngine::TransactionRecord->from_json($data);
-		#logmsg "TRACE", "PeerServer: resp_tr_push(): Got tr ", $tr->uuid, " dumping route history:\n";
-		#$tr->_dump_route_hist;
+		logmsg "TRACE", "PeerServer: resp_tr_push(): Got tr ", $tr->uuid, " dumping route history:\n";
+		$tr->_dump_route_hist;
 		
 		# Prevent recusrive updates of this $tr
 		#if($self->has_seen_tr($tr))
 		if($tr->has_been_here) # it checks internal {route_hist} against our uuid
 		{
-			#logmsg "TRACE", "PeerServer: resp_tr_push(): Already seen ", $tr->uuid, " - not processing\n";
+			logmsg "TRACE", "PeerServer: resp_tr_push(): Already seen ", $tr->uuid, " - not processing\n";
 		}
 		else
 		{
@@ -1541,6 +1571,8 @@ of software available.
 		
 		my $key = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
 		my $value = uri_unescape(http_param($req, 'data'));
+
+		logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
 		
 		if(!$key)
 		{
@@ -1550,7 +1582,6 @@ of software available.
 		
 		$self->engine->put($key, $value);
 
-		logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
 		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
 		#http_respond($res, 'application/octet-stream', $value);
 		http_respond($res, 'text/plain', 'OK ', $key);
@@ -1658,8 +1689,22 @@ of software available.
 			my @possible = split /\|/, $peer_url;
 			
 			my $final_url = 0;
+			my %seen;
 			foreach my $possible_url (@possible)
 			{
+				#trace "PeerServer: resp_reg_peer(): \$possible_url: '$possible_url'\n";
+				if(is_this_host($possible_url))
+				{
+					my $tmp = $possible_url;
+					my $uri = URI->new($possible_url);
+					$uri->host('localhost');
+					$possible_url = $uri->as_string;
+					trace "PeerServer: resp_reg_peer(): Changed '$tmp' => '$possible_url' because its localhost\n";
+				}
+				
+				next if $seen{$possible_url};
+				$seen{$possible_url} = 1;
+
 				my $result = $self->engine->add_peer($possible_url);
 				
 				# >0 means it's added
