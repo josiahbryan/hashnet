@@ -349,25 +349,25 @@ package HashNet::StorageEngine;
 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
 
 		# See comments below on why !$peer_server
-		if(!$peer_server)
-		{
-			# Lock state so the last_tx_sent doesn't get out of sync between processes
-			foreach my $p (@peers)
-			{
-				if(defined $peer_server &&
-				   $peer_server->is_this_peer($p->url))
-				{
-					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
-					next;
-				}
-				
-				# Lock the state file (and load it if changed in another thread)
-				# to ensure that when we set the {last_tx_sent} it will be the correct
-				# id and will not change between the time we generate {rel_id}
-				# and the time we call save_state()
-				$p->update_begin();
-			}
-		}
+# 		#if(!$peer_server)
+# 		{
+# 			# Lock state so the last_tx_sent doesn't get out of sync between processes
+# 			foreach my $p (@peers)
+# 			{
+# 				if(defined $peer_server &&
+# 				   $peer_server->is_this_peer($p->url))
+# 				{
+# 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+# 					next;
+# 				}
+# 				
+# 				# Lock the state file (and load it if changed in another thread)
+# 				# to ensure that when we set the {last_tx_sent} it will be the correct
+# 				# id and will not change between the time we generate {rel_id}
+# 				# and the time we call save_state()
+# 				$p->update_begin();
+# 			}
+# 		}
 		
 		# Lock the tx db so that we know the length() is not changed between the
 		# time we call push() and the time we call length() by another process.
@@ -398,7 +398,7 @@ package HashNet::StorageEngine;
 		#      here now, we still would be locked...
 		# However, in non-server usage (e.g. StorageEngine used in an app which is not running a PeerServer),
 		# we do want to push to peers so the data gets "out of our process" (well, off our machine.) 
-		if(!$peer_server)
+		#if(!$peer_server)
 		{
 			foreach my $p (@peers)
 			{
@@ -428,7 +428,23 @@ package HashNet::StorageEngine;
 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
 					next;
 				}
+
+				if(defined $p->node_uuid &&
+				   $tr->has_been_here($p->node_uuid))
+				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
+
+					logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - routing history shows it was already on that host.\n";
+					next;
+				}
+				else
+				{
+					logmsg "TRACE", "StorageEngine: _push_tr(): [WARN] No node_uuid for ", $p->url, " - can't check routing hist\n";
+				}
 				
+				$p->update_begin();
+
 				if($p->push($tr))
 				{
 					$p->{last_tx_sent} = $tr->{rel_id};
@@ -440,21 +456,23 @@ package HashNet::StorageEngine;
 					$p->{host_down} = 1;
 					$p->{_changed}  = 1;
 				}
-			}
-	
-			foreach my $p (@peers)
-			{
-				if(defined $peer_server &&
-				   $peer_server->is_this_peer($p->url))
-				{
-					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
-					next;
-				}
-				
-				# Will save state if _changed is true
-				logmsg 'debug', "Changed: $p->{_changed}\n";
+
 				$p->update_end($p->{_changed});
 			}
+	
+# 			foreach my $p (@peers)
+# 			{
+# 				if(defined $peer_server &&
+# 				   $peer_server->is_this_peer($p->url))
+# 				{
+# 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+# 					next;
+# 				}
+# 				
+# 				# Will save state if _changed is true
+# 				logmsg 'debug', "Changed: $p->{_changed}\n";
+# 				$p->update_end($p->{_changed});
+# 			}
 		}
 	}
 
