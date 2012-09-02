@@ -1,5 +1,5 @@
 use common::sense;
-package HashNet::Logging;
+package HashNet::Util::Logging;
 {
 	use Time::HiRes qw/time/;
 	

@@ -46,7 +46,7 @@ package HashNet::StorageEngine;
 	use HashNet::StorageEngine::PeerServer;
 	use HashNet::StorageEngine::Peer;
 	use HashNet::StorageEngine::TransactionRecord;
-	use HashNet::Logging;
+	use HashNet::Util::Logging;
 
 	use UUID::Generator::PurePerl;
 
@@ -374,13 +374,15 @@ package HashNet::StorageEngine;
 		my $db = $t->tx_db;
 		$db->lock_exclusive();
 		{
-			# Let the DB worry about serialization (instead of using to_json)
-			$db->push($tr->to_hash);
-			
 			# rel_id is relative to this machine - each peer that getts this transaction
 			# will give it a new relative id - so that *it's* peers can know what ID
 			# to reference for playback if needed
 			$tr->{rel_id} = $db->length();
+
+			# Let the DB worry about serialization (instead of using to_json)
+			$db->push($tr->to_hash);
+
+			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
 		}
 		$db->unlock();
 		
@@ -399,14 +401,13 @@ package HashNet::StorageEngine;
 		# However, in non-server usage (e.g. StorageEngine used in an app which is not running a PeerServer),
 		# we do want to push to peers so the data gets "out of our process" (well, off our machine.) 
 		#if(!$peer_server)
+		if(0)
 		{
 			foreach my $p (@peers)
 			{
-				$p->{_changed} = 0;
-				
 				#next if $p->url !~ /10.10.9.90/; # NOTE Just for prototyping/debugging
 				
-				#logmsg "TRACE", "StorageEngine: _push_tr(): Peer: ", $p->url, ", tr: ", $tr->uuid, "\n";
+				logmsg "TRACE", "StorageEngine: _push_tr(): Peer: ", $p->url, ", tr: ", $tr->uuid, "\n";
 				
 				if(defined $p &&
 				   $p->host_down)
@@ -418,6 +419,8 @@ package HashNet::StorageEngine;
 				if(defined $peer_server &&
 				   $peer_server->is_this_peer($p->url))
 				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
 					next;
 				}
@@ -425,6 +428,8 @@ package HashNet::StorageEngine;
 				if(defined $skip_peer_url &&
 				   $p->url eq $skip_peer_url)
 				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
 					next;
 				}
@@ -448,16 +453,15 @@ package HashNet::StorageEngine;
 				if($p->push($tr))
 				{
 					$p->{last_tx_sent} = $tr->{rel_id};
-					$p->{_changed}     = 1;
+					debug "StorageEngine: _push_tr(): Pushed tr to $p->{url}, last_tx_sent: $tr->{rel_id}\n";
 				}
 				else
 				{
 					# TODO: Replay transactions for this peer when it comes back up
 					$p->{host_down} = 1;
-					$p->{_changed}  = 1;
 				}
 
-				$p->update_end($p->{_changed});
+				$p->update_end();
 			}
 	
 # 			foreach my $p (@peers)

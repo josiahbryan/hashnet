@@ -111,7 +111,7 @@ sub start {
           }
         }
 
-        HashNet::Logging::losgmsg('TRACE',"[HTTP Request End]\n\n");
+        HashNet::Util::Logging::losgmsg('TRACE',"[HTTP Request End]\n\n");
 
         $pm->finish if $self->{fork}; # TODO: I assume this exits so the next exit is unecessary ...
         # should use a guard object here to protect against early exit leaving zombies
@@ -234,7 +234,7 @@ package HashNet::StorageEngine::PeerServer;
 	use HTTP::Server::Brick;
 	
 	use HashNet::StorageEngine;
-	use HashNet::Logging;
+	use HashNet::Util::Logging;
 	
 	use Storable qw/lock_nstore lock_retrieve/;
 	use LWP::Simple qw/getstore/;
@@ -371,9 +371,8 @@ package HashNet::StorageEngine::PeerServer;
 		
 		# Lock peer and read in state if changed in another thread
 		my $locker = $peer->update_begin;
-		# make sure we unlock even if we return
-		my $lock = OnDestroy->new(sub{ $peer->update_end });
-		
+		# $locker will call update_end when it goes out of scope
+
 		my $url = $peer->url . '/reg_peer';
 
 		if($peer->host_down)
@@ -732,75 +731,95 @@ package HashNet::StorageEngine::PeerServer;
 					#$self->update_software($peer)
 					#	unless $peer->{host_down};
 					
-					if(!$peer->host_down)
+					if(!$peer->host_down && !$self->is_this_peer($peer->url))
 					{
 						#$self->update_software($peer)
-						my $last_tx = $peer->{last_tx_sent} || 0;
+						my $first_tx_needed = ($peer->{last_tx_sent} || -1) + 1;
 						#logmsg 'TRACE', "PeerServer: Last tx sent: $last_tx\n";
 
 						my $db = $engine->tx_db;
-						my $cur_len = $db->length() || 0;
+						my $cur_id = $db->length() || 0;
 
+						if($cur_id < 0)
+						{
+							debug "PeerServer: No transactions in database, not transmitting anything\n";
+							next;
+						}
+						
 						# Logically, this shouldn't happen - if it does, it means the txlog was probably
 						# deleted but the peer state was not. So, try to auto-fix the peer state.
-						if(($peer->{last_tx_sent}||0) > $cur_len)
+						if(($peer->{last_tx_sent}||0) > $cur_id)
 						{
-							my $lock = $peer->update_begin();
-							$peer->{last_tx_sent} = $cur_len;
-							undef $lock; # calls update_end
+							$peer->update_begin();
+							$peer->{last_tx_sent} = $cur_id;
+							$peer->update_end();
 						}
 
-						my $length = $cur_len - $last_tx;
-						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (last sent: $last_tx, current num: $cur_len)\n" if $length > 0;
-
-						for my $idx ($last_tx .. $cur_len-1)
+						my $length = $cur_id - $first_tx_needed;
+						if($length <= 0)
 						{
+							debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_id), nothing to send.\n";
+							next;
+						}
+						
+						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (irst_tx_needed: $first_tx_needed, current num: $cur_id)\n";
+
+						for my $idx ($first_tx_needed .. $cur_id-1)
+						{
+							# peer->push() [below] could change this while we're in
+							# the for() loop, hence why we check this again
 							next if $peer->host_down;
 
 							my $data = $db->[$idx];
 							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
+
+							# This should never happen ... why does it?
 							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
 							{
 								$tr->{rel_id} = $idx;
 							}
 
 							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
-							$tr->_dump_route_hist;
 							
+							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_id) (relid ".($tr->{rel_id} || -1).")\n";
+							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
+
+							# Just for debugging...
+							$tr->_dump_route_hist;
+
+							# If this TR has laready been to this node, then don't bother sending it
 							if($tr->has_been_here($peer->node_uuid))
 							{
-								my $lock = $peer->update_begin();
+								$peer->update_begin();
+
+								# Update the tx# in the peer so our code doesn't think this peer is behind
 								$peer->{last_tx_sent} = $idx;
-								#logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx (relid ".($tr->{rel_id} || -1).")\n";
+								
+								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_id, uuid: $tr->{uuid}\n";
+
+								$peer->update_end();
 								next;
 							}
-
-							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_len) (relid ".($tr->{rel_id} || -1).")\n";
-							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_len: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
 
 							#logmsg 'TRACE', "Mark1\n";
 							#my $lock = $peer->update_begin();
 							#if($lock)
 							$peer->update_begin();
 							{
+								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_id, uuid: $tr->{uuid} ...\n";
 								#logmsg 'TRACE', "Mark2\n";
-								$peer->{_changed} = 0;
-
 								if($peer->push($tr))
 								{
 									#logmsg 'TRACE', "Mark3\n";
 									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
-									$peer->{_changed}     = 1;
 								}
 								else
 								{
-									# TODO: Replay transactions for this peer when it comes back up
 									$peer->{host_down} = 1;
-									$peer->{_changed}  = 1;
 								}
 							}
 							#logmsg 'TRACE', "Mark4\n";
-							$peer->update_end($peer->{_changed});
+							$peer->update_end();
 							#logmsg 'TRACE', "Mark5\n";
 
 							#last TX_SEND if $peer->host_down;
@@ -810,7 +829,7 @@ package HashNet::StorageEngine::PeerServer;
 				}
 
 				undef $w;
-	
+				
 				$w = AnyEvent->timer (after => 5, cb => $timeout_sub );
 				
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
@@ -823,7 +842,7 @@ package HashNet::StorageEngine::PeerServer;
 			# Sometimes it doesnt start without calling this explicitly
 			$timeout_sub->();
 			
-			# run the event loop, never returns
+			# run the event loop, (should) never return
 			AnyEvent::Loop::run();
 			
 			# we're in a fork, so exit

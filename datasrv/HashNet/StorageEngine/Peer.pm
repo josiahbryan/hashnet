@@ -26,7 +26,8 @@ package HashNet::StorageEngine::Peer;
 	use JSON qw/decode_json encode_json/;
 	use POSIX 'WNOHANG';
 	use Digest::Perl::MD5 qw/md5_hex/;
-	use HashNet::Logging;
+	use HashNet::Util::Logging;
+	use HashNet::Util::OnDestroy; # exports ondestroy($coderef)
 	
 	# This is included ONLY so buildpacked.pl picks it up for use by JSON on some older linux boxen
 	use JSON::backportPP;
@@ -133,7 +134,7 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd}	 = $state->{last_tx_recd};
 		$self->{distance_metric} = $state->{distance_metric};
 		
-		#trace "Peer: Load peer state:  $self->{url} \t $self->{distance_metric} (+in)\n";
+		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_sent} (+in)\n";
 	}
 
 	sub _lock_state
@@ -157,17 +158,6 @@ package HashNet::StorageEngine::Peer;
 		#debug "Peer: _unlock_state():  ",$self->url," (-)    [$$]\n"; #: ", $self->state_file,"\n";
 		NetMon::Util::unlock_file($self->state_file);
 		
-	}
-	
-	{
-		package OnDestroy;
-		sub new {
-			my ($class, $coderef) = @_;
-			bless $coderef, $class;
-		}
-		sub DESTROY {
-			shift->();
-		}
 	}
 	
 	# Determine if the state is dirty by checking the mtime AND the size -
@@ -211,7 +201,7 @@ package HashNet::StorageEngine::Peer;
 		# Returns undef if in void context
 		if(defined wantarray)
 		{
-			return OnDestroy->new(sub{ $self->update_end });
+			return ondestroy sub { $self->update_end };
 		}
 		
 		return 1;
@@ -279,7 +269,7 @@ package HashNet::StorageEngine::Peer;
 			distance_metric => $self->distance_metric,
 		};
 		
-		#trace "Peer: Save peer state:  $self->{url} \t $self->{distance_metric} (-out)\n";
+		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_sent} (-out)\n";
 		#print_stack_trace();
 
 		nstore($state, $file);
@@ -330,14 +320,14 @@ package HashNet::StorageEngine::Peer;
 		my $my_uuid = HashNet::StorageEngine::PeerServer->node_info->{uuid};
 		if(!$my_uuid)
 		{
-			logmsg "WARN", "Peer: Could not find the node_info UUID for this computer, something went wrong. Unable to properly store latency and other metrics in cloud.\n";
+			logmsg 'WARN', "Peer: Could not find the node_info UUID for this computer, something went wrong. Unable to properly store latency and other metrics in cloud.\n";
 			return;
 		}
 		
 		my $other_uuid = $self->node_uuid;
 		if(!$other_uuid)
 		{ 
-			logmsg "WARN", "Peer: No node_info received from remote peer $self->{url}, unable to properly store latency and other metrics in cloud.\n"
+			logmsg 'WARN', "Peer: No node_info received from remote peer $self->{url}, unable to properly store latency and other metrics in cloud.\n"
 				unless $self->{host_down} && $self->{warned_about_node_uuid} ++;
 				# Don't over-warn about down hosts
 			return;
@@ -348,6 +338,9 @@ package HashNet::StorageEngine::Peer;
 		
 		my $my_root = '/global/nodes/'.$my_uuid.'/peers';
 		my $key_root = $my_root.'/'.$other_uuid;
+
+		# TODO Implement batch update mode
+		#my $update_lock = $self->engine->begin_batch_update();
 		
 		my $flag = $self->host_down ? 1:0;
 		my $cur_flag = $self->engine->get("$key_root/host_down") || 0;
@@ -367,6 +360,9 @@ package HashNet::StorageEngine::Peer;
 			$date =~ s/[\r\n]//g;
 			$self->engine->put("$key_root/last_seen", $date);
 		}
+
+		# Calls end_batch_update automatically
+		#undef $update_lock;
 
 		#$self->engine->put("$key_root/latency", $self->distance_metric);
 	}
