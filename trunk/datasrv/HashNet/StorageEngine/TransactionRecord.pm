@@ -12,7 +12,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	use UUID::Generator::PurePerl;
 	
 	use HashNet::StorageEngine::PeerServer; # for node_info->{uuid}
-	use HashNet::Logging;
+	use HashNet::Util::Logging;
 	
 	my $ug = UUID::Generator::PurePerl->new();
 	
