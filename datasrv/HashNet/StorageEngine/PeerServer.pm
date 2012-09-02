@@ -856,9 +856,8 @@ package HashNet::StorageEngine::PeerServer;
 		$self->{bin_file} = '';
 		
 		my $db_root = $self->engine->db_root;
-		$db_root .= '/' if $db_root !~ /\/$/;
 
-		$self->{tr_cache_file} = $db_root . 'tr_flags.db';
+		$self->{tr_cache_file} = $db_root . '.tr_flags';
 		#$self->{tr_cache_file} = "/tmp/test".$self->peer_port.".db";
 		#$self->{tr_cache_file} = $db_root."test".$self->peer_port.".db";
 		#$self->tr_flag_db->put(test => time());
@@ -1419,41 +1418,69 @@ package HashNet::StorageEngine::PeerServer;
 		my $self = shift;
 		my $tr = shift;
 		
-		#my $tr_cache = {}; #$self->{tr_cache} || {};
-		#$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
-		#logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper($tr_cache);
-		logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
-		 
-		#return 1 if $tr_cache->{$tr->uuid};
+# 		my $tr_cache = $self->_read_tr_cache($self->{tr_cache_file}); #{}; #$self->{tr_cache} || {};
+# 		#$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
+# 		logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper($tr_cache);
+# 		#logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
+# 		 
+# 		return 1 if $tr_cache->{$tr->uuid};
 		
 		return 1 if $self->tr_flag_db->{$tr->uuid};
 	}
+
+# 	sub _read_tr_cache
+# 	{
+# 		my $self = shift;
+# 		my $file = shift;
+# 		if(!-f $file)
+# 		{
+# 			logmsg "DEBUG", "PeerServer: _read_tr_cache($file): File does not exist, returning empty hash.\n";
+# 			return {};
+# 		}
+# 		open(FILE,"<$file") || die "Unable to read $file: $!";
+# 		my %cache = map { s/[\r\n]//g; $_ => 1 } <FILE>;
+# 		close(FILE);
+# 		return \%cache;
+# 	}
+# 
+# 	sub _write_tr_cache
+# 	{
+# 		my $self = shift;
+# 		my $file = shift;
+# 		my $cache = shift || {};
+# 		my @keys = keys %{$cache || {}};
+# 		if(!@keys)
+# 		{
+# 			logmsg "DEBUG", "PeerServer: _write_tr_cache(): Empty set of keys, file will be empty\n";
+# 		}
+# 		open(FILE,">$file") || die "Unable to write $file: $!";
+# 		print FILE $_, "\n" foreach @keys;
+# 		close(FILE);
+# 	}
 	
 	sub mark_tr_seen
 	{
 		my $self = shift;
 		my $tr = shift;
 		
-		#my $tr_cache = {}; #$self->{tr_cache};
+		#my $tr_cache = $self->_read_tr_cache($self->{tr_cache_file}); #{}; #$self->{tr_cache};
 		#$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
 		
 		#$tr_cache->{$tr->uuid} = 1;
 		#logmsg "DEBUG" ,"PeerServer: mark_tr_seen(".$tr->uuid."): Dump of cache: ".Dumper($tr_cache);
 		
-		
-		#lock_nstore($tr_cache, $self->{tr_cache_file});
 
+		#$self->_write_tr_cache($self->{tr_cache_file}, $tr_cache);
+		
 		$self->tr_flag_db->{$tr->uuid} = 1;
 
-		logmsg "DEBUG" ,"PeerServer: mark_tr_seen(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
+		#logmsg "DEBUG" ,"PeerServer: mark_tr_seen(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
 
 	}
 
 	sub DESTROY
 	{
  		my $self = shift;
-		unlink $self->{tr_cache_file};
-		#logmsg "DEBUG" ,"PeerServer: DESTROY: Removing $self->{tr_cache_file}\n";
 		
 # 		kill 9, $self->{server_pid} if $self->{server_pid};
  	}
