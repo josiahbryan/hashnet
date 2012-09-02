@@ -249,7 +249,10 @@ package HashNet::StorageEngine::PeerServer;
 	use Geo::IP; # for Geolocating our WAN address
 	use HTTP::Request::Params; # for http_respond
 	use Cwd qw/abs_path/; # for images, etc
-	
+	use DBM::Deep; # for our has_seen_tr()/etc routines
+	# Explicitly include here for the sake of buildpacked.pl
+	use DBM::Deep::Engine::File;
+		
 	#sub peer_url  { 'http://localhost:' . peer_port() . '/db' }
 	
 	my @IP_LIST_CACHE;
@@ -734,8 +737,9 @@ package HashNet::StorageEngine::PeerServer;
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
 					{
 						#$self->update_software($peer)
-						my $first_tx_needed = ($peer->{last_tx_sent} || -1) + 1;
-						#logmsg 'TRACE', "PeerServer: Last tx sent: $last_tx\n";
+						$peer->{last_tx_sent} = -1 if !defined $peer->{last_tx_sent};
+						my $first_tx_needed = $peer->{last_tx_sent} + 1;
+						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
 
 						my $db = $engine->tx_db;
 						my $cur_id = $db->length() || 0;
@@ -758,11 +762,11 @@ package HashNet::StorageEngine::PeerServer;
 						my $length = $cur_id - $first_tx_needed;
 						if($length <= 0)
 						{
-							debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_id), nothing to send.\n";
+							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_id), nothing to send.\n";
 							next;
 						}
 						
-						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (irst_tx_needed: $first_tx_needed, current num: $cur_id)\n";
+						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_id)\n";
 
 						for my $idx ($first_tx_needed .. $cur_id-1)
 						{
@@ -851,7 +855,16 @@ package HashNet::StorageEngine::PeerServer;
 
 		$self->{bin_file} = '';
 		
-		$self->{tr_cache_file} = ".hashnet.peerserver.transactions.$$";
+		my $db_root = $self->engine->db_root;
+		$db_root .= '/' if $db_root !~ /\/$/;
+
+		$self->{tr_cache_file} = $db_root . 'tr_flags.db';
+		#$self->{tr_cache_file} = "/tmp/test".$self->peer_port.".db";
+		#$self->{tr_cache_file} = $db_root."test".$self->peer_port.".db";
+		#$self->tr_flag_db->put(test => time());
+		logmsg "TRACE", "Using transaction flag file $self->{tr_cache_file}\n";
+		#logmsg "DEBUG", "Test retrieve: ",$self->tr_flag_db->get('test'),"\n";
+
 		
 		# Setup 'locks' around requests so we can guard various parts of our code while in the middle of processing a request
 # 		$httpd->reg_cb(
@@ -1377,15 +1390,43 @@ package HashNet::StorageEngine::PeerServer;
 		return $self->{bin_file};
 	}
 	
+	sub tr_flag_db
+	{
+		my $self = shift;
+
+		if(!$self->{tr_flag_db} ||
+		  # Re-create the DBM::Deep object when we change PIDs -
+		  # e.g. when someone forks a process that we are in.
+		  # I learned the hard way (via multiple unexplainable errors)
+		  # that DBM::Deep does NOT like existing before forks and used
+		  # in child procs. (Ref: http://stackoverflow.com/questions/11368807/dbmdeep-unexplained-errors)
+		  ($self->{_tr_flag_db_pid}||0) != $$)
+		{
+			$self->{tr_flag_db} = DBM::Deep->new($self->{tr_cache_file});
+# 				file => $self->{tr_cache_file},
+# 				locking   => 1, # enabled by default, just here to remind me
+# 				autoflush => 1, # enabled by default, just here to remind me
+# 				#type => DBM::Deep->TYPE_ARRAY
+# 			);
+			warn "Error opening $self->{tr_cache_file}: $@ $!" if $@ || $!;
+			$self->{_tr_flag_db_pid} = $$;
+		}
+		return $self->{tr_flag_db};
+	}
+
 	sub has_seen_tr
 	{
 		my $self = shift;
 		my $tr = shift;
 		
-		my $tr_cache = {}; #$self->{tr_cache} || {};
-		$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
+		#my $tr_cache = {}; #$self->{tr_cache} || {};
+		#$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
+		#logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper($tr_cache);
+		logmsg "DEBUG" ,"PeerServer: has_seen_tr(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
 		 
-		return 1 if $tr_cache->{$tr->uuid};
+		#return 1 if $tr_cache->{$tr->uuid};
+		
+		return 1 if $self->tr_flag_db->{$tr->uuid};
 	}
 	
 	sub mark_tr_seen
@@ -1393,19 +1434,29 @@ package HashNet::StorageEngine::PeerServer;
 		my $self = shift;
 		my $tr = shift;
 		
-		my $tr_cache = {}; #$self->{tr_cache};
-		$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
+		#my $tr_cache = {}; #$self->{tr_cache};
+		#$tr_cache = lock_retrieve($self->{tr_cache_file}) if -f $self->{tr_cache_file};
 		
-		$tr_cache->{$tr->uuid} = 1;
+		#$tr_cache->{$tr->uuid} = 1;
+		#logmsg "DEBUG" ,"PeerServer: mark_tr_seen(".$tr->uuid."): Dump of cache: ".Dumper($tr_cache);
 		
-		lock_nstore($tr_cache, $self->{tr_cache_file});
+		
+		#lock_nstore($tr_cache, $self->{tr_cache_file});
+
+		$self->tr_flag_db->{$tr->uuid} = 1;
+
+		logmsg "DEBUG" ,"PeerServer: mark_tr_seen(".$tr->uuid."): Dump of cache: ".Dumper(\%{ $self->tr_flag_db });
+
 	}
 
-# 	sub DESTROY
-# 	{
-# 		my $self = shift;
+	sub DESTROY
+	{
+ 		my $self = shift;
+		unlink $self->{tr_cache_file};
+		#logmsg "DEBUG" ,"PeerServer: DESTROY: Removing $self->{tr_cache_file}\n";
+		
 # 		kill 9, $self->{server_pid} if $self->{server_pid};
-# 	}
+ 	}
 	
 # 	my %dispatch = (
 # 		'tr_push'  => \&resp_tr_push,
@@ -1509,20 +1560,28 @@ of software available.
 		
 		#my $tr = HashNet::StorageEngine::TransactionRecord->from_bytes($data);
 		my $tr = HashNet::StorageEngine::TransactionRecord->from_json($data);
-		logmsg "TRACE", "PeerServer: resp_tr_push(): Got tr ", $tr->uuid, " dumping route history:\n";
-		$tr->_dump_route_hist;
+		logmsg "TRACE", "PeerServer: resp_tr_push(): Got tr ", $tr->uuid, ", has seen tr? ",($self->has_seen_tr($tr)?1:0),"\n";
+		#$tr->_dump_route_hist;
+
+		#NetMon::Util::lock_file($self->{tr_cache_file});
+		$self->tr_flag_db->lock_exclusive;
 		
 		# Prevent recusrive updates of this $tr
-		#if($self->has_seen_tr($tr))
-		if($tr->has_been_here) # it checks internal {route_hist} against our uuid
+		if($self->has_seen_tr($tr) || $tr->has_been_here) # it checks internal {route_hist} against our uuid
 		{
+			#NetMon::Util::unlock_file($self->{tr_cache_file});
+			$self->tr_flag_db->unlock;
 			logmsg "TRACE", "PeerServer: resp_tr_push(): Already seen ", $tr->uuid, " - not processing\n";
 		}
 		else
 		{
 			# Flag it as seen - mark_tr_seen() will sync across all threads
-			#$self->mark_tr_seen($tr);
+			$self->mark_tr_seen($tr);
+
+			#NetMon::Util::unlock_file($self->{tr_cache_file});
+			$self->tr_flag_db->unlock;
 			
+			# Update the route history so hosts down the line know not to send it back to us
 			$tr->update_route_history;
 			
 			# Get the ip to guess the peer_url if not provided
