@@ -302,11 +302,54 @@ package HashNet::StorageEngine;
 		$self->{peers} ||= [];
 		return $self->{peers};
 	}
-		
+
+	sub begin_batch_update
+	{
+		my $self = shift;
+		$self->{_batch_update} = 1;
+		$self->{_batch_list}   = [];
+	}
+
+	sub end_batch_update
+	{
+		my $self = shift;
+
+		my @batch = @{$self->{_batch_list} || []};
+		if(!@batch)
+		{
+			#logmsg "INFO", "StorageEngine: end_batch_update(): No entries in batch list, nothing updated.\n";
+			return;
+		}
+
+		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', $self->{_batch_list}, 'TYPE_WRITE_BATCH');
+		$tr->update_route_history;
+
+		$self->_push_tr($tr);
+		$self->_put_local_batch($self->{_batch_list});
+
+		undef $self->{_batch_list};
+		$self->{_batch_update} = 0;
+	}
+
+	sub _put_local_batch
+	{
+		my $self = shift;
+		my @batch = @{ shift || {} };
+		if(!@batch)
+		{
+			logmsg "INFO", "StorageEngine: _put_local_batch(): No entries in batch list, nothing updated.\n";
+			return;
+		}
+
+		foreach my $item (@batch)
+		{
+			$self->_put_local($item->{key}, $item->{val});
+		}
+	}
 	
 	sub put
 	{
-		my $t = shift;
+		my $self = shift;
 		my $key = shift;
 		my $val = shift;
 
@@ -320,8 +363,17 @@ package HashNet::StorageEngine;
 
 		$key = '/'.$key if $key !~ /^\//;
 
-		$t->_put_peers($key, $val);
-		$t->_put_local($key, $val);
+		if($self->{_batch_update})
+		{
+			logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => $val\n";
+			push @{$self->{_batch_list}}, {key=>$key, val=>$val};
+			return;
+		}
+
+		logmsg "TRACE", "StorageEngine: put(): $key => $val\n";
+
+		$self->_put_peers($key, $val);
+		$self->_put_local($key, $val);
 	}
 		
 	sub _put_peers
@@ -402,8 +454,8 @@ package HashNet::StorageEngine;
 		#      here now, we still would be locked...
 		# However, in non-server usage (e.g. StorageEngine used in an app which is not running a PeerServer),
 		# we do want to push to peers so the data gets "out of our process" (well, off our machine.) 
-		#if(!$peer_server)
-		if(0)
+		if(!$peer_server)
+		#if(1)
 		{
 			foreach my $p (@peers)
 			{
@@ -498,7 +550,7 @@ package HashNet::StorageEngine;
 		my $key_file = $key_path . '/data';
 		store({ data => $val}, $key_file);
 
-		trace "StorageEngine: put(): key_file: $key_file\n"
+		trace "StorageEngine: _put_local(): key_file: $key_file\n"
 			unless $key =~ /^\/global\/nodes\//;
 
 		return $t;
@@ -597,6 +649,8 @@ package HashNet::StorageEngine;
 		if($checked_peers_count <= 0)
 		{
 			logmsg "TRACE", "StorageEngine: get(): No peers available to check for missing key: $key\n";
+			$@ = "No peers to check for missing key '$key'";
+			return undef;
 		}
 
 		#delete $self->{get_seen}->{$req_uuid};

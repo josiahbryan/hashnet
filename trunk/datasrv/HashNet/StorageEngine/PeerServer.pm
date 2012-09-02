@@ -673,8 +673,23 @@ package HashNet::StorageEngine::PeerServer;
 		$self->{engine} = $engine;
 		$self->{port}   = $port;
 
+
+		my $db_root = $self->engine->db_root;
+
+		$self->{node_info_changed_flag_file} = $db_root . '.node_info_changed_flag';
+		logmsg "TRACE", "Node info changed flag file is $self->{node_info_changed_flag_file}\n";
+
+		$self->{tr_cache_file} = $db_root . '.tr_flags';
+		#$self->{tr_cache_file} = "/tmp/test".$self->peer_port.".db";
+		#$self->{tr_cache_file} = $db_root."test".$self->peer_port.".db";
+		#$self->tr_flag_db->put(test => time());
+		logmsg "TRACE", "Using transaction flag file $self->{tr_cache_file}\n";
+		#logmsg "DEBUG", "Test retrieve: ",$self->tr_flag_db->get('test'),"\n";
+
+
 		$self->load_config;
 		$self->save_config; # re-push into cloud
+
 		
 		# Fork off a event loop to fire off timed events
 		if(my $pid = fork)
@@ -725,7 +740,7 @@ package HashNet::StorageEngine::PeerServer;
 
 					$peer->update_end();
 					
-					#$peer->put_peer_stats(); #$engine);
+					$peer->put_peer_stats(); #$engine);
 					
 					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric}\n" # \t '$peer->{host_down}'\n"
 						unless $peer->{host_down};
@@ -832,9 +847,30 @@ package HashNet::StorageEngine::PeerServer;
 					}
 				}
 
+				if(-f $self->{node_info_changed_flag_file})
+				{
+					$self->engine->begin_batch_update();
+
+					unlink $self->{node_info_changed_flag_file};
+					my $inf = $self->{node_info};
+					my $uuid = $inf->{uuid};
+					my $key_path = '/global/nodes/'. $uuid;
+					#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+					foreach my $key (keys %$inf)
+					{
+						my $put_key = $key_path . '/' . $key;
+						my $val = $inf->{$key};
+						#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+						$self->engine->put($put_key, $val);
+					}
+
+					$self->engine->end_batch_update();
+				}
+
+
 				undef $w;
 				
-				$w = AnyEvent->timer (after => 5, cb => $timeout_sub );
+				$w = AnyEvent->timer (after => 30, cb => $timeout_sub );
 				
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 	
@@ -855,15 +891,6 @@ package HashNet::StorageEngine::PeerServer;
 
 		$self->{bin_file} = '';
 		
-		my $db_root = $self->engine->db_root;
-
-		$self->{tr_cache_file} = $db_root . '.tr_flags';
-		#$self->{tr_cache_file} = "/tmp/test".$self->peer_port.".db";
-		#$self->{tr_cache_file} = $db_root."test".$self->peer_port.".db";
-		#$self->tr_flag_db->put(test => time());
-		logmsg "TRACE", "Using transaction flag file $self->{tr_cache_file}\n";
-		#logmsg "DEBUG", "Test retrieve: ",$self->tr_flag_db->get('test'),"\n";
-
 		
 		# Setup 'locks' around requests so we can guard various parts of our code while in the middle of processing a request
 # 		$httpd->reg_cb(
@@ -931,7 +958,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "</ul>"
 				. "<hr/>"
 				. "<p><font size=-1><i>HashNet StorageEngine, Version <b>$HashNet::StorageEngine::VERSION</b>, date <b>". `date`. "</b></i></p>"
-				. "<script>setTimeout(function(){window.location.reload()}, 1000)</script>"
+				#. "<script>setTimeout(function(){window.location.reload()}, 1000)</script>"
 				. "</body></html>"
 			);
 		}});
@@ -1034,7 +1061,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "</tbody></table>"
 				. "<hr/>"
 				. "<p><font size=-1><i>HashNet StorageEngine, Version <b>$HashNet::StorageEngine::VERSION</b>, date <b>". `date`. "</b></i></p>"
-				. "<script>setTimeout(function(){window.location.reload()}, 10000)</script>"
+				. "<script>setTimeout(function(){window.location.reload()}, 30000) // Peers are checked every 30 seconds on the server</script>"
 				. "</body></html>"
 			);
 		}});
@@ -1122,37 +1149,11 @@ package HashNet::StorageEngine::PeerServer;
 		
 		#logmsg "DEBUG", "PeerServer: Saving config to $CONFIG_FILE\n";
 		YAML::Tiny::DumpFile($CONFIG_FILE, $config);
-		
-# 		# Setup a timer to push our node_info into the database after a second or so
-# 		# to allow the server to init and register
-# 		if($self->engine)
-# 		{
-# 			# engine() won't be set if the server is not actually running, so we cant 
-# 			# push values in that case.
-# 			#logmsg "TRACE", "PeerServer: Scheduling timer to push node_info into cloud\n";
-# 			
-# 			# Push node info before trying to register with peers so that peers have our info before we register...?
-# 			my $timer; $timer = AnyEvent->timer(after => 0.5, cb => sub
-# 			{
-# 				my $inf = $self->{node_info};
-# 				my $uuid = $inf->{uuid};
-# 				my $key_path = '/global/nodes/'. $uuid;
-# 				#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-# 				foreach my $key (keys %$inf)
-# 				{
-# 					my $put_key = $key_path . '/' . $key;
-# 					my $val = $inf->{$key};
-# 					#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-# 					$self->engine->put($put_key, $val); 
-# 				}
-# 				
-# 				undef $timer;
-# 			});
-# 		}
-# 		else
-# 		{
-# 			#logmsg "DEBUG", "PeerServer: engine() not set, unable to put values into cloud\n";
-# 		}
+
+		# The timer loop will check for the existance of this file and push the node info into the storage engine
+		open(FILE,">$self->{node_info_changed_flag_file}") || warn "Unable to write to $self->{node_info_changed_flag_file}: $!";
+		print FILE "1\n";
+		close(FILE);
 	}
 	
 	sub check_node_info
@@ -1622,13 +1623,20 @@ of software available.
 			# If the tr is valid...
 			if(defined $tr->key)
 			{
-				logmsg "TRACE", "PeerServer: resp_tr_push(): ", $tr->key, " => ", ($tr->data || ''), ($peer_url ? " (from $peer_url)" :""). "\n"
+				logmsg "TRACE", "PeerServer: resp_tr_push(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($peer_url ? " (from $peer_url)" :""). "\n"
 					unless $tr->key =~ /^\/global\/nodes\//;
 				
 				my $eng = $self->engine;
 				
 				# We dont use eng->put() here because it constructs a new tr
-				$eng->_put_local($tr->key, $tr->data);
+				if($tr->type eq 'TYPE_WRITE_BATCH')
+				{
+					$eng->_put_local_batch($tr->data);
+				}
+				else
+				{
+					$eng->_put_local($tr->key, $tr->data);
+				}
 				
 				$eng->_push_tr($tr, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
 			}
@@ -1657,9 +1665,39 @@ of software available.
 			 # HTTP::Server::Brick will pick this up
 			 die 'Error: No Key Given';
 		}
+
+		my $value = undef;
 		
-		my $value = $self->engine->get($key, http_param($req, 'uuid'));
+		my $req_uuid = http_param($req, 'uuid');
+		if(defined $req_uuid)
+		{
+			$self->tr_flag_db->lock_exclusive;
+
+			# Prevent recusrive updates of this $tr
+			if($self->tr_flag_db->{$req_uuid})
+			{
+				#NetMon::Util::unlock_file($self->{tr_cache_file});
+				$self->tr_flag_db->unlock;
+				logmsg "TRACE", "PeerServer: resp_get(): Already seen get() request ", $req_uuid, " - not processing\n";
+			}
+			else
+			{
+				# Flag it as seen - mark_tr_seen() will sync across all threads
+				$self->tr_flag_db->{$req_uuid} = 1;
+
+				#NetMon::Util::unlock_file($self->{tr_cache_file});
+				$self->tr_flag_db->unlock;
+
+				$value = $self->engine->get($key, $req_uuid);
+			}
+		}
+		else
+		{
+			$value = $self->engine->get($key);
+		}
+
 		$value ||= ''; # avoid warnings
+		
 		
 		logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
 		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
@@ -1673,23 +1711,42 @@ of software available.
 		# AnyEvent::HTTPD calls this as a callback, doesn't provide $self
 		my $self = $ActivePeerServer;
 		my ($req, $res) = @_;
-		
-		my $key = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
-		my $value = uri_unescape(http_param($req, 'data'));
 
-		logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
-		
-		if(!$key)
+		if(my $keys = http_param($req, 'keys'))
 		{
-			 # Should be propogated by HTTP::Server::Brick
-			 die "Error: No Key Given";
-		}
-		
-		$self->engine->put($key, $value);
+			$self->engine->begin_batch_update();
 
-		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
-		#http_respond($res, 'application/octet-stream', $value);
-		http_respond($res, 'text/plain', 'OK ', $key);
+			my @keys = split /,/, $keys;
+			foreach my $key (@keys)
+			{
+				my $value = uri_unescape(http_param($req, $key));
+				logmsg "TRACE", "PeerServer: resp_put(): [BATCH] $key => $value\n";
+				$self->engine->put($key, $value);
+			}
+
+			$self->engine->end_batch_update();
+
+			http_respond($res, 'text/plain', 'OK '. $keys);
+		}
+		else
+		{
+			my $key = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
+			my $value = uri_unescape(http_param($req, 'data'));
+
+			logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
+
+			if(!$key)
+			{
+				# Should be propogated by HTTP::Server::Brick
+				die "Error: No Key Given";
+			}
+
+			$self->engine->put($key, $value);
+
+			#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
+			#http_respond($res, 'application/octet-stream', $value);
+			http_respond($res, 'text/plain', 'OK '. $key);
+		}
 	}
 	
 	sub resp_ver

@@ -17,6 +17,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	my $ug = UUID::Generator::PurePerl->new();
 	
 #public:
+	sub TYPE_WRITE_BATCH() { 'TYPE_WRITE_BATCH' }
 	sub TYPE_WRITE() { 'TYPE_WRITE' }
 	sub TYPE_READ()  { 'TYPE_READ'  }
 	sub MODE_SQL()   { 'MODE_SQL'   }
@@ -135,13 +136,44 @@ package HashNet::StorageEngine::TransactionRecord;
 		return {
 			mode	=> $self->{mode},
 			key	=> $self->{key},
-			data	=> $self->{data},
+			data	=> _clean_ref($self->{data}),
 			type	=> $self->{type},
 			uuid	=> $self->{uuid},
 			timestamp => $self->{timestamp},
 			rel_id  => $self->{rel_id},
 			route_hist => \@hist,
 		}
+	}
+
+	sub _clean_ref
+	{
+		my $ref = shift;
+		return $ref if !ref($ref) || !$ref;
+		if(ref $ref eq 'ARRAY' ||
+		   ref $ref eq 'DBM::Deep::Array')
+		{
+			my @new_array;
+			my @old_array = @$ref;
+			foreach my $line (@old_array)
+			{
+				push @new_array, _clean_ref($line);
+			}
+			return \@new_array;
+		}
+		elsif(ref $ref eq 'HASH' ||
+		      ref $ref eq 'DBM::Deep::Hash')
+		{
+			my %new_hash;
+			my %old_hash = %$ref;
+			my @keys = keys %old_hash;
+			foreach my $key (keys %old_hash)
+			{
+				$new_hash{$key} = _clean_ref($old_hash{$key});
+			}
+			return \%new_hash;
+		}
+		warn "TransactionRecord: _clean_ref($ref): Could not clean ref type '".ref($ref)."'";
+		return $ref;
 	}
 
 	sub from_bytes
