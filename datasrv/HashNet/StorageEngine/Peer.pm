@@ -105,8 +105,14 @@ package HashNet::StorageEngine::Peer;
 	{
 		my $self = shift;
 
+		# engine is undef when called in DESTROY, above
+		return $self->{_cached_state_file_name} if !$self->engine;
+		
+		my $root = $self->engine->db_root;
+		$root .= '/' if $root !~ /\/$/;
+		
 		# TODO is this name going to cause problems? Does it need to be more host-specific?
-		return '.peer-'.md5_hex($self->url).'.state';
+		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->url).'.state';
 	}
 
 	sub load_state
@@ -134,7 +140,7 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd}	 = $state->{last_tx_recd};
 		$self->{distance_metric} = $state->{distance_metric};
 		
-		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_sent} (+in)\n";
+		#trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_sent} (+in)\n";
 	}
 
 	sub _lock_state
@@ -269,7 +275,7 @@ package HashNet::StorageEngine::Peer;
 			distance_metric => $self->distance_metric,
 		};
 		
-		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_sent} (-out)\n";
+		#trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_sent} (-out)\n";
 		#print_stack_trace();
 
 		nstore($state, $file);

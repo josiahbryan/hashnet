@@ -159,6 +159,8 @@ package HashNet::StorageEngine;
 		
 		return $self;
 	};
+
+	sub db_root { shift->{db_root} }
 	
 	sub tx_db
 	{
