@@ -345,18 +345,18 @@ package HashNet::StorageEngine::Peer;
 		my $my_root = '/global/nodes/'.$my_uuid.'/peers';
 		my $key_root = $my_root.'/'.$other_uuid;
 
-		# TODO Implement batch update mode
-		#my $update_lock = $self->engine->begin_batch_update();
+		$self->engine->begin_batch_update();
 		
 		my $flag = $self->host_down ? 1:0;
 		my $cur_flag = $self->engine->get("$key_root/host_down") || 0;
 		$cur_flag = $cur_flag eq "" ? 0 : int($cur_flag); # all this is just to avoid warnings
 		$self->engine->put("$key_root/host_down", $flag)
 			if $cur_flag != $flag;
+		#logmsg "DEBUG", "Peer: put_peer_states(): cur_flag:'$cur_flag', flag:'$flag'\n";
 			
 		$self->engine->put("$key_root/latency", $self->distance_metric)
 			if ($self->engine->get("$key_root/latency")||0) != ($self->distance_metric||0);
-			
+
 		$self->engine->put("$key_root/known_as", $self->known_as)
 			if ($self->engine->get("$key_root/known_as")||'') ne ($self->known_as || '');
 
@@ -368,7 +368,7 @@ package HashNet::StorageEngine::Peer;
 		}
 
 		# Calls end_batch_update automatically
-		#undef $update_lock;
+		$self->engine->end_batch_update;
 
 		#$self->engine->put("$key_root/latency", $self->distance_metric);
 	}
@@ -636,6 +636,7 @@ package HashNet::StorageEngine::Peer;
 		my $self = shift;
 		my $key = shift;
 		my $req_uuid = shift;
+		
 		my $url = $self->{url};
 		$url =~ s/\/$//g;
 		$url .= '/get';
@@ -647,7 +648,7 @@ package HashNet::StorageEngine::Peer;
 		}
 
 		# NOTE $key should already have been sanatized by StorageEngine
-		$url .= '?key=' . $key . '&req_uuid=' . $req_uuid;
+		$url .= '?key=' . $key . '&uuid=' . $req_uuid;
 		my $r;
 
 		my $timed_out = exec_timeout 6.0, sub { $r = get($url) };
