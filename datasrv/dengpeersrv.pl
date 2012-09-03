@@ -131,7 +131,6 @@ my $con = HashNet::StorageEngine->new(
 if(-f $bin_file)
 {
 	print "$0: Using bin_file to '$bin_file'\n";
-	$HashNet::StorageEngine::PeerServer::BIN_FILE = $bin_file;
 }
 
 print "$0: Creating PeerServer...\n";

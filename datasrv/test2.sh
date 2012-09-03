@@ -1,8 +1,3 @@
 #!/bin/sh
-#perl ./dengpeersrv.pl \
-#./dengpeersrv.bin \
-perl ./dengpeersrv.pl \
-	-p 8052 \
-	-c /tmp/test/2/peers.cfg \
-	-n /tmp/test/2/node.cfg \
-	-d /tmp/test/2/db
+perl ./dengpeersrv.pl -p 8052 -c /tmp/test/2/peers.cfg -n /tmp/test/2/node.cfg -d /tmp/test/2/db
+#./dengpeersrv.bin -p 8052 -c /tmp/test/2/peers.cfg -n /tmp/test/2/node.cfg -d /tmp/test/2/db
