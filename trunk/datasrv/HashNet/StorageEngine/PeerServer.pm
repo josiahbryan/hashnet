@@ -255,8 +255,6 @@ package HashNet::StorageEngine::PeerServer;
 
 	our @Startup_ARGV = (); # set by dengpeersrv.pl - used in request_restart();
 
-	our $BIN_FILE = '';
-	
 	#sub peer_url  { 'http://localhost:' . peer_port() . '/db' }
 	
 	my @IP_LIST_CACHE;
@@ -732,7 +730,6 @@ package HashNet::StorageEngine::PeerServer;
 			# Register with peers *after* the event loop starts
 			# so that if we do have to upgrade, $self->bin_file
 			# is set so we know where to store the software
-			# TODO Will this work now that we've converted to a forked method?
 			my $timer; $timer = AnyEvent->timer(after => 1, cb => sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
@@ -895,7 +892,8 @@ package HashNet::StorageEngine::PeerServer;
 
 
 				undef $w;
-				
+				# Yes, I know AE has an 'interval' property - but it does not seem to work,
+				# or at least I couldn't get it working. This does work though.
 				$w = AnyEvent->timer (after => 30, cb => $timeout_sub );
 				
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
@@ -915,9 +913,6 @@ package HashNet::StorageEngine::PeerServer;
 			exit(0);
 		};
 
-		$self->{bin_file} = '';
-		
-		
 		# Setup 'locks' around requests so we can guard various parts of our code while in the middle of processing a request
 # 		$httpd->reg_cb(
 # 			client_connected => sub {
@@ -1420,7 +1415,7 @@ package HashNet::StorageEngine::PeerServer;
 	{
 		my $self = shift;
 		#$self->{bin_file} = shift if @_;
-		$self->{bin_file} ||= $BIN_FILE;
+		$self->{bin_file} ||= '';
 		logmsg "DEBUG", "PeerServer: bin_file(): $self->{bin_file}\n";
 		return $self->{bin_file};
 	}
