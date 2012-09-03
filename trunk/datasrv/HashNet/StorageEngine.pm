@@ -52,7 +52,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0265;
+	our $VERSION = 0.0267;
 	
 	our $PING_TIMEOUT =  1.75;
 	
@@ -365,12 +365,12 @@ package HashNet::StorageEngine;
 
 		if($self->{_batch_update})
 		{
-			logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => $val\n";
+			logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
 			push @{$self->{_batch_list}}, {key=>$key, val=>$val};
 			return;
 		}
 
-		logmsg "TRACE", "StorageEngine: put(): $key => $val\n";
+		logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
 
 		$self->_put_peers($key, $val);
 		$self->_put_local($key, $val);
@@ -427,6 +427,7 @@ package HashNet::StorageEngine;
 		# time we call push() and the time we call length() by another process.
 		my $db = $t->tx_db;
 		$db->lock_exclusive();
+		eval
 		{
 			# rel_id is relative to this machine - each peer that getts this transaction
 			# will give it a new relative id - so that *it's* peers can know what ID
@@ -437,7 +438,11 @@ package HashNet::StorageEngine;
 			$db->push($tr->to_hash);
 
 			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
-		}
+		};
+		if($@)
+		{
+			debug "StorageEngine: _push_tr(): Error storing tr in db: tr: ".Dumper($tr), "Error: $@\n";
+		}	
 		$db->unlock();
 		
 		

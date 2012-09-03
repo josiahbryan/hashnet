@@ -1,4 +1,6 @@
 #!/bin/sh
+#perl ./dengpeersrv.pl \
+#./dengpeersrv.bin \
 perl ./dengpeersrv.pl \
 	-p 8052 \
 	-c /tmp/test/2/peers.cfg \

@@ -20,14 +20,15 @@ my $con = HashNet::StorageEngine->new(
 #$date =~ s/[\r\n]//g;
 
 #my $val = @ARGV ? shift : 1;
-my $val = $opts{v} || 1;
+#my $val = $opts{v} || 1;
+my $val = '(auto)';
 
-my $count = 10000;
+my $count = 1000;
 my $start = time;
 for(0..$count-1)
 {
 	print "-> $_\n";
-	$con->put('/global/test', $val);
+	$con->put('/test', time());
 };
 my $end = time;
 my $delta = $end-$start;
