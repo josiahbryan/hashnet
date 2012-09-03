@@ -252,7 +252,11 @@ package HashNet::StorageEngine::PeerServer;
 	use DBM::Deep; # for our has_seen_tr()/etc routines
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
-		
+
+	our @Startup_ARGV = (); # set by dengpeersrv.pl - used in request_restart();
+
+	our $BIN_FILE = '';
+	
 	#sub peer_url  { 'http://localhost:' . peer_port() . '/db' }
 	
 	my @IP_LIST_CACHE;
@@ -435,7 +439,7 @@ package HashNet::StorageEngine::PeerServer;
 		$self->engine->save_peers;
 
 		# Check against the peer to see if they have newer software than we have
-		$self->update_software($peer);
+		#$self->update_software($peer);
 		
 	}
 
@@ -446,61 +450,67 @@ package HashNet::StorageEngine::PeerServer;
 
 		if($peer->host_down)
 		{
-			#logmsg "TRACE", "PeerServer: update_software(): Not checking version with peer at $peer->{url}, host marked as down\n";
+			logmsg "TRACE", "PeerServer: update_software(): Not checking version with peer at $peer->{url}, host marked as down\n";
 			return;
 		}
-		
+
 		if($self->is_this_peer($peer->url))
 		{
-			#logmsg "TRACE", "PeerServer: update_software(): Not checking version with peer at $peer->{url}, same as this host\n";
+			logmsg "TRACE", "PeerServer: update_software(): Not checking version with peer at $peer->{url}, same as this host\n";
 			return;
 		}
 
 		my $ver = $HashNet::StorageEngine::VERSION;
 		my $url = $peer->url . '/ver?upgrade_check=' . $ver . '&peer_url=' . ($peer->{known_as} || '');
-		
-		http_get($url, sub
+
+		#logmsg "TRACE", "PeerServer: update_software(): Calling url '$url'\n";
+		my $json = '';
+		HashNet::StorageEngine::Peer::exec_timeout(10.0, sub
 		{
-			my $json = shift;
-			if(!$json)
+			$json = LWP::Simple::get($url);
+		});
+
+		#logmsg "TRACE", "PeerServer: update_software(): Got json: $json\n";
+		
+		$json ||= '';
+		if(!$json)
+		{
+			# TODO Should we mark host as down?
+			logmsg "TRACE", "PeerServer: update_software(): No valid version data from $peer->{url}\n";
+			return;
+		}
+
+		#use Data::Dumper;
+		#print Dumper \@_;
+
+		my $data;
+		{
+			local $@;
+			eval
 			{
-				# TODO Should we mark host as down?
-				logmsg "TRACE", "PeerServer: update_software(): No valid version data from $peer->{url}\n";
+				$data = decode_json($json);
+			};
+
+			if($@)
+			{
+				logmsg "TRACE", "PeerServer: update_software(): Error parsing data from $peer->{url}: $@, data: $json\n";
 				return;
 			}
-			
-			#use Data::Dumper;
-			#print Dumper \@_;
-			
-			my $data;
-			{
-				local $@;
-				eval
-				{
-					$data = decode_json($json);
-				};
-				
-				if($@)
-				{
-					logmsg "TRACE", "PeerServer: update_software(): Error parsing data from $peer->{url}: $@, data: $json\n";
-					return;
-				}
-			}
-				
-			if($data->{has_new} &&
-			   $data->{has_bin})
-			{
-				#return $data->{version};
-				logmsg "TRACE", "PeerServer: update_software(): Updated version '$ver' available, downloading from peer...\n";
-				$self->download_upgrade($peer);
-			}
-			else
-			{
-				#logmsg "TRACE", "PeerServer: update_software(): Running same or newer version as peer $peer->{url} ($ver >= $data->{version})\n";
-			}
-	
-			return;
-		});
+		}
+
+		if($data->{version} > $ver &&
+		   $data->{has_bin})
+		{
+			#return $data->{version};
+			logmsg "TRACE", "PeerServer: update_software(): Updated version '$ver' available, downloading from peer...\n";
+			$self->download_upgrade($peer);
+		}
+		else
+		{
+			logmsg "TRACE", "PeerServer: update_software(): Running same or newer version as peer $peer->{url} ($ver >= $data->{version}) (or !{has_bin} [$data->{has_bin}])\n";
+		}
+
+		return;
 	}
 
 	sub download_upgrade
@@ -580,6 +590,13 @@ package HashNet::StorageEngine::PeerServer;
 			}
 		}
 
+		if($self->{timer_loop_pid})
+		{
+			logmsg "INFO", "PeerServer: request_restart(): Killing timer loop $self->{timer_loop_pid}\n";
+			kill 15, $self->{timer_loop_pid};
+		}
+			
+
 		logmsg "INFO", "PeerServer: request_restart(): All children killed, killing self: $$\n";
 
 		if(fork)
@@ -593,8 +610,8 @@ package HashNet::StorageEngine::PeerServer;
 		else
 		{
 			# Close the app output so init messages from restarting (below) don't leak to any possible active HTTP requests
-			select(STDOUT);
-			close(STDOUT);
+			#select(STDOUT);
+			#close(STDOUT);
 			
 # 			#print STDERR "\$^X: $^X, \$0: $0, \@ARGV: @ARGV [END]\n";
 # 			if($ENV{SCRIPT_FILE})
@@ -605,7 +622,11 @@ package HashNet::StorageEngine::PeerServer;
 # 			else
 # 			{
 				# Running as a regular script
-				system("$^X $0 @ARGV &");
+				my $app = $0;
+				$app =~ s/#.*$//g; # remove any comments from the app name
+				my $cmd = "$^X $app @Startup_ARGV &";
+				logmsg "INFO", "PeerServer: request_restart(): In monitor fork $$, executing restart command: '$cmd'\n";
+				system($cmd);
 #			}
 			exit;
 		}
@@ -634,6 +655,7 @@ package HashNet::StorageEngine::PeerServer;
 		my $class  = shift;
 		my $engine;
 		my $port = 8031;
+		my $bin_file = '';
 		
 		my %opts;
 		if(@_ == 1)
@@ -645,6 +667,7 @@ package HashNet::StorageEngine::PeerServer;
 			%opts = @_;
 			$engine = $opts{engine};
 			$port   = $opts{port} || $port;
+			$bin_file = $opts{bin_file} || '';
 			$CONFIG_FILE = $opts{config} if $opts{config};
 		}
 		
@@ -673,6 +696,8 @@ package HashNet::StorageEngine::PeerServer;
 		$self->{engine} = $engine;
 		$self->{port}   = $port;
 
+		$self->{bin_file} = $bin_file;
+		#logmsg "DEBUG", "Server 'bin_file': $bin_file, test retrieve: ", $self->bin_file, "\n";
 
 		my $db_root = $self->engine->db_root;
 
@@ -695,6 +720,7 @@ package HashNet::StorageEngine::PeerServer;
 		if(my $pid = fork)
 		{
 			print "[TRACE] PeerServer: Forked timer loop as pid $pid\n";
+			$self->{timer_loop_pid} = $pid; # for use in request_restart()
 		}
 		else
 		{
@@ -745,13 +771,8 @@ package HashNet::StorageEngine::PeerServer;
 					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric}\n" # \t '$peer->{host_down}'\n"
 						unless $peer->{host_down};
 					
-					# Check our version of software against all peers to make sure we have the latest version
-					#$self->update_software($peer)
-					#	unless $peer->{host_down};
-					
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
 					{
-						#$self->update_software($peer)
 						$peer->{last_tx_sent} = -1 if !defined $peer->{last_tx_sent};
 						my $first_tx_needed = $peer->{last_tx_sent} + 1;
 						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
@@ -844,6 +865,11 @@ package HashNet::StorageEngine::PeerServer;
 							#last TX_SEND if $peer->host_down;
 
 						}
+
+						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
+						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+						$self->update_software($peer);
+						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
 					}
 				}
 
@@ -1231,6 +1257,8 @@ package HashNet::StorageEngine::PeerServer;
 				$external_ip = $1;
 			}
 
+			$external_ip = '' if !$external_ip;
+			
 			$set->('wan_ip', $external_ip)
 				if ($inf->{wan_ip}||'') ne $external_ip;
 		}
@@ -1248,7 +1276,8 @@ package HashNet::StorageEngine::PeerServer;
 		}
 		$inf->{geo_info_auto} += 0; # force-cast to number
 			
-		if($inf->{geo_info_auto})
+		if($inf->{geo_info_auto} &&
+		   $inf->{wan_ip})
 		{
 			my @files = ('/var/lib/hashnet/GeoLiteCity.dat','/usr/local/share/GeoIP/GeoLiteCity.dat','/tmp/GeoLiteCity.dat');
 			
@@ -1297,15 +1326,21 @@ package HashNet::StorageEngine::PeerServer;
 # 					$record->continent_code,
 # 					$record->metro_code);
 
-				my $geo_info = join(', ',
-					$record->city,
-					$record->region,
-					$record->country_code,
-					$record->latitude,
-					$record->longitude);
-	
-				$set->('geo_info', $geo_info)
-					if ($inf->{geo_info}||'') ne $geo_info;
+				eval {
+					my $geo_info = join(', ',
+						$record->city,
+						$record->region,
+						$record->country_code,
+						$record->latitude,
+						$record->longitude);
+
+					$set->('geo_info', $geo_info)
+						if ($inf->{geo_info}||'') ne $geo_info;
+				};
+				if($@)
+				{
+					logmsg "INFO", "Error updating geo_info for wan '$inf->{wan_ip}': $@";
+				}
 			}
 		}
 
@@ -1384,9 +1419,9 @@ package HashNet::StorageEngine::PeerServer;
 	sub bin_file
 	{
 		my $self = shift;
-		$self->{bin_file} = shift if @_;
-		$self->{bin_file} ||= '';
-		#logmsg "DEBUG", "PeerServer: bin_file(): $self->{bin_file}\n";
+		#$self->{bin_file} = shift if @_;
+		$self->{bin_file} ||= $BIN_FILE;
+		logmsg "DEBUG", "PeerServer: bin_file(): $self->{bin_file}\n";
 		return $self->{bin_file};
 	}
 	

@@ -46,12 +46,13 @@ package HashNet::StorageEngine;
 	use HashNet::StorageEngine::PeerServer;
 	use HashNet::StorageEngine::Peer;
 	use HashNet::StorageEngine::TransactionRecord;
+	use HashNet::Util::Logging;
 
 	use UUID::Generator::PurePerl;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0264;
+	our $VERSION = 0.0266;
 	
 	our $PING_TIMEOUT =  1.75;
 	
@@ -114,11 +115,9 @@ package HashNet::StorageEngine;
 			$txlog_abs_file = abs_path($txlog_file);
 		}
 		$self->{tx_file} = $txlog_abs_file;
-		
-		$self->{tx_db} = DBM::Deep->new(
-			file => $txlog_abs_file,
-			type => DBM::Deep->TYPE_ARRAY
-		);
+
+		print STDERR "[DEBUG] StorageEngine: Using '$txlog_abs_file' as transaction log\n";
+		# Only create {tx_db} on first use to avoid having it created before a fork if possible
 
 		my @peers;
 		#push @peers, qw{http://bryanhq.homelinux.com:8031/db};
@@ -160,8 +159,31 @@ package HashNet::StorageEngine;
 		
 		return $self;
 	};
+
+	sub db_root { shift->{db_root} }
 	
-	sub tx_db { shift->{tx_db} }
+	sub tx_db
+	{
+		my $self = shift;
+		
+		if(!$self->{tx_db} ||
+		  # Re-create the DBM::Deep object when we change PIDs -
+		  # e.g. when someone forks a process that we are in.
+		  # I learned the hard way (via multiple unexplainable errors)
+		  # that DBM::Deep does NOT like existing before forks and used
+		  # in child procs. (Ref: http://stackoverflow.com/questions/11368807/dbmdeep-unexplained-errors)
+		  ($self->{_tx_db_pid}||0) != $$)
+		{
+			$self->{tx_db} = DBM::Deep->new(
+				file => $self->{tx_file},
+				locking   => 1, # enabled by default, just here to remind me
+				autoflush => 1, # enabled by default, just here to remind me
+				type => DBM::Deep->TYPE_ARRAY
+			);
+			$self->{_tx_db_pid} = $$;
+		}
+		return $self->{tx_db};
+	}
 	
 	sub load_peers
 	{
@@ -280,11 +302,54 @@ package HashNet::StorageEngine;
 		$self->{peers} ||= [];
 		return $self->{peers};
 	}
-		
+
+	sub begin_batch_update
+	{
+		my $self = shift;
+		$self->{_batch_update} = 1;
+		$self->{_batch_list}   = [];
+	}
+
+	sub end_batch_update
+	{
+		my $self = shift;
+
+		my @batch = @{$self->{_batch_list} || []};
+		if(!@batch)
+		{
+			#logmsg "INFO", "StorageEngine: end_batch_update(): No entries in batch list, nothing updated.\n";
+			return;
+		}
+
+		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', $self->{_batch_list}, 'TYPE_WRITE_BATCH');
+		$tr->update_route_history;
+
+		$self->_push_tr($tr);
+		$self->_put_local_batch($self->{_batch_list});
+
+		undef $self->{_batch_list};
+		$self->{_batch_update} = 0;
+	}
+
+	sub _put_local_batch
+	{
+		my $self = shift;
+		my @batch = @{ shift || {} };
+		if(!@batch)
+		{
+			logmsg "INFO", "StorageEngine: _put_local_batch(): No entries in batch list, nothing updated.\n";
+			return;
+		}
+
+		foreach my $item (@batch)
+		{
+			$self->_put_local($item->{key}, $item->{val});
+		}
+	}
 	
 	sub put
 	{
-		my $t = shift;
+		my $self = shift;
 		my $key = shift;
 		my $val = shift;
 
@@ -298,8 +363,17 @@ package HashNet::StorageEngine;
 
 		$key = '/'.$key if $key !~ /^\//;
 
-		$t->_put_peers($key, $val);
-		$t->_put_local($key, $val);
+		if($self->{_batch_update})
+		{
+			logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
+			push @{$self->{_batch_list}}, {key=>$key, val=>$val};
+			return;
+		}
+
+		logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
+
+		$self->_put_peers($key, $val);
+		$self->_put_local($key, $val);
 	}
 		
 	sub _put_peers
@@ -309,6 +383,8 @@ package HashNet::StorageEngine;
 		my $val = shift;
 		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
+		$tr->update_route_history;
+		
 		$t->_push_tr($tr);
 	}
 	
@@ -324,93 +400,142 @@ package HashNet::StorageEngine;
 		# by not having to deref two more times below
 		my @peers = @{$t->{peers} || []};
 
-		# Lock state so the last_tx_sent doesn't get out of sync between processes
-		foreach my $p (@peers)
-		{
-			# Opens and locks the state file
-			# to ensure that when we set the {last_tx_sent} it will be the correct
-			# id and will not change between the time we generate {rel_id}
-			# and the time we call save_state()
-			$p->lock_state();
+		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
 
-			# Note that lock_state() is non-destructive - e.g. just opening and locking
-			# will NOT erase any state already in the file. Which means we can safely
-			# call $p->unlock_state() if we did not make any changes to the state
-			# and just want to release the lock. Calling $p->save_state() also
-			# automatically unlocks the file after saving.
-		}
+		# See comments below on why !$peer_server
+# 		#if(!$peer_server)
+# 		{
+# 			# Lock state so the last_tx_sent doesn't get out of sync between processes
+# 			foreach my $p (@peers)
+# 			{
+# 				if(defined $peer_server &&
+# 				   $peer_server->is_this_peer($p->url))
+# 				{
+# 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+# 					next;
+# 				}
+# 				
+# 				# Lock the state file (and load it if changed in another thread)
+# 				# to ensure that when we set the {last_tx_sent} it will be the correct
+# 				# id and will not change between the time we generate {rel_id}
+# 				# and the time we call save_state()
+# 				$p->update_begin();
+# 			}
+# 		}
 		
 		# Lock the tx db so that we know the length() is not changed between the
 		# time we call push() and the time we call length() by another process.
+		my $db = $t->tx_db;
+		$db->lock_exclusive();
+		eval
 		{
-			$t->tx_db->lock_exclusive();
-			
-			$t->tx_db->push($tr->to_json);
-
 			# rel_id is relative to this machine - each peer that getts this transaction
 			# will give it a new relative id - so that *it's* peers can know what ID
 			# to reference for playback if needed
-			$tr->{rel_id} = $t->tx_db->length();
+			$tr->{rel_id} = $db->length();
 
-			$t->tx_db->unlock();
-		}
+			# Let the DB worry about serialization (instead of using to_json)
+			$db->push($tr->to_hash);
+
+			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
+		};
+		if($@)
+		{
+			debug "StorageEngine: _push_tr(): Error storing tr in db: tr: ".Dumper($tr), "Error: $@\n";
+		}	
+		$db->unlock();
 		
-		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
-
-		foreach my $p (@peers)
+		
+		# We're only going to push transacts out to peers if we're NOT inside a PeerServer because the PeerServer will
+		# run a seperate timer thread to sync out transactions to peers based on the peer's last_tx_sent.
+		# The push function was moved to the timer thread in PeerServer because we could get caught in a race condition
+		# that looked like this:
+		#    - This StorageEngine pushes a transaction to a peer (this routine)
+		#    - Remote PeerServer receives a /db/tr_push from a Peer
+		#    - Remote PeerServer stores the tx locally
+		#    - Remote PeerServer calls it's engine->_push_tr() 
+		#    - This PeerServer gets /deb/tr_push, which calls our _push_tr() [this routine]
+		#    - Since the first line (above) would have already locked in update_begin(), when it hits 
+		#      here now, we still would be locked...
+		# However, in non-server usage (e.g. StorageEngine used in an app which is not running a PeerServer),
+		# we do want to push to peers so the data gets "out of our process" (well, off our machine.) 
+		if(!$peer_server)
+		#if(1)
 		{
-			$p->{_changed} = 0;
-			
-			#next if $p->url !~ /10.10.9.90/; # NOTE Just for prototyping/debugging
-			
-			#print STDERR "[TRACE] StorageEngine: _push_tr(): Peer: ", $p->url, ", tr: ", $tr->uuid, "\n";
-			
-			if(defined $p &&
-			   $p->host_down)
+			foreach my $p (@peers)
 			{
-				#print STDERR "[TRACE] StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's marked as down.\n";
-				next;
-			}
+				#next if $p->url !~ /10.10.9.90/; # NOTE Just for prototyping/debugging
+				
+				logmsg "TRACE", "StorageEngine: _push_tr(): Peer: ", $p->url, ", tr: ", $tr->uuid, "\n";
+				
+				if(defined $p &&
+				   $p->host_down)
+				{
+					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's marked as down.\n";
+					next;
+				}
+	
+				if(defined $peer_server &&
+				   $peer_server->is_this_peer($p->url))
+				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
+					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+					next;
+				}
+				
+				if(defined $skip_peer_url &&
+				   $p->url eq $skip_peer_url)
+				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
+					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
+					next;
+				}
 
-			if(defined $peer_server &&
-			   $peer_server->is_this_peer($p->url))
-			{
-				#print STDERR "[TRACE] StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
-				next;
-			}
-			
-			if(defined $skip_peer_url &&
-			   $p->url eq $skip_peer_url)
-			{
-				#print STDERR "[TRACE] StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
-				next;
-			}
-			
-			if($p->push($tr))
-			{
-				$p->{last_tx_sent} = $tr->{rel_id};
-				$p->{_changed} = 1;
-			}
-			else
-			{
-				# TODO: Replay transactions for this peer when it comes back up
-				$p->{host_down} = 1;
-				$p->{_changed} = 1;
-			}
-		}
+				if(defined $p->node_uuid &&
+				   $tr->has_been_here($p->node_uuid))
+				{
+					my $lock = $p->update_begin();
+					$p->{last_tx_sent} = $tr->{rel_id};
 
-		foreach my $p (@peers)
-		{
-			if($p->{_changed})
-			{
-				# save_state() also unlocks
-				$p->save_state();
+					logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - routing history shows it was already on that host.\n";
+					next;
+				}
+				else
+				{
+					logmsg "TRACE", "StorageEngine: _push_tr(): [WARN] No node_uuid for ", $p->url, " - can't check routing hist\n";
+				}
+				
+				$p->update_begin();
+
+				if($p->push($tr))
+				{
+					$p->{last_tx_sent} = $tr->{rel_id};
+					debug "StorageEngine: _push_tr(): Pushed tr to $p->{url}, last_tx_sent: $tr->{rel_id}\n";
+				}
+				else
+				{
+					# TODO: Replay transactions for this peer when it comes back up
+					$p->{host_down} = 1;
+				}
+
+				$p->update_end();
 			}
-			else
-			{
-				# Unlock state file without changing it
-				$p->unlock_state();
-			}
+	
+# 			foreach my $p (@peers)
+# 			{
+# 				if(defined $peer_server &&
+# 				   $peer_server->is_this_peer($p->url))
+# 				{
+# 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+# 					next;
+# 				}
+# 				
+# 				# Will save state if _changed is true
+# 				logmsg 'debug', "Changed: $p->{_changed}\n";
+# 				$p->update_end($p->{_changed});
+# 			}
 		}
 	}
 
@@ -430,7 +555,7 @@ package HashNet::StorageEngine;
 		my $key_file = $key_path . '/data';
 		store({ data => $val}, $key_file);
 
-		print STDERR "[TRACE] StorageEngine: put(): key_file: $key_file\n"
+		trace "StorageEngine: _put_local(): key_file: $key_file\n"
 			unless $key =~ /^\/global\/nodes\//;
 
 		return $t;
@@ -456,7 +581,7 @@ package HashNet::StorageEngine;
 		if(!$req_uuid)
 		{
 			$req_uuid = $ug->generate_v1->as_string();
-			#print STDERR "[TRACE] StorageEngine: get(): Generating new UUID $req_uuid for request for '$key'\n";
+			#logmsg "TRACE", "StorageEngine: get(): Generating new UUID $req_uuid for request for '$key'\n";
 		}
 
 		# Prevents looping
@@ -469,7 +594,7 @@ package HashNet::StorageEngine;
 		# without checking (since we already know we dont have $key since we asked them in the first place!)
 		if($self->{get_seen}->{$req_uuid})
 		{
-			print STDERR "[TRACE] StorageEngine: get(): Already seen uuid $req_uuid\n";
+			logmsg "TRACE", "StorageEngine: get(): Already seen uuid $req_uuid\n";
 			return undef;
 		}
 		$self->{get_seen}->{$req_uuid} = 1;
@@ -488,7 +613,7 @@ package HashNet::StorageEngine;
 # 		push @{$t->{txqueue}}, $tr;
 
 		# TODO Update timestamp fo $key in cache for aging purposes
-		#print STDERR "[TRACE] get($key): Checking {cache} for $key\n";
+		#logmsg "TRACE", "get($key): Checking {cache} for $key\n";
 		#return $t->{cache}->{$key} if defined $t->{cache}->{$key};
 
 		my $key_path = $self->{db_root} . $key;
@@ -497,7 +622,7 @@ package HashNet::StorageEngine;
 		my $val = undef;
 		if(-f $key_file)
 		{
-			#print STDERR "[TRACE] StorageEngine: get(): Reading key_file $key_file\n";
+			#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
 			$val = retrieve($key_file)->{data};
 			return $val;
 		}
@@ -514,13 +639,13 @@ package HashNet::StorageEngine;
 			if(defined $peer_server &&
 				$peer_server->is_this_peer($p->url))
 			{
-				print STDERR "[TRACE] StorageEngine: get(): Not checking ", $p->url, " for $key - it's our local peer and local server is active.\n";
+				logmsg "TRACE", "StorageEngine: get(): Not checking ", $p->url, " for $key - it's our local peer and local server is active.\n";
 				next;
 			}
 
 			if(defined ($val = $p->pull($key, $req_uuid)))
 			{
-				print STDERR "[TRACE] StorageEngine: get(): Pulled $key from peer $p->{url}\n";
+				logmsg "TRACE", "StorageEngine: get(): Pulled $key from peer $p->{url}\n";
 				$self->_put_local($key, $val);
 				last;
 			}
@@ -528,7 +653,9 @@ package HashNet::StorageEngine;
 
 		if($checked_peers_count <= 0)
 		{
-			print STDERR "[TRACE] StorageEngine: get(): No peers available to check for missing key: $key\n";
+			logmsg "TRACE", "StorageEngine: get(): No peers available to check for missing key: $key\n";
+			$@ = "No peers to check for missing key '$key'";
+			return undef;
 		}
 
 		#delete $self->{get_seen}->{$req_uuid};
@@ -595,11 +722,11 @@ package HashNet::StorageEngine;
 		
 		#my $key_file = $key_path . '/data';
 
-		print STDERR "[TRACE] StorageEngine: list(): Listing cmd: '$cmd'\n";
+		logmsg "TRACE", "StorageEngine: list(): Listing cmd: '$cmd'\n";
 		#my $val = undef;
 		#$val = retrieve($key_file)->{data} if -f $key_file;
 
-		print STDERR "[TRACE] StorageEngine: list(): Listing key_path $key_path\n";
+		logmsg "TRACE", "StorageEngine: list(): Listing key_path $key_path\n";
 
 		my $result = {};
 		foreach my $key_file (qx { $cmd })
@@ -617,11 +744,25 @@ package HashNet::StorageEngine;
 				$value = retrieve($key_file)->{data};
 			}
 			
-			print STDERR "[TRACE] StorageEngine: list(): key '$key' => '".($value||"")."'\n";
+			logmsg "TRACE", "StorageEngine: list(): key '$key' => '".($value||"")."'\n";
 			$result->{$key} = $value;
 		}
 
 		return $result;
+	}
+	
+	sub refresh_peers
+	{
+		#logmsg "TRACE", "StorageEngine: refresh_peers() start\n";
+		my $self = shift;
+		my $changed = 0;
+		my @peers = @{ $self->peers };
+		foreach my $peer (@peers)
+		{
+			$changed = 1 if $peer->load_changes;
+		}
+		$self->_sort_peers() if $changed;
+		#logmsg "TRACE", "StorageEngine: refresh_peers() end\n";
 	}
 
 };

@@ -4,7 +4,7 @@ use warnings;
 
 package HashNet::StorageEngine::TransactionRecord;
 {
-	use base qw/Object::Event/;
+#	use base qw/Object::Event/;
 	use Storable qw/freeze thaw/;
 	use JSON::PP qw/encode_json decode_json/;
 	use Time::HiRes qw/time/;
@@ -26,7 +26,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub new#($mode=[MODE_SQL|MODE_KV],$data_or_key,$data=undef,$type=[TYPE_READ|TYPE_WRITE])
 	{
 		my $class = shift;
-		my $self = $class->SUPER::new();
+		my $self = bless {}, $class; #$class->SUPER::new();
 
 		my $mode = shift || MODE_KV;
 		my $key  = shift || undef;
@@ -136,6 +136,9 @@ package HashNet::StorageEngine::TransactionRecord;
 		return {
 			mode	=> $self->{mode},
 			key	=> $self->{key},
+			# _clean_ref() creates a pure hash-/array-ref structure
+			# from any blessed hash/arrayrefs such as from DBM::Deep
+			# - necessary because JSON doesn't like blessed refs
 			data	=> _clean_ref($self->{data}),
 			type	=> $self->{type},
 			uuid	=> $self->{uuid},

@@ -11,6 +11,9 @@ use Cwd qw/abs_path/;
 
 print "\n$0: HashNet StorageEngine Version $HashNet::StorageEngine::VERSION\n\n";
 
+@HashNet::StorageEngine::PeerServer::Startup_ARGV = @ARGV;
+
+
 my %opts;
 getopts('hkf:c:d:p:n:', \%opts);
 
@@ -97,7 +100,7 @@ if($opts{k})
 		shift @lines;
 		if(@lines)
 		{
-			print STDERR "$lines[0]\n";
+			print STDERR "Killing $lines[0]\n";
 			kill 9, $pid;
 		}
 	}
@@ -125,18 +128,19 @@ my $con = HashNet::StorageEngine->new(
 	db_root	=> $opts{d}
 );
 
+if(-f $bin_file)
+{
+	print "$0: Using bin_file to '$bin_file'\n";
+	$HashNet::StorageEngine::PeerServer::BIN_FILE = $bin_file;
+}
+
 print "$0: Creating PeerServer...\n";
 my $srv = HashNet::StorageEngine::PeerServer->new(
 	engine	=> $con,
 	port	=> $opts{p},
 	config	=> $opts{n},
+	bin_file => $bin_file, 
 );
-
-if(-f $bin_file)
-{
-	print "$0: Setting bin_file to '$bin_file'\n";
-	$srv->bin_file($bin_file);
-}
 
 print "$0: Running PeerServer...\n";
 $srv->run;
