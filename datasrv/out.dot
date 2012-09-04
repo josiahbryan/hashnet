@@ -1,0 +1,8 @@
+graph graphname {
+	josiahdesktop -- t3400;
+	Laptop -- josiahdesktop;
+	Laptop -- t3400;
+	Laptop -- dellcontrol3;
+	dellcontrol3 -- webserver;
+	t3400 -- webserver;
+}

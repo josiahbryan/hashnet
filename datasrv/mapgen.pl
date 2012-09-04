@@ -44,7 +44,9 @@ my $tree = {};
 # Build into a hash-of-hashes
 foreach my $key (keys %res)
 {
+	my $orig_key = $key;
 	#print "key: $key, val: '$res{$key}'\n";
+	$key =~ s/<[^\>]+?>//g;
 	my @parts = split /\//, $key;
 	my $current_ref = $tree;
 	shift @parts;
@@ -58,14 +60,14 @@ foreach my $key (keys %res)
 		}
 		else
 		{
-			$current_ref->{$item} = $res{$key};
+			$current_ref->{$item} = $res{$orig_key};
 		}
 	}
 	
 	#die Dumper $tree;
 }
 
-#print Dumper $tree;
+#die Dumper $tree->{global}->{nodes};
 
 my $count = 0;
 
@@ -120,6 +122,8 @@ foreach my $node_uuid (keys %{$nodes || {}})
 		{
 			push @links, { lat => $lat, lng => $lng };
 			$links_added{$link_key} = 1;
+			
+			print "$node->{name} -- $peer->{name};\n";
 		}
 		
 		$node_json->{links} = \@links;
@@ -130,4 +134,4 @@ foreach my $node_uuid (keys %{$nodes || {}})
 }
 
 print STDERR Dumper \@json_list;
-print "map_list=", to_json(\@json_list), "\n";
+#print "map_list=", to_json(\@json_list), "\n";
