@@ -274,11 +274,22 @@ package HashNet::StorageEngine::PeerServer;
 			# NOTE Yes, I know - need to find a way to make compat with IPv6
 			$ifs{$interface}->{ip}    = $1     if /inet\D+(\d+\.\d+\.\d+\.\d+)/i;
 		}
+
+		# Skip bridges because even though they are not technically the localhost interface,
+		# if we have the same bridge ip on multiple machines (such as two machines that have
+		# xen dom0 or VirtualBox installed), resp_reg_ip would change the bridgeip to localhost
+		# since the same ip appears in both lists. (See resp_reg_ip())
+		foreach ( qx{ brctl show } )
+		{
+			$interface = $1 if /^(\S+?)\s/;
+			next unless defined $interface && $interface ne 'bridge'; # first line is 'bridge name ...';
+			delete $ifs{$interface};
+		}
 		
 		@IP_LIST_CACHE = ();
 		foreach my $if (keys %ifs)
 		{
-			next if $ifs{$if}->{state} ne 'UP';
+			next if !defined $ifs{$if} || $ifs{$if}->{state} ne 'UP';
 			my $ip = $ifs{$if}->{ip} || '';
 			
 			push @IP_LIST_CACHE, $ip if $ip;
@@ -380,21 +391,26 @@ package HashNet::StorageEngine::PeerServer;
 
 		my $url = $peer->url . '/reg_peer';
 
-		if($peer->host_down)
-		{
-			logmsg "TRACE", "PeerServer: reg_peer(): Not registering with peer at $url, host marked as down\n";
-			return;
-		}
-		
+# 		if($peer->host_down)
+# 		{
+# 			logmsg "TRACE", "PeerServer: reg_peer(): Not registering with peer at $url, host marked as down\n";
+# 			return;
+# 		}
+# 		
 		if($self->is_this_peer($url))
 		{
 			logmsg "TRACE", "PeerServer: reg_peer(): Not registering with peer at $url, same as this host\n";
 			return;
 		}
 
-		my @discovery_urls = map { 'http://'.$_.':'.$self->peer_port().'/db' } grep { $_ ne '127.0.0.1' } my_ip_list();
+		my $other_peer_port = URI->new($url)->port;
+
+		my $allow_localhost = $self->peer_port() != $other_peer_port ? 1:0;
+		#logmsg "DEBUG", "PeerServer: self->peer_port:", $self->peer_port(),", other_peer_port:$other_peer_port, \$allow_localhost:$allow_localhost \n";
+
+		my @discovery_urls = map { 'http://'.$_.':'.$self->peer_port().'/db' } grep { $allow_localhost ? 1 : $_ ne '127.0.0.1' } my_ip_list();
 		
-		@discovery_urls = ($peer->{known_as}) if $peer->{known_as};
+		#@discovery_urls = ($peer->{known_as}) if $peer->{known_as};
 		
 		my $payload = "peer_url=" . uri_escape(join('|', @discovery_urls)) . "&ver=$HashNet::StorageEngine::VERSION";
 		#my $payload_encrypted = $payload; #HashNet::Cipher->cipher->encrypt($payload);
@@ -402,6 +418,7 @@ package HashNet::StorageEngine::PeerServer;
 		# LWP::Simple
 		my $final_url = $url . '?' . $payload;
 		logmsg "TRACE", "PeerServer: reg_peer(): Trying to register as a peer at url: $final_url\n";
+		#die "Test over";
 
 		my $r;
 		HashNet::StorageEngine::Peer::exec_timeout(10.0, sub
@@ -730,7 +747,7 @@ package HashNet::StorageEngine::PeerServer;
 			# Register with peers *after* the event loop starts
 			# so that if we do have to upgrade, $self->bin_file
 			# is set so we know where to store the software
-			my $timer; $timer = AnyEvent->timer(after => 1, cb => sub
+			my $timer; $timer = AnyEvent->timer(after => 0.1, cb => sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
 				my @peers = @{ $engine->peers };
@@ -1000,7 +1017,7 @@ package HashNet::StorageEngine::PeerServer;
 				my @parts = split /\//, $key;
 				shift @parts;  # first part always empty
 				my $count = 0;
-				my @html = map { s/$path/<b>$path<\/b>/g if $path; '<span class=' . (++$count % 2 == 0 ? 'odd' : 'even').'>'.$_.'</span>' } @parts;
+				my @html = map { s/($path)/<b>$1<\/b>/g if $path; '<span class=' . (++$count % 2 == 0 ? 'odd' : 'even').'>'.$_.'</span>' } @parts;
 				return '<span class=key>/'.join('/',@html).'</span>';
 				
 			}
@@ -1416,7 +1433,7 @@ package HashNet::StorageEngine::PeerServer;
 		my $self = shift;
 		#$self->{bin_file} = shift if @_;
 		$self->{bin_file} ||= '';
-		logmsg "DEBUG", "PeerServer: bin_file(): $self->{bin_file}\n";
+		#logmsg "DEBUG", "PeerServer: bin_file(): $self->{bin_file}\n";
 		return $self->{bin_file};
 	}
 	
@@ -1438,7 +1455,7 @@ package HashNet::StorageEngine::PeerServer;
 # 				autoflush => 1, # enabled by default, just here to remind me
 # 				#type => DBM::Deep->TYPE_ARRAY
 # 			);
-			warn "Error opening $self->{tr_cache_file}: $@ $!" if $@ || $!;
+			warn "Error opening $self->{tr_cache_file}: $@ $!" if ($@ || $!) && !$self->{tr_flag_db};
 			$self->{_tr_flag_db_pid} = $$;
 		}
 		return $self->{tr_flag_db};
