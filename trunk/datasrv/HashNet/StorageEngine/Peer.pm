@@ -326,14 +326,14 @@ package HashNet::StorageEngine::Peer;
 		my $my_uuid = HashNet::StorageEngine::PeerServer->node_info->{uuid};
 		if(!$my_uuid)
 		{
-			logmsg 'WARN', "Peer: Could not find the node_info UUID for this computer, something went wrong. Unable to properly store latency and other metrics in cloud.\n";
+			logmsg 'WARN', "Peer: Could not find the node_info UUID for this computer, something went wrong. Unable data in engine.\n";
 			return;
 		}
 		
 		my $other_uuid = $self->node_uuid;
 		if(!$other_uuid)
 		{ 
-			logmsg 'WARN', "Peer: No node_info received from remote peer $self->{url}, unable to properly store latency and other metrics in cloud.\n"
+			logmsg 'WARN', "Peer: No node_info received from remote peer $self->{url}, unable to data in engine.\n"
 				unless $self->{host_down} && $self->{warned_about_node_uuid} ++;
 				# Don't over-warn about down hosts
 			return;

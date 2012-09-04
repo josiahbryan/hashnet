@@ -29,7 +29,11 @@ else
 	print "$0: Version number NOT changed, just building $main_file\n";
 }
 
-system("perl buildpacked.pl -i favicon.ico,hashnet-logo.png,basicstyles.css -z $main_file");
+use Module::Locate qw/locate/;
+# Core mod I think - it doesn't get packaged, and we need the newest version, so package it here anyway
+my $ping_mod = locate("Net::Ping");
+
+system("perl buildpacked.pl -i favicon.ico,hashnet-logo.png,basicstyles.css,$ping_mod -z $main_file");
 
 print "$0: Built version $new_ver.\n";
 

@@ -39,8 +39,12 @@ package HashNet::StorageEngine;
 	use Time::HiRes qw/time sleep/;
 	use Cwd qw/abs_path/;
 	use DBM::Deep;
+
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
+	use DBM::Deep::Iterator::File;
+	use DBM::Deep::Hash;
+	use DBM::Deep::Array;
 	
 	use HashNet::StorageEngine::PeerDiscovery;
 	use HashNet::StorageEngine::PeerServer;
@@ -52,7 +56,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0267;
+	our $VERSION = 0.0271;
 	
 	our $PING_TIMEOUT =  1.75;
 	
