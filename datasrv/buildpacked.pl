@@ -177,10 +177,11 @@ print "$0: Building payload in $payload_dir\n";
 sub add_payload
 {
 	my $file = shift;
-	my ($path,$name) = $file =~ /(^.*\/)?([^\/]+)$/;
-
+	
 	my $out_file = $file;
 	$out_file = '/'.$file if $file !~ /^\//;
+	
+	my ($path,$name) = $out_file =~ /(^.*\/)?([^\/]+)$/;
 
 	$path ||= ''; # prevent warnings of uninitalized value
 	my $payload_path = $payload_dir.$path;
@@ -190,6 +191,7 @@ sub add_payload
 	mkpath($payload_path) if !-d $payload_path;
 
 	#system("cp $file ${payload_dir}${out_file}");
+	#print STDERR "Debug: Copying '$file' -> '$payload_dir.$out_file' ($payload_path)\n";;
 	copy($file, $payload_dir.$out_file);
 
 	return wantarray ? ($path,$name) : $file;

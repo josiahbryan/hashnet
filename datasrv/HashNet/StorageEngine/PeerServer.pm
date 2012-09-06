@@ -252,8 +252,24 @@ package HashNet::StorageEngine::PeerServer;
 	use DBM::Deep; # for our has_seen_tr()/etc routines
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
+	#use HTML::Template; # for use in the visulization
+	use LWP::MediaTypes qw(guess_media_type); # for serving files
+	
 
 	our @Startup_ARGV = (); # set by dengpeersrv.pl - used in request_restart();
+	
+	our %HTTP_FILE_RESOURCES = (
+			
+		'/favicon.ico'		=> 'www/images/favicon.ico',
+		'/hashnet-logo.png'	=> 'www/images/hashnet-logo.png',
+		'/basicstyles.css'	=> 'www/css/basicstyles.css',
+		
+		'/db/viz'		=> 'www/viz.html',
+		'/images/circle.png'	=> 'www/images/circle.png',
+		
+		'/js/jquery.jsPlumb-1.3.13-all-min.js'	=> 'www/js/jquery.jsPlumb-1.3.13-all-min.js',
+		'/js/jquery.jsPlumb-1.3.13-all.js'	=> 'www/js/jquery.jsPlumb-1.3.13-all.js',
+	);
 
 	#sub peer_url  { 'http://localhost:' . peer_port() . '/db' }
 	
@@ -763,6 +779,9 @@ package HashNet::StorageEngine::PeerServer;
 			my $w;
 			my $timeout_sub; $timeout_sub = sub
 			{
+				my $db = $engine->tx_db;
+				my $cur_tx_id = $db->length() || 0;
+
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
 				my @peers = @{ $engine->peers };
 				foreach my $peer (@peers)
@@ -791,10 +810,7 @@ package HashNet::StorageEngine::PeerServer;
 						my $first_tx_needed = $peer->{last_tx_sent} + 1;
 						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
 
-						my $db = $engine->tx_db;
-						my $cur_id = $db->length() || 0;
-
-						if($cur_id < 0)
+						if($cur_tx_id < 0)
 						{
 							debug "PeerServer: No transactions in database, not transmitting anything\n";
 							next;
@@ -802,23 +818,23 @@ package HashNet::StorageEngine::PeerServer;
 						
 						# Logically, this shouldn't happen - if it does, it means the txlog was probably
 						# deleted but the peer state was not. So, try to auto-fix the peer state.
-						if(($peer->{last_tx_sent}||0) > $cur_id)
+						if(($peer->{last_tx_sent}||0) > $cur_tx_id)
 						{
 							$peer->update_begin();
-							$peer->{last_tx_sent} = $cur_id;
+							$peer->{last_tx_sent} = $cur_tx_id;
 							$peer->update_end();
 						}
 
-						my $length = $cur_id - $first_tx_needed;
+						my $length = $cur_tx_id - $first_tx_needed;
 						if($length <= 0)
 						{
-							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_id), nothing to send.\n";
+							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 							next;
 						}
 						
-						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_id)\n";
+						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_tx_id)\n";
 
-						for my $idx ($first_tx_needed .. $cur_id-1)
+						for my $idx ($first_tx_needed .. $cur_tx_id-1)
 						{
 							# peer->push() [below] could change this while we're in
 							# the for() loop, hence why we check this again
@@ -835,8 +851,8 @@ package HashNet::StorageEngine::PeerServer;
 
 							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
 							
-							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_id) (relid ".($tr->{rel_id} || -1).")\n";
-							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
+							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_tx_id) (relid ".($tr->{rel_id} || -1).")\n";
+							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_tx_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
 
 							# Just for debugging...
 							$tr->_dump_route_hist;
@@ -849,7 +865,7 @@ package HashNet::StorageEngine::PeerServer;
 								# Update the tx# in the peer so our code doesn't think this peer is behind
 								$peer->{last_tx_sent} = $idx;
 								
-								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_id, uuid: $tr->{uuid}\n";
+								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_tx_id, uuid: $tr->{uuid}\n";
 
 								$peer->update_end();
 								next;
@@ -860,7 +876,7 @@ package HashNet::StorageEngine::PeerServer;
 							#if($lock)
 							$peer->update_begin();
 							{
-								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_id, uuid: $tr->{uuid} ...\n";
+								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_tx_id, uuid: $tr->{uuid} ...\n";
 								#logmsg 'TRACE', "Mark2\n";
 								if($peer->push($tr))
 								{
@@ -887,26 +903,30 @@ package HashNet::StorageEngine::PeerServer;
 					}
 				}
 
-				if(-f $self->{node_info_changed_flag_file})
+				$self->engine->begin_batch_update();
 				{
-					$self->engine->begin_batch_update();
-
-					unlink $self->{node_info_changed_flag_file};
-					my $inf = $self->{node_info};
+					my $inf  = $self->{node_info};
 					my $uuid = $inf->{uuid};
 					my $key_path = '/global/nodes/'. $uuid;
-					#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-					foreach my $key (keys %$inf)
+					
+					if(-f $self->{node_info_changed_flag_file})
 					{
-						my $put_key = $key_path . '/' . $key;
-						my $val = $inf->{$key};
-						#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-						$self->engine->put($put_key, $val);
+						unlink $self->{node_info_changed_flag_file};
+						#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+						foreach my $key (keys %$inf)
+						{
+							my $put_key = $key_path . '/' . $key;
+							my $val = $inf->{$key};
+							#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+							$self->engine->put($put_key, $val);
+						}
 					}
-
-					$self->engine->end_batch_update();
+				
+					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
+						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
+					
 				}
-
+				$self->engine->end_batch_update();
 
 				undef $w;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
@@ -950,12 +970,6 @@ package HashNet::StorageEngine::PeerServer;
 		#$httpd->reg_cb('' => sub
 		my $root = $ENV{PACKED_ROOT} ? $ENV{PACKED_ROOT} : '';
 		
-		my $favicon = abs_path($root . 'favicon.ico');
-		my $logo    = abs_path($root . 'hashnet-logo.png');
-		my $styles  = abs_path($root . 'basicstyles.css');
-		
-		#logmsg "DEBUG", "PeerServer: favicon: '$favicon', logo: '$logo'\n";
-		
 		sub http_send_file
 		{
 			my $file = shift;
@@ -967,18 +981,28 @@ package HashNet::StorageEngine::PeerServer;
 				push @buffer, $_ while $_ = <F>;
 				close(F);
 				my $data = join '', @buffer;
-				my $ctype = `file -i $file`;
-				$ctype =~ s/^$file:\s*//g;
-				$ctype =~ s/[\r\n]//g;
+				#my $ctype = `file -i $file`;
+				#$ctype =~ s/^$file:\s*//g;
+				#$ctype =~ s/[\r\n]//g;
+				my $ctype = guess_media_type($file);
 				#logmsg "TRACE", "PeerServer: Serving ", length($data)," bytes from $file as $ctype\n";
 				http_respond($res, $ctype, $data);
 			};
 		}
 		
-		$httpd->mount( '/favicon.ico'      => { handler => http_send_file($favicon) } );
-		$httpd->mount( '/hashnet-logo.png' => { handler => http_send_file($logo) } );
-		$httpd->mount( '/basicstyles.css'  => { handler => http_send_file($styles) } );
+		foreach my $key (keys %HTTP_FILE_RESOURCES)
+		{
+			my $abs_file = abs_path($root.$HTTP_FILE_RESOURCES{$key});
+			info "Registering $abs_file as path '$key'\n";
+			$httpd->mount($key => { handler => http_send_file($abs_file) });
+		};
 		
+		
+		
+# 		$httpd->mount( '/favicon.ico'      => { handler => http_send_file($favicon) } );
+# 		$httpd->mount( '/hashnet-logo.png' => { handler => http_send_file($logo) } );
+# 		$httpd->mount( '/basicstyles.css'  => { handler => http_send_file($styles) } );
+# 		
 		$httpd->mount('/' => { handler => sub
 		{
 			#my ($req, $res) = @_;
@@ -1001,11 +1025,54 @@ package HashNet::StorageEngine::PeerServer;
 			);
 		}});
 		
+		$httpd->mount('/db' => { handler => sub
+		{
+			my ($req, $res) = @_;
+			$res->code(302);
+			$res->header('Location', '/');
+			$res->{target_uri} = URI::http->new('/');
+			return $res;
+		}});
+		
+		$httpd->mount('/db/viz/nodeinfo.js' => { handler => sub
+		{
+			my ($req, $res) = @_;
+			
+			my $list = $self->engine->list('/global/nodes');
+			my $tree = searchlist_to_tree($list);
+			my $out = build_nodeinfo_json($tree);
+			
+			# Add in any stored positions
+			foreach my $node (@{$out || []})
+			{
+				my $data = $self->engine->get("/db/viz/state/node_pos/".$node->{uuid});
+				next if !$data;
+				
+				my ($x,$y) = split /,\s*/, $data;
+				$node->{x} = $x;
+				$node->{y} = $y;
+			}
+			
+			http_respond($res, 'text/javascript', encode_json($out));
+		}});
+		
+		$httpd->mount('/db/viz/store_pos' => { handler => sub
+		{
+			my ($req, $res) = @_;
+			
+			my $uuid = http_param($req, 'uuid');
+			my $x = http_param($req, 'x');
+			my $y = http_param($req, 'y');
+			
+			$self->engine->put("/db/viz/state/node_pos/$uuid", "$x, $y");
+			
+			http_respond($res, 'text/plain', "OK");
+		}});
+		
 
 		#$httpd->reg_cb('/db/search' => sub
 		$httpd->mount('/db/search' => { handler => sub
 		{
-			
 			my ($req, $res) = @_;
 
 			my $path = http_param($req, 'path') || '/';
@@ -1023,6 +1090,13 @@ package HashNet::StorageEngine::PeerServer;
 			}
 			
 			my $list = $self->engine->list($path);
+			
+			my $output = http_param($req, 'output') || 'html';
+			if($output eq 'json')
+			{
+				http_respond($res, 'text/plain', encode_json(searchlist_to_tree($list)));
+				return;
+			}
 
 			my @keys = sort { $a cmp $b } keys %{$list || {}};
 
@@ -2000,6 +2074,142 @@ of software available.
 # 		});
 		
 		1;
+	}
+	
+	sub searchlist_to_tree
+	{
+		my $res = shift || {};
+		
+		#print Dumper \%res;
+		#exit;
+		my $tree = {};
+		
+		# Build into a hash-of-hashes
+		foreach my $key (keys %$res)
+		{
+			my $orig_key = $key;
+			#print "key: $key, val: '$res{$key}'\n";
+			$key =~ s/<[^\>]+?>//g;
+			my @parts = split /\//, $key;
+			my $current_ref = $tree;
+			shift @parts;
+			#print Dumper \@parts;
+			while(my $item = shift @parts)
+			{
+				if(@parts)
+				{
+					$current_ref->{$item} ||= {};
+					$current_ref = $current_ref->{$item};
+				}
+				else
+				{
+					$current_ref->{$item} = $res->{$orig_key};
+				}
+			}
+			
+			#die Dumper $tree;
+		}
+		
+		return $tree;
+		
+		#die Dumper $tree->{global}->{nodes};
+		#print Dumper $tree->{global}->{nodes};
+		#exit;
+	}
+	
+	sub build_nodeinfo_json
+	{
+		my $tree = shift;
+		
+		my $count = 0;
+		
+		my @json_list;
+		
+		sub normalize
+		{
+			my ($x,$y) = @_;
+			return ($x cmp $y) < 0 ? "$x$y" : "$y$x";
+		}
+		
+		my %links_added;
+		
+		my $nodes = $tree->{global}->{nodes};
+		foreach my $node_uuid (keys %{$nodes || {}})
+		{
+			my $node = $nodes->{$node_uuid};
+			my $geo  = $node->{geo_info};
+			if(!$geo)
+			{
+				warn "No geo info for $node_uuid";
+				next;
+			}
+			my ($lat, $lng) = $geo =~ /, (-?\d+\.\d+), (-?\d+\.\d+)/;
+			
+			#print STDERR "$node->{name} ($lat, $lng)\n";
+			
+		# 	my $node_json = {
+		# 		uuid => $node_uuid,
+		# 		name => $node->{name},
+		# 		geo  => $geo,
+		# 		lat  => $lat,
+		# 		lng  => $lng,
+		# 		x    => int(abs(int($lat * 100 - 4000)) * 1.2),
+		# 		y    => int((abs(int($lng * 100 + 8000)) - 400) * 1.2),
+		# 	};
+		
+			my %more_data = (
+				lat  => $lat,
+				lng  => $lng,
+				x    => rand() * 800, #int(abs(int($lat * 100 - 4000)) * 1.2),
+				y    => rand() * 400, #int((abs(int($lng * 100 + 8000)) - 400) * 1.2),
+			);
+			
+			my $node_json = $node;
+			$node_json->{$_} = $more_data{$_} foreach keys %more_data;
+			
+			my @links;
+			my @peers = keys %{$node->{peers} || {}};
+			foreach my $peer_uuid (@peers)
+			{
+				my $peer = $nodes->{$peer_uuid};
+				my $geo = $peer->{geo_info};
+				if(!$geo)
+				{
+					warn "No geo info for peer $peer_uuid";
+					next;
+				}
+				my ($lat, $lng) = $geo =~ /, (-?\d+\.\d+), (-?\d+\.\d+)/;
+				
+				#print STDERR "\t -> $peer->{name} ($lat, $lng)\n";
+				
+				my $link_key = normalize($node_uuid, $peer_uuid);
+				#if(!$links_added{$link_key})
+				{
+		# 			push @links,
+		# 			{
+		# # 				lat => $lat, 
+		# # 				lng => $lng,
+		# # 				x    => int(abs(int($lat * 100 - 4000)) * 1.2),
+		# # 				y    => int((abs(int($lng * 100 + 8000)) - 400) * 1.2),
+		# 				uuid => $peer_uuid,
+		# 		 	};
+					my $peer_info = $node->{peers}->{$peer_uuid};
+					$peer_info->{uuid} = $peer_uuid;
+					push @links, $peer_info;
+					$links_added{$link_key} = 1;
+					
+					#print "$node->{name} -- $peer->{name};\n";
+				}
+				
+				$node_json->{links} = \@links;
+			}
+		
+			push @json_list, $node_json;
+			$count ++;
+		}
+		
+		#print STDERR Dumper \@json_list;
+		return \@json_list;	
 	}
 };
 

@@ -56,7 +56,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.027;
+	our $VERSION = 0.0271;
 	
 	our $PING_TIMEOUT =  1.75;
 	
@@ -84,7 +84,7 @@ package HashNet::StorageEngine;
 			{
 				if(-f $file)
 				{
-					print STDERR "[INFO] StorageEngine: Using peers config file '$file'\n";
+					info "StorageEngine: Using peers config file '$file'\n";
 					$PEERS_CONFIG_FILE = $file;
 					$found = 1;
 					last;
@@ -94,7 +94,7 @@ package HashNet::StorageEngine;
 			if(!$found)
 			{
 				my $file = shift @$PEERS_CONFIG_FILE;
-				print STDERR "[INFO] StorageEngine: No config file found, using default location '$file'\n";
+				info "StorageEngine: No config file found, using default location '$file'\n";
 				$PEERS_CONFIG_FILE = $file;
 			}
 		}
@@ -120,7 +120,7 @@ package HashNet::StorageEngine;
 		}
 		$self->{tx_file} = $txlog_abs_file;
 
-		print STDERR "[DEBUG] StorageEngine: Using '$txlog_abs_file' as transaction log\n";
+		debug "StorageEngine: Using '$txlog_abs_file' as transaction log\n";
 		# Only create {tx_db} on first use to avoid having it created before a fork if possible
 
 		my @peers;
@@ -295,7 +295,7 @@ package HashNet::StorageEngine;
 			next if $peer->host_down;
 			
 			$num ++;
-			print "[TRACE] StorageEngine: Peer $num: $peer->{url} ($peer->{distance_metric} sec)\n";
+			trace "StorageEngine: Peer $num: $peer->{url} ($peer->{distance_metric} sec)\n";
 		}
 		
 	}
@@ -726,11 +726,12 @@ package HashNet::StorageEngine;
 		
 		#my $key_file = $key_path . '/data';
 
-		logmsg "TRACE", "StorageEngine: list(): Listing cmd: '$cmd'\n";
+		#logmsg "TRACE", "StorageEngine: list(): Listing cmd: '$cmd'\n";
+		
 		#my $val = undef;
 		#$val = retrieve($key_file)->{data} if -f $key_file;
 
-		logmsg "TRACE", "StorageEngine: list(): Listing key_path $key_path\n";
+		#logmsg "TRACE", "StorageEngine: list(): Listing key_path $key_path\n";
 
 		my $result = {};
 		foreach my $key_file (qx { $cmd })
@@ -748,7 +749,7 @@ package HashNet::StorageEngine;
 				$value = retrieve($key_file)->{data};
 			}
 			
-			logmsg "TRACE", "StorageEngine: list(): key '$key' => '".($value||"")."'\n";
+			#logmsg "TRACE", "StorageEngine: list(): key '$key' => '".($value||"")."'\n";
 			$result->{$key} = $value;
 		}
 
