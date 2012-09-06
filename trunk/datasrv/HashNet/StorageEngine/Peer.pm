@@ -359,6 +359,12 @@ package HashNet::StorageEngine::Peer;
 
 		$self->engine->put("$key_root/known_as", $self->known_as)
 			if ($self->engine->get("$key_root/known_as")||'') ne ($self->known_as || '');
+			
+		$self->engine->put("$key_root/last_tx_sent", $self->last_tx_sent)
+			if ($self->engine->get("$key_root/last_tx_sent")||0) != ($self->last_tx_sent||0);
+
+		$self->engine->put("$key_root/last_tx_recd", $self->last_tx_recd)
+			if ($self->engine->get("$key_root/last_tx_recd")||0) != ($self->last_tx_recd||0);
 
 		if(!$self->host_down)
 		{
