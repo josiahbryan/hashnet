@@ -784,6 +784,9 @@ package HashNet::StorageEngine::PeerServer;
 
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
 				my @peers = @{ $engine->peers };
+
+				#@peers = (); # TODO JUST FOR DEBUGGING
+				
 				foreach my $peer (@peers)
 				{
 					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Update begin ...\n";
