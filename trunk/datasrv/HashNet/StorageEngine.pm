@@ -35,7 +35,6 @@ package HashNet::StorageEngine;
 	use Storable qw/freeze thaw store retrieve/;
 	use File::Path qw/mkpath/;
 	use Data::Dumper;
-	use Net::Ping;
 	use Time::HiRes qw/time sleep/;
 	use Cwd qw/abs_path/;
 	use DBM::Deep;
@@ -57,11 +56,6 @@ package HashNet::StorageEngine;
 	my $ug = UUID::Generator::PurePerl->new();
 
 	our $VERSION = 0.0273;
-	
-	our $PING_TIMEOUT =  1.75;
-	
-	my $pinger = Net::Ping->new('tcp');
-	$pinger->hires(1);
 	
 	our $PEERS_CONFIG_FILE = ['/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -242,15 +236,6 @@ package HashNet::StorageEngine;
 		
 		my $peer = HashNet::StorageEngine::Peer->new($self, $url);
 		
-		my $uri  = URI->new($url)->canonical;
-		my $host = $uri->host;
-		
-		if(!$pinger->ping($host, $PING_TIMEOUT))
-		{
-			print STDERR "[WARN]  StorageEngine: add_peer(): Not adding peer '$url' because cannot ping $host within $PING_TIMEOUT seconds\n";
-			return 0; 
-		}
-		
 		push @{ $self->peers }, $peer;
 
 		if(!$bulk_mode)
@@ -326,7 +311,8 @@ package HashNet::StorageEngine;
 		}
 
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', $self->{_batch_list}, 'TYPE_WRITE_BATCH');
-		$tr->update_route_history;
+		# Moved this call to _push_tr
+		#$tr->update_route_history;
 
 		$self->_push_tr($tr);
 		$self->_put_local_batch($self->{_batch_list});
@@ -387,7 +373,8 @@ package HashNet::StorageEngine;
 		my $val = shift;
 		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
-		$tr->update_route_history;
+		# Moved this call to _push_tr
+		#$tr->update_route_history;
 		
 		$t->_push_tr($tr);
 	}
@@ -437,6 +424,7 @@ package HashNet::StorageEngine;
 			# will give it a new relative id - so that *it's* peers can know what ID
 			# to reference for playback if needed
 			$tr->{rel_id} = $db->length();
+			$tr->update_route_history($tr->{rel_id});
 
 			# Let the DB worry about serialization (instead of using to_json)
 			$db->push($tr->to_hash);

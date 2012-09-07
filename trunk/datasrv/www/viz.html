@@ -57,6 +57,14 @@
 				white-space:nowrap;
 			}
 			
+			#loading_msg {
+				z-index: 999;
+				width:20em;
+				padding: .5em 2em 2em 2em;
+			}
+			
+	
+			
 
 
 		</style>
@@ -116,10 +124,41 @@
 			function eraseCookie(name) {
 				createCookie(name, "", -1);
 			}
+			
+			window.showLoading = function()
+			{
+				//console.debug("Connection Lost...");
+				if(window.LoadingVisible)
+					return;
+					
+				window.LoadingVisible = true;
+		
+				//$.mobile.showPageLoadingMsg("b","Connection Lost, Reconnecting...");
+				var elm = $("<div class='ui-body ui-body-a' id='loading_msg'><center><h3>Loading</h3>Loading data from server...</center></div>");
+				$(document.body).append(elm);
+				window.showLoading.elm = elm;
+				
+				var win = $(window);
+				elm.css('top', win.height() /2 - elm.height()/2 + $(window).scrollTop() );
+				elm.css('left', win.width() /2 - elm.width() /2 );
+			}
+			
+			window.hideLoading = function()
+			{
+				if(window.LoadingVisible)
+				{
+					window.LoadingVisible = false;
+					//$.mobile.hidePageLoadingMsg();
+					window.showLoading.elm.remove();
+				}
+			}
 
 			window.jsPlumbDemo = {
 					
 				init : function() {
+				
+					showLoading();
+					
 					$.ajax({
 						type: "GET",
 						url: '/db/viz/nodeinfo.js',
@@ -127,6 +166,7 @@
 						{
 							//console.debug(url + ":error:",data);
 							//showConLost();
+							hideLoading();
 						},
 						success: function(data)
 						{
@@ -242,13 +282,18 @@
 										
 										var agoList = [];
 										if(diffDays > 0)
-											agoList.push(diffDays+" days");
-										if(diffHrs > 0)
-											agoList.push(diffHrs+" hr");
-										if(diffMins > 0)
-											agoList.push(diffMins+" min");
-										if(diffSecs > 0 && diffMins <= 0)
-											agoList.push(diffSecs+" sec");
+											agoList.push(diffDays+" day"+(diffDays>1?"s":""));
+										else
+										{
+											if(diffHrs > 0)
+												agoList.push(diffHrs+" hr"+(diffHrs>1?"s":""));
+											if(diffMins > 0)
+												agoList.push(diffMins+" min");
+											if(diffSecs > 0 && diffMins <= 0)
+												agoList.push(diffSecs+" sec");
+											if(agoList.length <= 0)
+												agoList.push("Less than 1 sec");
+										}
 										
 										var timeAgo = agoList.join(", ")+" ago";
 										var maxMinutes = 1000 * 60 * 10;
@@ -308,6 +353,9 @@
 								
 							// make everything draggable
 							jsPlumb.draggable(shapes);
+							
+							hideLoading();
+							
 		// 						
 		// 					// loop through them and connect each one to each other one.
 		// 					for (var i = 0; i < shapes.length; i++)

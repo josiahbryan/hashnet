@@ -254,6 +254,14 @@ package HashNet::StorageEngine::PeerServer;
 	use DBM::Deep::Engine::File;
 	#use HTML::Template; # for use in the visulization
 	use LWP::MediaTypes qw(guess_media_type); # for serving files
+	use Net::Ping; # for pinging hosts in resp_reg_peer
+	
+	our $PING_TIMEOUT =  1.75;
+	
+	my $pinger = Net::Ping->new('tcp');
+	$pinger->hires(1);
+	
+
 	
 
 	our @Startup_ARGV = (); # set by dengpeersrv.pl - used in request_restart();
@@ -1734,7 +1742,10 @@ of software available.
 			$self->tr_flag_db->unlock;
 			
 			# Update the route history so hosts down the line know not to send it back to us
-			$tr->update_route_history;
+			# UPDATE: Moved this call to _push_tr
+			#$tr->update_route_history();
+			
+			# TODO: Send message back to peer
 			
 			# Get the ip to guess the peer_url if not provided
 			my $peer_ip  = $req->{host} || '';
@@ -1976,13 +1987,17 @@ of software available.
 			
 			my $final_url = 0;
 			my %seen;
+			
+			my @list_to_check = ();
+			
 			foreach my $possible_url (@possible)
 			{
 				#trace "PeerServer: resp_reg_peer(): \$possible_url: '$possible_url'\n";
+				my $uri = URI->new($possible_url);
+					
 				if(is_this_host($possible_url))
 				{
 					my $tmp = $possible_url;
-					my $uri = URI->new($possible_url);
 					$uri->host('localhost');
 					$possible_url = $uri->as_string;
 					trace "PeerServer: resp_reg_peer(): Changed '$tmp' => '$possible_url' because its localhost\n";
@@ -1990,7 +2005,18 @@ of software available.
 				
 				next if $seen{$possible_url};
 				$seen{$possible_url} = 1;
-
+				
+				# We'll explicitly check localhost *last*
+				next if $uri->host eq 'localhost' || $uri->host eq '127.0.0.1';
+				
+				push @list_to_check, $possible_url;
+				
+			}
+			
+			foreach my $possible_url (@list_to_check)
+			{
+				next if ! is_valid_peer($possible_url);
+				
 				my $result = $self->engine->add_peer($possible_url);
 				
 				# >0 means it's added
@@ -2003,6 +2029,27 @@ of software available.
 					# for tr_push requests, etc.
 					$final_url = $possible_url;
 					last;
+				}
+			}
+			
+			# check local host - but need at least 1 possible URI to figure out what port to check
+			if(!$final_url && @list_to_check)
+			{
+				my $local_uri = URI->new(shift @list_to_check);
+				my $port = $local_uri->port;
+				my $local_url = "http://localhost:${port}/db";
+				my $node_info = is_valid_peer($local_url);
+				if(!$node_info)
+				{
+					# No server on that port, warn?
+				}
+				elsif($node_info->{uuid} ne $self->node_info->{uuid})
+				{
+					$final_url = $local_url;
+				}
+				else
+				{
+					# Local url not valid, warn?
 				}
 			}
 			
@@ -2077,6 +2124,48 @@ of software available.
 # 		});
 		
 		1;
+	}
+	
+	sub is_valid_peer
+	{
+		my $url  = shift || '';
+		
+		my $uri  = URI->new($url)->canonical;
+		if(!$uri->can('host'))
+		{
+			info "PeerServer: is_valid_peer($url): Unable to check url '$url' - URI module can't parse it.\n";
+			return 0;
+		}
+		
+		my $host = $uri->host;
+		
+		if(!$pinger->ping($host, $PING_TIMEOUT))
+		{
+			info "PeerServer: is_valid_peer($url): Not adding peer '$url' because cannot ping $host within $PING_TIMEOUT seconds\n";
+			return 0;
+		}
+		
+		my $ver = $HashNet::StorageEngine::VERSION;
+		my $ver_url = $uri . '/ver?upgrade_check=' . $ver;
+		
+		my $json;
+		
+		my $timed_out  = HashNet::StorageEngine::Peer::exec_timeout(3.0, sub { $json = get($ver_url); });
+		
+		if($timed_out)
+		{
+			info "PeerServer: is_valid_peer($url): Timed out while getting $ver_url, marking invalid\n";
+			return 0;
+		}
+
+		if(!$json)
+		{
+			info "PeerServer: is_valid_peer($url): Empty string from $ver_url, marking invalid\n";
+			return 0;
+		}
+		
+		my $data = decode_json($json);
+		return $data->{node_info};
 	}
 	
 	sub searchlist_to_tree

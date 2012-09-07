@@ -8,6 +8,7 @@ use Getopt::Std;
 use HashNet::StorageEngine;
 use HashNet::StorageEngine::PeerServer;
 use Cwd qw/abs_path/;
+use lib 'extern';
 use version::vpp; # for buildpacked.pl to pick up
 
 print "\n$0: HashNet StorageEngine Version $HashNet::StorageEngine::VERSION\n\n";

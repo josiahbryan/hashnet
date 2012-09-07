@@ -3,3 +3,8 @@
 -Figure out how to handle check version timer and software upgrades
 -Generic 'server id' independent of peer url
 -Key meta data (e.g. creation host, lifespan, hosts its on, etc)
+-Add an ssh tunnel manager
+-Add a 'check' so that when the remote side of the tunnel isn't accessible, it restarts the tunnel
+	- E.g. Host A opens tunnel TO Host B (ports 3032 local and remote)
+	- Some time later, Host A can access Host B on 3032, BUT Host A is not getting any TX (last_seen is >X time) from Host B
+	- Therefore, restart the tunnel
