@@ -80,9 +80,28 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub update_route_history
 	{
 		my $self = shift;
+		my $relid = shift || -1;
 		push @{$self->{route_hist}}, {
-			uuid => host_uuid(),
-			ts   => time(),
+			uuid  => host_uuid(),
+			ts    => time(),
+			relid =>  $relid,
+		};
+	}
+	
+	sub update_route_history_uuid
+	{
+		my $self = shift;
+		my $uuid = shift;
+		my $relid = shift || -1;
+		if(!$uuid)
+		{
+			warn "update_route_history_uuid: No UUID given";
+			return undef;
+		}
+		push @{$self->{route_hist}}, {
+			uuid  => $uuid,
+			ts    => time(),
+			relid =>  $relid,
 		};
 	}
 	
