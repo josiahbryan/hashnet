@@ -56,7 +56,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0272;
+	our $VERSION = 0.0273;
 	
 	our $PING_TIMEOUT =  1.75;
 	

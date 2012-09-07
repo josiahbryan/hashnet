@@ -161,7 +161,8 @@
 								
 								var nodeInfoHtml = ""
 									+ "<b>" + node_info.name + "</b><br>"
-									+ geoString;
+									+ geoString + "<br>"
+									+ "<i>" + node_info.hashnet_ver + "</i>";
 								
 								//var $shape = $('<div class="shape" data-shape="rectangle" style="left:'+nx+'px;top:'+ny+'px;">'+genNameHtml(node_info.name)+'</div>');
 								var $shape = $('<div class="shape" data-shape="circle" style="left:'+nx+'px;top:'+ny+'px;">'+verticalCenter(nodeInfoHtml)+'</div>');
