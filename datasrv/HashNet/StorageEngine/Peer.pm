@@ -15,7 +15,7 @@ $SIG{CHLD} = sub { while( waitpid(-1,WNOHANG)>0 ) {  } };
 
 package HashNet::StorageEngine::Peer;
 {
-	use base qw/Object::Event/;
+	#use base qw/Object::Event/;
 	use Storable qw/freeze thaw nstore retrieve/;
 	use AnyEvent::HTTP;
 #	use LWP::Simple::Post qw/post/;
@@ -28,11 +28,13 @@ package HashNet::StorageEngine::Peer;
 	use Digest::Perl::MD5 qw/md5_hex/;
 	use HashNet::Util::Logging;
 	use HashNet::Util::OnDestroy; # exports ondestroy($coderef)
+	#use Net::Ping::External qw(ping);
+	use Data::Dumper;
 	
 	# This is included ONLY so buildpacked.pl picks it up for use by JSON on some older linux boxen
 	use JSON::backportPP;
 	
-	our $PING_TIMEOUT =  0.75;
+	our $PING_TIMEOUT =  1.75;
 	
 	my $pinger = Net::Ping->new('tcp');
 	$pinger->hires(1);
@@ -75,7 +77,7 @@ package HashNet::StorageEngine::Peer;
 	sub new
 	{
 		my $class = shift;
-		my $self = $class->SUPER::new();
+		my $self = bless {}, $class; #$class->SUPER::new();
 
 		my $engine = shift;
 		my $url = shift;
@@ -112,7 +114,7 @@ package HashNet::StorageEngine::Peer;
 		$root .= '/' if $root !~ /\/$/;
 		
 		# TODO is this name going to cause problems? Does it need to be more host-specific?
-		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->url).'.state';
+		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->node_uuid).'.state';
 	}
 
 	sub load_state
@@ -136,8 +138,8 @@ package HashNet::StorageEngine::Peer;
 		$self->{known_as}	 = $state->{known_as};
 		$self->{node_info}	 = $state->{node_info};
 		$self->{host_down}	 = $state->{host_down};
-		$self->{last_tx_sent}	 = $state->{last_tx_sent};
-		$self->{last_tx_recd}	 = $state->{last_tx_recd};
+		$self->{last_tx_sent}	 = $state->{last_tx_sent} || -1;
+		$self->{last_tx_recd}	 = $state->{last_tx_recd} || -1;
 		$self->{distance_metric} = $state->{distance_metric};
 		
 		#trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_sent} (+in)\n";
@@ -378,7 +380,101 @@ package HashNet::StorageEngine::Peer;
 
 		#$self->engine->put("$key_root/latency", $self->distance_metric);
 	}
-	
+
+	my $DEBUG = 1;
+	# Generic subroutine to handle pinging using the system() function. Generally,
+	# UNIX-like systems return 0 on a successful ping and something else on
+	# failure. If the return value of running $command is equal to the value
+	# specified as $success, the ping succeeds. Otherwise, it fails.
+	sub _ping_system {
+		my ($command,   # The ping command to run
+		$success,   # What value the system ping command returns on success
+		) = @_;
+		my $devnull = "/dev/null";
+		$command .= " 1>$devnull 2>$devnull";
+		print "#$command\n" if $DEBUG;
+		my $exit_status = system($command) >> 8;
+		print "## $exit_status == $success;\n" if $DEBUG;
+		return 1 if $exit_status == $success;
+		return 0;
+	}
+	# Debian 2.2 OK, RedHat 6.2 OK
+	# -s size option available to superuser... FIXME?
+	sub _ping_linux {
+		my %args = @_;
+		my $command;
+		#for next version
+		if (-e '/etc/redhat-release' || -e '/etc/SuSE-release') {
+		$command = "ping -c $args{count} -s $args{size} $args{host}";
+		} else {
+		$command = "ping -c $args{count} $args{host}";
+		}
+		return _ping_system($command, 0);
+	}
+
+
+	sub extern_ping
+	{
+		my ($host, $timeout) = @_;
+		my $ts = time;
+		my $result;
+		my $timeout_flag = exec_timeout $timeout, sub {
+			$result = _ping_linux(hostname => $host);
+		};
+		my $te = time;
+		my $td = $te - $ts;
+		#debug "Peer: extern_ping($host): \$result='$result', td: $td\n";
+		debug "Peer: extern_ping($host): \$result='$result', timeout_flag?'$timeout_flag', timeout:$timeout, td:$td\n";
+		return $timeout_flag ? 0 : $result;
+	}
+
+	sub is_valid_peer
+	{
+		shift if ref($_[0]) eq __PACKAGE__ || $_[0] eq __PACKAGE__;
+		
+		my $url  = shift || '';
+
+		my $uri  = URI->new($url)->canonical;
+		if(!$uri->can('host'))
+		{
+			info "Peer: is_valid_peer($url): Unable to check url '$url' - URI module can't parse it.\n";
+			return 0;
+		}
+
+		my $host = $uri->host;
+
+# 		#if(!$pinger->ping($host, $PING_TIMEOUT))
+# 		if(!extern_ping($host, $PING_TIMEOUT))
+# 		{
+# 			info "Peer: is_valid_peer($url): Not adding peer '$url' because cannot ping $host within $PING_TIMEOUT seconds\n";
+# 			#die "Peer: is_valid_peer($url): Not adding peer '$url' because cannot ping $host within $PING_TIMEOUT seconds";
+# 			#die "Test Done";
+# 			return 0;
+# 		}
+
+		my $ver = $HashNet::StorageEngine::VERSION;
+		my $ver_url = $uri . '/ver?upgrade_check=' . $ver;
+
+		my $json;
+
+		my $timed_out  = exec_timeout 3.0, sub { $json = get($ver_url); };
+
+		if($timed_out)
+		{
+			info "Peer: is_valid_peer($url): Timed out while getting $ver_url, not a valid peer URL\n";
+			return 0;
+		}
+
+		if(!$json)
+		{
+			info "Peer: is_valid_peer($url): Empty string from $ver_url, not a valid peer URL\n";
+			return 0;
+		}
+
+		my $data = decode_json($json);
+		return wantarray ? $data->{node_info}->{uuid} : $data->{node_info};
+	}
+
 	sub distance_metric { shift->{distance_metric} }
 	sub calc_distance_metric
 	{
@@ -475,13 +571,16 @@ package HashNet::StorageEngine::Peer;
 		#$t->{last_tx_sent} = $self->{rel_id};
 
 		#my $payload = "data=".$tr->to_bytes;
-		my $payload = "data=".uri_escape($tr->to_json);
-		
-		# We only need to include peer_url to prevent recursion (or at least try to prevent it)
-		if(HashNet::StorageEngine::PeerServer->active_server)
-		{
-			$payload .= '&peer_url='. $self->{known_as} if $self->{known_as};
-		}
+# 		my $payload = "data=".uri_escape($tr->to_json);
+# 		
+# 		# We only need to include peer_url to prevent recursion (or at least try to prevent it)
+# 		if(HashNet::StorageEngine::PeerServer->active_server)
+# 		{
+# 			$payload .= '&peer_url='. $self->{known_as} if $self->{known_as};
+# 		}
+
+
+
 		#my $payload_encrypted = $payload; #HashNet::Cipher->cipher->encrypt($payload);
 		
 # 		trace "Peer: push($url): Pushing transaction: $payload\n"
@@ -489,10 +588,18 @@ package HashNet::StorageEngine::Peer;
 
 		# LWP::Simple::Post
 		#my $r = post($url, $payload);
- 		my $final_url = $url . '?' . $payload;
+ 		#my $final_url = $url . '?' . $payload;
+
+		my $post_url = $url;
+		my $payload = {
+			data => $tr->to_json,
+			#uri_escape($tr->to_json);
+			peer_url => $self->{known_as},
+		};
+
  		
-		trace "Peer: push($url): Transaction URL: '$final_url'\n"
-			unless $tr->key =~ /^\/global\/nodes\//;
+# 		trace "Peer: push($url): Post URL: '$post_url'\n"
+# 			unless $tr->key =~ /^\/global\/nodes\//;
 			
 		# NOTE I disabled the usage of AE's http_get() routine because test results showed that it
 		# increased the latency of push transactions from 16ms to over 60ms when using http_get()
@@ -577,17 +684,42 @@ package HashNet::StorageEngine::Peer;
  			my $timeout = 999.0;
  			
  			my $result = undef;
+
+			if(!$self->{ua})
+			{
+				$self->{ua} = LWP::UserAgent->new;
+				$self->{ua}->timeout(10);
+				$self->{ua}->env_proxy;
+			}
 			
+			my $ua = $self->{ua};
+							
 			#trace "Peer: push($url): Starting push, timeout:$timeout\n";
 			my $start = time();
- 			my $timed_out = exec_timeout $timeout, sub{ $result = get($final_url) };
+			#trace "Peer: push(): post_ur:$post_url, payload:".Dumper($payload);
+ 			#my $timed_out = exec_timeout $timeout, sub{ $result = get($final_url) };
+			my $timed_out = exec_timeout $timeout, sub
+			{
+				my $response = $ua->post($post_url, $payload);
+
+				if ($response->is_success)
+				{
+					$result = $response->decoded_content;  # or whatever
+				}
+				else
+				{
+					debug "Peer: push($post_url): Error while posting: ", $response->status_line, "\n";
+					#die $response->status_line;
+				}
+			};
+			
  			my $end = time();
  			my $diff = $end - $start;
- 			#trace "Peer: push($url): Done push, timed_out?'$timed_out', diff:'$diff'\n"; 
+ 			#trace "Peer: push($url): Done push, timed_out?'$timed_out', diff:'$diff'\n";
 			
 			if($timed_out)
 			{
-				debug "Peer: push($url): Timeout while trying to push transaction to $final_url";
+				debug "Peer: push($url): Timeout while trying to push transaction to $post_url";
 				return 0;
 			}
 			
@@ -607,19 +739,10 @@ package HashNet::StorageEngine::Peer;
 				debug "Peer: push($url): Error pushing: value returned ($rx_uuid) does not match the UUID we pushed ($tr->{uuid})\n";
 				return 0;
 			}
-			
-			
-			# NOTE TODO - We must handle $timeout cases
-			# Possibly mark host as down and start queueing transactions for next successful connection.
-			# Also, probably should check $result to make sure the other host got the tx - if not,
-			# also start queueing/mark host as down
-			
 		}
 		
 		
 		# TODO: add a timestamp and global sequence number (??) to transactions!
-		
-		# TODO Check $r for confirmation
 		return 1;
 	}
 	

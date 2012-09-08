@@ -8,3 +8,4 @@
 	- E.g. Host A opens tunnel TO Host B (ports 3032 local and remote)
 	- Some time later, Host A can access Host B on 3032, BUT Host A is not getting any TX (last_seen is >X time) from Host B
 	- Therefore, restart the tunnel
+-Add integration to iptables top open up incoming port if needed
