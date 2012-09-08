@@ -248,6 +248,7 @@
 							var cd = new Date();//"Thu Sep 06 2012 14:12:06 GMT-0400 (EDT)");
 							//console.debug(cd);
 							//console.debug(map_list);
+							var numHosts = map_list.length;
 							
 							for(var idx in map_list)
 							{
@@ -295,7 +296,7 @@
 												agoList.push("Less than 1 sec");
 										}
 										
-										var timeAgo = agoList.join(", ")+" ago";
+										var timeAgo = agoList.length <= 0 ? "" : (agoList.join(", ") + " ago");
 										var maxMinutes = 1000 * 60 * 10;
 										
 										// This will prevent the 'yellow' style from showing
@@ -304,7 +305,7 @@
 											
 										var latencyString = 
 											link_info.host_down > 0 ? "<b style='color:red'>Host Down</b>" :
-											link_info.latency ? sprintf("%.04f ms latency",parseFloat(link_info.latency))
+											link_info.latency   > 0 ? sprintf("%d ms latency",Math.round(link_info.latency * 1000))
 											: "Unknown latency";
 										
 										
@@ -312,9 +313,12 @@
 										if(link_info.last_tx_sent)
 										{
 											var diff = node_info.cur_tx_id - link_info.last_tx_sent;
+											// We define maxLateTx as the numHosts*numHosts because the number of tx queued during a normal cycle could be *at least* as many as their are hosts,
+											// *2 update periods, *2 more for buffer
+											var maxLateTx = Math.pow(numHosts, 2) * 2 * 2;
 											//alert(diff);
-											txStatus = "<span style='color:" + (diff > 0 ? 'red' : 'green')+"'>" 
-												+ diff + (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
+											txStatus = "<span style='color:" + (Math.abs(diff) < maxLateTx ? 'red' : 'green')+"'>"
+												+ diff + '/' + maxLateTx + (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
 										}
 											
 										//console.debug(diffMs, diffDays,diffHrs,diffMins);

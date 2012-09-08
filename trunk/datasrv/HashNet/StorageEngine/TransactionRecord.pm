@@ -66,6 +66,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub local_timestamp { shift->{local_timestamp} }
 	sub is_valid { shift->{is_valid} }
 	sub rel_id { shift->{rel_id} }
+	sub merged_uuid_list { shift->{merged_uuid_list} || [] }
 
 	sub host_uuid()
 	{
@@ -164,6 +165,8 @@ package HashNet::StorageEngine::TransactionRecord;
 			timestamp => $self->{timestamp},
 			rel_id  => $self->{rel_id},
 			route_hist => \@hist,
+			# Only created by HashNet::StorageEngine->merge_transactions(), and used by PeerServer when receiving a merged tx
+			merged_uuid_list => $self->{merged_uuid_list},
 		}
 	}
 
@@ -228,6 +231,7 @@ package HashNet::StorageEngine::TransactionRecord;
 		$obj->{timestamp} = $hash->{timestamp};
 		$obj->{rel_id}    = $hash->{rel_id};
 		$obj->{route_hist} = $hash->{route_hist};
+		$obj->{merged_uuid_list} = $hash->{merged_uuid_list};
 		return $obj;
 	}
 };

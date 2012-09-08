@@ -57,7 +57,7 @@ package HashNet::StorageEngine;
 
 	our $VERSION = 0.0273;
 	
-	our $PEERS_CONFIG_FILE = ['/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
+	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
 	our $DEFAULT_DB_TXLOG  = '.txlog';
 #public:
@@ -137,14 +137,19 @@ package HashNet::StorageEngine;
 		{
 			my $known_as = undef;
 			($url, $known_as) = split /\s+/, $url if $url =~ /\s/;
-			
-			my $peer = HashNet::StorageEngine::Peer->new($self, $url, $known_as);
-			
+
 			#print STDERR "[DEBUG] StorageEngine: Loaded peer $url", ($known_as ? ", known as '$known_as' to remote peer" : ", no known as stored, will auto-discover"), ".\n";
-			
-			push @peer_tmp, $peer;
+
+			my $result = $self->add_peer($url, $known_as, 1); # 1= bulk_mode = e.g. don't _sort/_list peers
+			if($result <= 0)
+			{
+				debug "StorageEngine: Peer '$url' not added, result code '$result'\n";
+			}			
 		}
-		$self->{peers} = \@peer_tmp;
+
+		# Store the actual list of peers loaded from the file, NOT just the peers we're using this run
+		# because even though some peers may not be valid *right now* they may be valid *later* (at a different location, etc.)
+		$self->{stored_peer_list} = \@peers;
 	
 		$self->_sort_peers();
 		$self->_list_peers();
@@ -206,11 +211,11 @@ package HashNet::StorageEngine;
 		my $self = shift;
 		my $file = shift || $PEERS_CONFIG_FILE;
 		
-		my @list = @{ $self->peers };
+		my @list = @{ $self->{stored_peer_list} || [] };
 		return if !@list;
 		
 		open(F, ">$file") || die "Cannot write $file: $!";
-		print F $_->{url}, " ", ($_->{known_as} || ''), "\n" foreach @list;
+		print F $_, "\n" foreach @list;
 		close(F);
 		
 		return @list;
@@ -218,25 +223,53 @@ package HashNet::StorageEngine;
 	
 	sub add_peer
 	{
-		# TODO I've seen 127.0.0.1 wind up in peers.cfg (even though the LAN IP is also there) - so eventually we need to trace and figure out where that's coming from
-		# But for now, it's not causing any problems, thanks to other checks and stops in the code
-	
 		my $self = shift;
 		my $url = shift;
+		my $known_as = shift  || undef;
 		my $bulk_mode = shift || 0;
 
-		foreach my $p (@{ $self->peers })
+		my ($peer_uuid) = HashNet::StorageEngine::Peer->is_valid_peer($url);
+
+		# In "bulk mode", we assume the user knows what they're doing - so we dont reject a peer just because we don't get a UUID from it
+		if(!$bulk_mode)
 		{
-			if($p->{url} eq $url)
+			if(!$peer_uuid)
 			{
-				#print STDERR "[WARN]  StorageEngine: add_peer(): Not adding peer '$url' it's already in our list of peers.\n";
-				return -1; 
+				info "StorageEngine: add_peer(): Not adding peer '$url' because we could not get a valid UUID from it.\n";
+				return 0;
+			}
+		}
+
+		if($peer_uuid)
+		{
+			foreach my $p (@{ $self->peers })
+			{
+				#if($p->{url} eq $url ||
+				if(($p->node_uuid||'') eq ($peer_uuid||''))
+				{
+					#print STDERR "[WARN]  StorageEngine: add_peer(): Not adding peer '$url' it's already in our list of peers (matches existing peer $p->{url}, UUID $peer_uuid)\n";
+					info "StorageEngine: add_peer(): Not adding peer '$url' because it matches peer UUID for $p->{url} ($peer_uuid})\n";
+					return -1;
+				}
 			}
 		}
 		
-		my $peer = HashNet::StorageEngine::Peer->new($self, $url);
+		my $peer = HashNet::StorageEngine::Peer->new($self, $url, $known_as);
 		
 		push @{ $self->peers }, $peer;
+
+		my $found = 0;
+		foreach my $p (@{ $self->{stored_peer_list} || [] })
+		{
+			if($p eq $url)
+			{
+				$found = 1;
+				last;
+			}
+		}
+			
+		# This is the URL that actually gets stored in peers.cfg (or whatever the peer config file is)
+		push @{ $self->{stored_peer_list} || [] }, $url if !$found;
 
 		if(!$bulk_mode)
 		{
@@ -335,6 +368,45 @@ package HashNet::StorageEngine;
 		{
 			$self->_put_local($item->{key}, $item->{val});
 		}
+	}
+
+	sub merge_transactions
+	{
+		my $self = shift;
+		my ($tx_start, $tx_end, $peer_uuid) = @_;
+		my %namespace;
+		my @merged_uuids;
+		my $db = $self->tx_db;
+		for my $txid ($tx_start .. $tx_end-1)
+		{
+			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
+			#next if $peer_uuid && $tr->has_been_here($peer_uuid);
+			
+			if($tr->type eq 'TYPE_WRITE_BATCH')
+			{
+				my @batch = @{ $tr->data || [] };
+				foreach my $item (@batch)
+				{
+					$namespace{$item->{key}} = $item->{val};
+				}
+			}
+			else
+			{
+				$namespace{$tr->key} = $tr->data;
+			}
+			#push @merged_uuids, $tr->uuid;
+		}
+
+		my @batch_list;
+		foreach my $key (keys %namespace)
+		{
+			push @batch_list, { key => $key, val => $namespace{$key} };
+		}
+
+		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
+		$tr->update_route_history();
+		#$tr->{merged_uuid_list} = \@merged_uuids;
+		return $tr;
 	}
 	
 	sub put

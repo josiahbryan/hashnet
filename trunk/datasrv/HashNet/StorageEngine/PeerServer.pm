@@ -432,7 +432,11 @@ package HashNet::StorageEngine::PeerServer;
 		my $allow_localhost = $self->peer_port() != $other_peer_port ? 1:0;
 		#logmsg "DEBUG", "PeerServer: self->peer_port:", $self->peer_port(),", other_peer_port:$other_peer_port, \$allow_localhost:$allow_localhost \n";
 
-		my @discovery_urls = map { 'http://'.$_.':'.$self->peer_port().'/db' } grep { $allow_localhost ? 1 : $_ ne '127.0.0.1' } my_ip_list();
+		# TODO - We use $other_peer_port here instead of $self->peer_port() BECAUSE we ASSUME that if the other peer is not using the
+		# default peer port (our peer port), they are running over an SSH tunnel - and we ASSUME the SSH tunnel was set up with the same
+		# port fowarded on either side. *ASSUMPTIONS*
+		# TODO - Updated assumption - if *our port* is not the default port, then use OUR PORT when registering since we ASSUME we are testing on a non-normal port
+		my @discovery_urls = map { 'http://'.$_.':'.($self->peer_port() != $DEFAULT_PORT ? $self->peer_port() : $other_peer_port).'/db' } grep { $allow_localhost ? 1 : $_ ne '127.0.0.1' } my_ip_list();
 		
 		#@discovery_urls = ($peer->{known_as}) if $peer->{known_as};
 		
@@ -469,14 +473,9 @@ package HashNet::StorageEngine::PeerServer;
 		}
 		
 		# Write out the peer state and unlock
-		#$peer->update_end;
-		# When $locker goes out of scope, it will call update_end automatically
+		$peer->update_end;
+		# When $locker goes out of scope, it should call update_end automatically - but call it anyway to be safe
 		
-		# TODO Rewrite the peers list (maybe) to not store known_as since it's stored in state...? Maybe?
-		
-		# Save updated information about this peer, in case we set {known_as}
-		$self->engine->save_peers;
-
 		# Check against the peer to see if they have newer software than we have
 		#$self->update_software($peer);
 		
@@ -812,12 +811,44 @@ package HashNet::StorageEngine::PeerServer;
 					
 					$peer->put_peer_stats(); #$engine);
 					
-					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric}\n" # \t '$peer->{host_down}'\n"
-						unless $peer->{host_down};
+					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t '$peer->{host_down}'\n";
+					#	unless $peer->{host_down};
+					#next;
 					
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
 					{
 						$peer->{last_tx_sent} = -1 if !defined $peer->{last_tx_sent};
+# 						if(!defined $peer->{last_tx_sent} || $peer->{last_tx_sent} < 0)
+# 						{
+# 							#$peer->{last_tx_sent} = $cur_tx_id;
+# 							# Start NEW peers right at the head
+# 							# TODO should we NOT do this?
+# 							# Or just DUMP a whole batch of transactions to the peer?
+# 							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, merging into single batch transaction ...\n";
+# 							my $tr = $self->engine->merge_transactions(0, $cur_tx_id);
+# 
+# 							#die "Created merged transaction: ".Dumper($tr);
+# 
+# 							$peer->update_begin();
+# 							{
+# 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+# 								#logmsg 'TRACE', "Mark2\n";
+# 								if($peer->push($tr))
+# 								{
+# 									#logmsg 'TRACE', "Mark3\n";
+# 									$peer->{last_tx_sent} = $cur_tx_id;
+# 								}
+# 								else
+# 								{
+# 									$peer->{host_down} = 1;
+# 								}
+# 							}
+# 							#logmsg 'TRACE', "Mark4\n";
+# 							$peer->update_end();
+# 							
+# 							
+# 						}
+						
 						my $first_tx_needed = $peer->{last_tx_sent} + 1;
 						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
 
@@ -842,70 +873,94 @@ package HashNet::StorageEngine::PeerServer;
 							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 							next;
 						}
-						
-						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_tx_id)\n";
 
-						for my $idx ($first_tx_needed .. $cur_tx_id-1)
+						logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+						my $tr = $length == 1 ?
+							HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
+							$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $peer->node_uuid);
+
+						#die "Created merged transaction: ".Dumper($tr);
+
+						$peer->update_begin();
 						{
-							# peer->push() [below] could change this while we're in
-							# the for() loop, hence why we check this again
-							next if $peer->host_down;
-
-							my $data = $db->[$idx];
-							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
-
-							# This should never happen ... why does it?
-							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
+							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+							#logmsg 'TRACE', "Mark2\n";
+							if($peer->push($tr))
 							{
-								$tr->{rel_id} = $idx;
+								#logmsg 'TRACE', "Mark3\n";
+								$peer->{last_tx_sent} = $cur_tx_id;
 							}
-
-							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
-							
-							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_tx_id) (relid ".($tr->{rel_id} || -1).")\n";
-							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_tx_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
-
-							# Just for debugging...
-							$tr->_dump_route_hist;
-
-							# If this TR has laready been to this node, then don't bother sending it
-							if($tr->has_been_here($peer->node_uuid))
+							else
 							{
-								$peer->update_begin();
-
-								# Update the tx# in the peer so our code doesn't think this peer is behind
-								$peer->{last_tx_sent} = $idx;
-								
-								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_tx_id, uuid: $tr->{uuid}\n";
-
-								$peer->update_end();
-								next;
+								$peer->{host_down} = 1;
 							}
-
-							#logmsg 'TRACE', "Mark1\n";
-							#my $lock = $peer->update_begin();
-							#if($lock)
-							$peer->update_begin();
-							{
-								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_tx_id, uuid: $tr->{uuid} ...\n";
-								#logmsg 'TRACE', "Mark2\n";
-								if($peer->push($tr))
-								{
-									#logmsg 'TRACE', "Mark3\n";
-									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
-								}
-								else
-								{
-									$peer->{host_down} = 1;
-								}
-							}
-							#logmsg 'TRACE', "Mark4\n";
-							$peer->update_end();
-							#logmsg 'TRACE', "Mark5\n";
-
-							#last TX_SEND if $peer->host_down;
-
 						}
+						#logmsg 'TRACE', "Mark4\n";
+						$peer->update_end();
+						
+# 						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_tx_id)\n";
+# 
+# 						for my $idx ($first_tx_needed .. $cur_tx_id-1)
+# 						{
+# 							# peer->push() [below] could change this while we're in
+# 							# the for() loop, hence why we check this again
+# 							next if $peer->host_down;
+# 
+# 							my $data = $db->[$idx];
+# 							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
+# 
+# 							# This should never happen ... why does it?
+# 							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
+# 							{
+# 								$tr->{rel_id} = $idx;
+# 							}
+# 
+# 							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
+# 							
+# 							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_tx_id) (relid ".($tr->{rel_id} || -1).")\n";
+# 							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_tx_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
+# 
+# 							# Just for debugging...
+# 							$tr->_dump_route_hist;
+# 
+# 							# If this TR has laready been to this node, then don't bother sending it
+# 							if($tr->has_been_here($peer->node_uuid))
+# 							{
+# 								$peer->update_begin();
+# 
+# 								# Update the tx# in the peer so our code doesn't think this peer is behind
+# 								$peer->{last_tx_sent} = $idx;
+# 								
+# 								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_tx_id, uuid: $tr->{uuid}\n";
+# 
+# 								$peer->update_end();
+# 								next;
+# 							}
+# 
+# 							#logmsg 'TRACE', "Mark1\n";
+# 							#my $lock = $peer->update_begin();
+# 							#if($lock)
+# 							$peer->update_begin();
+# 							{
+# 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_tx_id, uuid: $tr->{uuid} ...\n";
+# 								#logmsg 'TRACE', "Mark2\n";
+# 								if($peer->push($tr))
+# 								{
+# 									#logmsg 'TRACE', "Mark3\n";
+# 									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
+# 								}
+# 								else
+# 								{
+# 									$peer->{host_down} = 1;
+# 								}
+# 							}
+# 							#logmsg 'TRACE', "Mark4\n";
+# 							$peer->update_end();
+# 							#logmsg 'TRACE', "Mark5\n";
+# 
+# 							#last TX_SEND if $peer->host_down;
+# 
+# 						}
 
 						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
 						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
@@ -1028,6 +1083,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "<ul>"
 				. "<li><a href='/db/peers'>Peers</a>"
 				. "<li><a href='/db/search'>Search</a>"
+				. "<li><a href='/db/viz'>Visualize</a>"
 				. "</ul>"
 				. "<hr/>"
 				. "<p><font size=-1><i>HashNet StorageEngine, Version <b>$HashNet::StorageEngine::VERSION</b>, date <b>". `date`. "</b></i></p>"
@@ -1160,8 +1216,8 @@ package HashNet::StorageEngine::PeerServer;
 			
 			my @peers = @{ $self->engine->peers };
 			
-			my $peer_tmp = $peers[0]; 
-			logmsg "TRACE", "PeerServer: /db/peers:  $peer_tmp->{url} \t $peer_tmp->{distance_metric} <-\n";
+			#my $peer_tmp = $peers[0]; 
+			#logmsg "TRACE", "PeerServer: /db/peers:  $peer_tmp->{url} \t $peer_tmp->{distance_metric} <-\n";
 
 			# Only will load changes if changed in another thread
 			my @rows = map { "" 
@@ -1736,7 +1792,10 @@ of software available.
 		else
 		{
 			# Flag it as seen - mark_tr_seen() will sync across all threads
-			$self->mark_tr_seen($tr);
+			#$self->mark_tr_seen($tr);
+			my @merged_uuid_list = @{ $tr->{merged_uuid_list} || [ $tr->uuid ]};
+			$self->tr_flag_db->{$_} = 1 foreach @merged_uuid_list;
+		
 
 			#NetMon::Util::unlock_file($self->{tr_cache_file});
 			$self->tr_flag_db->unlock;
@@ -2015,8 +2074,6 @@ of software available.
 			
 			foreach my $possible_url (@list_to_check)
 			{
-				next if ! is_valid_peer($possible_url);
-				
 				my $result = $self->engine->add_peer($possible_url);
 				
 				# >0 means it's added
@@ -2033,23 +2090,40 @@ of software available.
 			}
 			
 			# check local host - but need at least 1 possible URI to figure out what port to check
-			if(!$final_url && @list_to_check)
+			if(!$final_url && @possible)
 			{
-				my $local_uri = URI->new(shift @list_to_check);
+				my $local_uri = URI->new(shift @possible);
 				my $port = $local_uri->port;
 				my $local_url = "http://localhost:${port}/db";
-				my $node_info = is_valid_peer($local_url);
+				my $node_info = HashNet::StorageEngine::Peer->is_valid_peer($local_url);
 				if(!$node_info)
 				{
 					# No server on that port, warn?
+					logmsg "DEBUG", "PeerServer: resp_reg_peer(): Local URL '$local_url' not a valid peer\n";
 				}
-				elsif($node_info->{uuid} ne $self->node_info->{uuid})
+				elsif($node_info->{uuid} eq $self->node_info->{uuid})
 				{
-					$final_url = $local_url;
+					logmsg "DEBUG", "PeerServer: resp_reg_peer(): Local URL '$local_url' same as *this server instance*, not a valid peer\n";
 				}
 				else
 				{
-					# Local url not valid, warn?
+					logmsg "DEBUG", "PeerServer: resp_reg_peer(): Local URL '$local_url' valid, trying to add to engine\n";
+					#$final_url = $local_url;
+
+					my $result = $self->engine->add_peer($local_url);
+
+					# >0 means it's added
+					# <0 means it's already in the list
+					#  0 means we can't reach the host, not a good host
+					if($result != 0)
+					{
+						# We still want to set final_url even if its already in the list
+						# so that the peer knows that URL we expect them to provide
+						# for tr_push requests, etc.
+						$final_url = $local_url;
+						#last;
+					}
+					
 				}
 			}
 			
@@ -2124,48 +2198,6 @@ of software available.
 # 		});
 		
 		1;
-	}
-	
-	sub is_valid_peer
-	{
-		my $url  = shift || '';
-		
-		my $uri  = URI->new($url)->canonical;
-		if(!$uri->can('host'))
-		{
-			info "PeerServer: is_valid_peer($url): Unable to check url '$url' - URI module can't parse it.\n";
-			return 0;
-		}
-		
-		my $host = $uri->host;
-		
-		if(!$pinger->ping($host, $PING_TIMEOUT))
-		{
-			info "PeerServer: is_valid_peer($url): Not adding peer '$url' because cannot ping $host within $PING_TIMEOUT seconds\n";
-			return 0;
-		}
-		
-		my $ver = $HashNet::StorageEngine::VERSION;
-		my $ver_url = $uri . '/ver?upgrade_check=' . $ver;
-		
-		my $json;
-		
-		my $timed_out  = HashNet::StorageEngine::Peer::exec_timeout(3.0, sub { $json = get($ver_url); });
-		
-		if($timed_out)
-		{
-			info "PeerServer: is_valid_peer($url): Timed out while getting $ver_url, marking invalid\n";
-			return 0;
-		}
-
-		if(!$json)
-		{
-			info "PeerServer: is_valid_peer($url): Empty string from $ver_url, marking invalid\n";
-			return 0;
-		}
-		
-		my $data = decode_json($json);
-		return $data->{node_info};
 	}
 	
 	sub searchlist_to_tree
