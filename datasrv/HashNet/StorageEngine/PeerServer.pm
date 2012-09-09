@@ -811,8 +811,8 @@ package HashNet::StorageEngine::PeerServer;
 					
 					$peer->put_peer_stats(); #$engine);
 					
-					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t '$peer->{host_down}'\n";
-					#	unless $peer->{host_down};
+					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t" # '$peer->{host_down}'\n"
+						unless $peer->{host_down};
 					#next;
 					
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
@@ -1249,6 +1249,7 @@ package HashNet::StorageEngine::PeerServer;
 		# Register our handlers - each is prefixed with '/db/'
 		my %dispatch = (
 			'tr_push'  => \&resp_tr_push,
+			'tr_poll'  => \&resp_tr_poll,
 			'get'      => \&resp_get,
 			'put'      => \&resp_put,
 			'ver'      => \&resp_ver,
@@ -1845,6 +1846,81 @@ of software available.
 		}
 		
 		http_respond($res, 'text/plain', $tr->uuid); #"Received $tr: " . $tr->key .  " => " . ($tr->data || ''));
+	}
+
+	sub resp_tr_poll
+	{
+		# AnyEvent::HTTPD calls this as a callback, doesn't provide $self
+		my $self = $ActivePeerServer;
+		my ($req, $res) = @_;
+
+		my $db = $self->engine->tx_db;
+		my $cur_tx_id = $db->length() || 0;
+
+		my $node_uuid    = http_param($req, 'node_uuid') || '';
+		my $last_tx_recd = http_param($req, 'last_tx') || -1;
+
+		if(http_param($req, 'get_cur_tx_id'))
+		{
+			debug "PeerServer: resp_tr_poll(): $node_uuid: Just getting cur_tx_id\n";
+			return http_respond($res, 'application/octet-stream', '{cur_tx_id:'.$cur_tx_id.'}');
+		}
+
+		my $first_tx_needed = $last_tx_recd + 1;
+		logmsg 'TRACE', "PeerServer: resp_tr_poll(): $node_uuid: last_tx_recd: $last_tx_recd, cur_tx_id: $cur_tx_id\n";
+
+		if($cur_tx_id < 0)
+		{
+			debug "PeerServer: resp_tr_poll(): $node_uuid: No transactions in database, not transmitting anything\n";
+			return http_respond($res, 'application/octet-stream', '{is_current:true}');
+			return;
+		}
+
+		my $length = $cur_tx_id - $first_tx_needed;
+		if($length <= 0)
+		{
+			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			return http_respond($res, 'application/octet-stream', '{is_current:true}');
+		}
+
+		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+
+		my $tr = $length == 1 ?
+			HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
+			$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
+
+		#die "Created merged transaction: ".Dumper($tr);
+
+		my $peer = undef;
+		my @peers = @{ $self->engine->peers };
+		foreach my $tmp (@peers)
+		{
+			if($tmp->node_uuid eq $node_uuid)
+			{
+				$peer = $tmp;
+				last;
+			}
+		}
+		
+		if($peer)
+		{
+			$peer->update_begin();
+			$peer->{last_tx_sent} = $cur_tx_id;
+
+			if($peer->{host_down})
+			{
+				logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: Peer $peer->{url} was down, marking up\n";
+				$peer->{host_down} = 0;
+			}
+			$peer->update_end();
+		}
+			
+		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+
+
+		#logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
+		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
+		return http_respond($res, 'application/octet-stream', encode_json { batch => $tr->to_hash, cur_tx_id => $cur_tx_id } );
 	}
 
 	sub resp_get
