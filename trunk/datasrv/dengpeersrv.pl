@@ -5,6 +5,7 @@ use strict;
 use common::sense;
 
 use Getopt::Std;
+use HashNet::Util::Logging;
 use HashNet::StorageEngine;
 use HashNet::StorageEngine::PeerServer;
 use Cwd qw/abs_path/;
@@ -124,7 +125,7 @@ if($opts{k})
 # 	$HashNet::StorageEngine::VERSION = $ver;
 # }
 
-print "$0: Creating StorageEngine...\n";
+info "$0: Creating StorageEngine...\n";
 my $con = HashNet::StorageEngine->new(
 	config	=> $opts{c},
 	db_root	=> $opts{d}
@@ -132,10 +133,10 @@ my $con = HashNet::StorageEngine->new(
 
 if(-f $bin_file)
 {
-	print "$0: Using bin_file to '$bin_file'\n";
+	info "$0: Using bin_file to '$bin_file'\n";
 }
 
-print "$0: Creating PeerServer...\n";
+info "$0: Creating PeerServer...\n";
 my $srv = HashNet::StorageEngine::PeerServer->new(
 	engine	=> $con,
 	port	=> $opts{p},
@@ -143,7 +144,7 @@ my $srv = HashNet::StorageEngine::PeerServer->new(
 	bin_file => $bin_file, 
 );
 
-print "$0: Running PeerServer...\n";
+info "$0: Running PeerServer...\n";
 $srv->run;
 
 
