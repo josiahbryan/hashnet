@@ -551,6 +551,80 @@ package HashNet::StorageEngine::Peer;
 		
 		return $latency;
 	}
+
+	sub poll
+	{
+		my $self = shift;
+		my $url = $self->{url};
+		$url =~ s/\/$//g;
+		$url .= '/tr_poll';
+
+		my $my_uuid = HashNet::StorageEngine::PeerServer->node_info->{uuid};
+		my $last_tx = $self->{last_tx_recd};
+
+		$url .= '?last_tx='.$last_tx;
+		$url .= '&node_uuid='.$my_uuid;
+
+		my $json;
+
+		trace "Peer: poll(): Polling peer at url '$url'\n";
+
+		# Give a VERY generous timeout because if we are very far behind, it
+		# may take the peer a long time to compile the transaction
+		my $timed_out  = exec_timeout 60.0 * 10, sub { $json = get($url); };
+
+		if($timed_out)
+		{
+			info "Peer: poll(): Timed out while getting $url, not a valid peer URL\n";
+			$self->update_begin;
+			$self->{host_down} = 1;
+			$self->update_end;
+			return 0;
+		}
+
+		if(!$json)
+		{
+			info "Peer: poll(): Empty string from $url, not a valid peer URL\n";
+			$self->update_begin;
+			$self->{host_down} = 1;
+			$self->update_end;
+			return 0;
+		}
+
+		my $data = decode_json($json);
+
+		$self->update_begin;
+		if($self->{host_donw})
+		{
+			info "Peer: poll(): Peer was down, marking up\n";
+			$self->{host_down} = 0;
+		}
+		$self->{last_tx_recd} = $data->{cur_tx_id};
+		$self->update_end;
+
+		my $tr = $data->{batch};
+
+		# If the tr is valid...
+		if(defined $tr->key)
+		{
+			logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
+				unless $tr->key =~ /^\/global\/nodes\//;
+
+			my $eng = $self->engine;
+
+			# We dont use eng->put() here because it constructs a new tr
+			if($tr->type eq 'TYPE_WRITE_BATCH')
+			{
+				$eng->_put_local_batch($tr->data);
+			}
+			else
+			{
+				$eng->_put_local($tr->key, $tr->data);
+			}
+
+			$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
+		}
+	}
 	
 	# TODO: Add support for a 'tr_pull' method to pull transactions if *this* host cannot receive tr_push's
 	sub push
