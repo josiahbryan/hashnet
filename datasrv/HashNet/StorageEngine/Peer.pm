@@ -594,7 +594,7 @@ package HashNet::StorageEngine::Peer;
 		my $data = decode_json($json);
 
 		$self->update_begin;
-		if($self->{host_donw})
+		if($self->{host_down})
 		{
 			info "Peer: poll(): Peer was down, marking up\n";
 			$self->{host_down} = 0;
@@ -602,7 +602,7 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd} = $data->{cur_tx_id};
 		$self->update_end;
 
-		my $tr = $data->{batch};
+		my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data->{batch});
 
 		# If the tr is valid...
 		if(defined $tr->key)
