@@ -757,7 +757,7 @@ package HashNet::StorageEngine::PeerServer;
 		# Fork off a event loop to fire off timed events
 		if(my $pid = fork)
 		{
-			print "[TRACE] PeerServer: Forked timer loop as pid $pid\n";
+			trace "PeerServer: Forked timer loop as pid $pid\n";
 			$self->{timer_loop_pid} = $pid; # for use in request_restart()
 		}
 		else
@@ -770,6 +770,8 @@ package HashNet::StorageEngine::PeerServer;
 			# Register with peers *after* the event loop starts
 			# so that if we do have to upgrade, $self->bin_file
 			# is set so we know where to store the software
+			
+			# TODO DisabledForTesting
 			my $timer; $timer = AnyEvent->timer(after => 0.1, cb => sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
@@ -796,25 +798,22 @@ package HashNet::StorageEngine::PeerServer;
 				
 				foreach my $peer (@peers)
 				{
-					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Update begin ...\n";
+					$peer->load_changes();
 					
-					$peer->update_begin();
-
 					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Locked, checking ...\n";
 					
 					# Make sure the peer is online, check latency, etc
-					$peer->update_distance_metric();
-
-					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Check done, unlocking\n";
-
-					$peer->update_end();
-
+					
+					# TODO DisabledForTesting
+					#$peer->update_distance_metric();
+					
 					$peer->poll();
 					
-					$peer->put_peer_stats(); #$engine);
+					# TODO DisabledForTesting
+					#$peer->put_peer_stats(); #$engine);
 					
-					logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t" # '$peer->{host_down}'\n"
-						unless $peer->{host_down};
+					#logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t\n" # '$peer->{host_down}'\n"
+					#	unless $peer->{host_down};
 					#next;
 					
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
@@ -964,37 +963,39 @@ package HashNet::StorageEngine::PeerServer;
 # # 
 # # 						}
 
+						# TODO DisabledForTesting
 						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
-						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
-						$self->update_software($peer);
-						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
+						#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+						#$self->update_software($peer);
+						#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
 					}
 				}
 
-				$self->engine->begin_batch_update();
-				{
-					my $inf  = $self->{node_info};
-					my $uuid = $inf->{uuid};
-					my $key_path = '/global/nodes/'. $uuid;
-					
-					if(-f $self->{node_info_changed_flag_file})
-					{
-						unlink $self->{node_info_changed_flag_file};
-						#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-						foreach my $key (keys %$inf)
-						{
-							my $put_key = $key_path . '/' . $key;
-							my $val = $inf->{$key};
-							#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-							$self->engine->put($put_key, $val);
-						}
-					}
-				
-					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
-						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-					
-				}
-				$self->engine->end_batch_update();
+# TODO DisabledForTesting
+# 				$self->engine->begin_batch_update();
+# 				{
+# 					my $inf  = $self->{node_info};
+# 					my $uuid = $inf->{uuid};
+# 					my $key_path = '/global/nodes/'. $uuid;
+# 					
+# 					if(-f $self->{node_info_changed_flag_file})
+# 					{
+# 						unlink $self->{node_info_changed_flag_file};
+# 						#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+# 						foreach my $key (keys %$inf)
+# 						{
+# 							my $put_key = $key_path . '/' . $key;
+# 							my $val = $inf->{$key};
+# 							#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+# 							$self->engine->put($put_key, $val);
+# 						}
+# 					}
+# 				
+# 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
+# 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
+# 					
+# 				}
+# 				$self->engine->end_batch_update();
 
 				undef $w;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
@@ -1061,7 +1062,7 @@ package HashNet::StorageEngine::PeerServer;
 		foreach my $key (keys %HTTP_FILE_RESOURCES)
 		{
 			my $abs_file = abs_path($root.$HTTP_FILE_RESOURCES{$key});
-			info "Registering $abs_file as path '$key'\n";
+			#info "Registering $abs_file as path '$key'\n";
 			$httpd->mount($key => { handler => http_send_file($abs_file) });
 		};
 		
@@ -1865,7 +1866,7 @@ of software available.
 		if(http_param($req, 'get_cur_tx_id'))
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: Just getting cur_tx_id\n";
-			return http_respond($res, 'application/octet-stream', '{cur_tx_id:'.$cur_tx_id.'}');
+			return http_respond($res, 'application/octet-stream', '{"cur_tx_id":'.$cur_tx_id.'}');
 		}
 
 		my $first_tx_needed = $last_tx_recd + 1;
@@ -1874,7 +1875,7 @@ of software available.
 		if($cur_tx_id < 0)
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: No transactions in database, not transmitting anything\n";
-			return http_respond($res, 'application/octet-stream', '{is_current:true}');
+			return http_respond($res, 'application/octet-stream', '{"is_current":true}');
 			return;
 		}
 
@@ -1882,7 +1883,7 @@ of software available.
 		if($length <= 0)
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
-			return http_respond($res, 'application/octet-stream', '{is_current:true}');
+			return http_respond($res, 'application/octet-stream', '{"is_current":true}');
 		}
 
 		if($length > 500)

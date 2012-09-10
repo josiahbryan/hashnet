@@ -30,6 +30,7 @@ package HashNet::StorageEngine::Peer;
 	use HashNet::Util::OnDestroy; # exports ondestroy($coderef)
 	#use Net::Ping::External qw(ping);
 	use Data::Dumper;
+	use YAML::Tiny; # for load/save state
 	
 	# This is included ONLY so buildpacked.pl picks it up for use by JSON on some older linux boxen
 	use JSON::backportPP;
@@ -114,7 +115,7 @@ package HashNet::StorageEngine::Peer;
 		$root .= '/' if $root !~ /\/$/;
 		
 		# TODO is this name going to cause problems? Does it need to be more host-specific?
-		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->node_uuid).'.state';
+		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->url).'.state';
 	}
 
 	sub load_state
@@ -123,12 +124,24 @@ package HashNet::StorageEngine::Peer;
 		my $file = $self->state_file;
 		
 		my $state = {};
-		#debug "Peer: Loading state file '$file' in pid $$\n";
+		debug "Peer: Loading state file '$file' in pid $$\n";
 		{
 			local $@;
 			eval
 			{
-				$state = retrieve($file) if -f $file && (stat($file))[7] > 0;
+				#$state = retrieve($file) if -f $file && (stat($file))[7] > 0;
+				
+				#system("cat $file");
+				
+				if(-f $file && (stat($file))[7] > 0)
+				{
+					#$state = YAML::Tiny::LoadFile($file);
+					$state = retrieve($file);
+				}
+				else
+				{
+					die "File $file does not exist or is empty";
+				}
 			};
 			
 			warn "[WARN]  Peer: Error loading state from '$file': $@" if $@;
@@ -142,7 +155,7 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd}	 = $state->{last_tx_recd} || -1;
 		$self->{distance_metric} = $state->{distance_metric};
 		
-		#trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_sent} (+in)\n";
+		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_recd} (+in)\n";
 	}
 
 	sub _lock_state
@@ -277,10 +290,12 @@ package HashNet::StorageEngine::Peer;
 			distance_metric => $self->distance_metric,
 		};
 		
-		#trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_sent} (-out)\n";
+		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
 		#print_stack_trace();
 
 		nstore($state, $file);
+		#YAML::Tiny::DumpFile($file, $state);
+		#system("cat $file");
 	}
 
 	sub version	{ shift->{version} }
@@ -316,7 +331,10 @@ package HashNet::StorageEngine::Peer;
 	sub update_distance_metric
 	{
 		my $self = shift;
+		
+		$self->update_begin();
 		$self->{distance_metric} = $self->calc_distance_metric();
+		$self->update_end();
 	}
 	
 	# put_peer_stats was part of update_distance_metric
@@ -559,6 +577,8 @@ package HashNet::StorageEngine::Peer;
 		$url =~ s/\/$//g;
 		$url .= '/tr_poll';
 
+		$self->load_changes;
+		
 		my $my_uuid = HashNet::StorageEngine::PeerServer->node_info->{uuid};
 		my $last_tx = $self->{last_tx_recd};
 
@@ -591,7 +611,19 @@ package HashNet::StorageEngine::Peer;
 			return 0;
 		}
 
-		my $data = decode_json($json);
+		my $data;
+		undef $@;
+		
+		eval { $data = decode_json($json); };
+		
+		if($@)
+		{
+			info "Peer: poll(): Invalid JSON received: $@";
+			$self->update_begin;
+			$self->{host_down} = 1;
+			$self->update_end;
+			return 0;
+		}
 
 		$self->update_begin;
 		if($self->{host_down})
@@ -599,7 +631,11 @@ package HashNet::StorageEngine::Peer;
 			info "Peer: poll(): Peer was down, marking up\n";
 			$self->{host_down} = 0;
 		}
-		$self->{last_tx_recd} = $data->{cur_tx_id};
+		
+		if(defined $data->{cur_tx_id})
+		{
+			$self->{last_tx_recd} = $data->{cur_tx_id};
+		}
 		$self->update_end;
 
 		my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data->{batch});
@@ -607,8 +643,10 @@ package HashNet::StorageEngine::Peer;
 		# If the tr is valid...
 		if(defined $tr->key)
 		{
-			logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
-				unless $tr->key =~ /^\/global\/nodes\//;
+			#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
+			#	unless $tr->key =~ /^\/global\/nodes\//;
+			
+			logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n";
 
 			my $eng = $self->engine;
 

@@ -619,8 +619,8 @@ package HashNet::StorageEngine;
 		my $key_file = $key_path . '/data';
 		store({ data => $val}, $key_file);
 
-		trace "StorageEngine: _put_local(): key_file: $key_file\n"
-			unless $key =~ /^\/global\/nodes\//;
+		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
+		#	unless $key =~ /^\/global\/nodes\//;
 
 		return $t;
 	}
