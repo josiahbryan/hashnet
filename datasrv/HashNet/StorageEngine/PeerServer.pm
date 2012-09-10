@@ -808,6 +808,8 @@ package HashNet::StorageEngine::PeerServer;
 					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Check done, unlocking\n";
 
 					$peer->update_end();
+
+					$peer->poll();
 					
 					$peer->put_peer_stats(); #$engine);
 					
@@ -817,150 +819,150 @@ package HashNet::StorageEngine::PeerServer;
 					
 					if(!$peer->host_down && !$self->is_this_peer($peer->url))
 					{
-						$peer->{last_tx_sent} = -1 if !defined $peer->{last_tx_sent};
-# 						if(!defined $peer->{last_tx_sent} || $peer->{last_tx_sent} < 0)
+# 						$peer->{last_tx_sent} = -1 if !defined $peer->{last_tx_sent};
+# # 						if(!defined $peer->{last_tx_sent} || $peer->{last_tx_sent} < 0)
+# # 						{
+# # 							#$peer->{last_tx_sent} = $cur_tx_id;
+# # 							# Start NEW peers right at the head
+# # 							# TODO should we NOT do this?
+# # 							# Or just DUMP a whole batch of transactions to the peer?
+# # 							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, merging into single batch transaction ...\n";
+# # 							my $tr = $self->engine->merge_transactions(0, $cur_tx_id);
+# # 
+# # 							#die "Created merged transaction: ".Dumper($tr);
+# # 
+# # 							$peer->update_begin();
+# # 							{
+# # 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+# # 								#logmsg 'TRACE', "Mark2\n";
+# # 								if($peer->push($tr))
+# # 								{
+# # 									#logmsg 'TRACE', "Mark3\n";
+# # 									$peer->{last_tx_sent} = $cur_tx_id;
+# # 								}
+# # 								else
+# # 								{
+# # 									$peer->{host_down} = 1;
+# # 								}
+# # 							}
+# # 							#logmsg 'TRACE', "Mark4\n";
+# # 							$peer->update_end();
+# # 							
+# # 							
+# # 						}
+# 						
+# 						my $first_tx_needed = $peer->{last_tx_sent} + 1;
+# 						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
+# 
+# 						if($cur_tx_id < 0)
 # 						{
-# 							#$peer->{last_tx_sent} = $cur_tx_id;
-# 							# Start NEW peers right at the head
-# 							# TODO should we NOT do this?
-# 							# Or just DUMP a whole batch of transactions to the peer?
-# 							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, merging into single batch transaction ...\n";
-# 							my $tr = $self->engine->merge_transactions(0, $cur_tx_id);
-# 
-# 							#die "Created merged transaction: ".Dumper($tr);
-# 
-# 							$peer->update_begin();
-# 							{
-# 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from 0 to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
-# 								#logmsg 'TRACE', "Mark2\n";
-# 								if($peer->push($tr))
-# 								{
-# 									#logmsg 'TRACE', "Mark3\n";
-# 									$peer->{last_tx_sent} = $cur_tx_id;
-# 								}
-# 								else
-# 								{
-# 									$peer->{host_down} = 1;
-# 								}
-# 							}
-# 							#logmsg 'TRACE', "Mark4\n";
-# 							$peer->update_end();
-# 							
-# 							
+# 							debug "PeerServer: No transactions in database, not transmitting anything\n";
+# 							next;
 # 						}
-						
-						my $first_tx_needed = $peer->{last_tx_sent} + 1;
-						#logmsg 'TRACE', "PeerServer: Last tx sent: $peer->{last_tx_sent}, first_tx_needed: $first_tx_needed\n";
-
-						if($cur_tx_id < 0)
-						{
-							debug "PeerServer: No transactions in database, not transmitting anything\n";
-							next;
-						}
-						
-						# Logically, this shouldn't happen - if it does, it means the txlog was probably
-						# deleted but the peer state was not. So, try to auto-fix the peer state.
-						if(($peer->{last_tx_sent}||0) > $cur_tx_id)
-						{
-							$peer->update_begin();
-							$peer->{last_tx_sent} = $cur_tx_id;
-							$peer->update_end();
-						}
-
-						my $length = $cur_tx_id - $first_tx_needed;
-						if($length <= 0)
-						{
-							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
-							next;
-						}
-
-						logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
-						my $tr = $length == 1 ?
-							HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
-							$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $peer->node_uuid);
-
-						#die "Created merged transaction: ".Dumper($tr);
-
-						$peer->update_begin();
-						{
-							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
-							#logmsg 'TRACE', "Mark2\n";
-							if($peer->push($tr))
-							{
-								#logmsg 'TRACE', "Mark3\n";
-								$peer->{last_tx_sent} = $cur_tx_id;
-							}
-							else
-							{
-								$peer->{host_down} = 1;
-							}
-						}
-						#logmsg 'TRACE', "Mark4\n";
-						$peer->update_end();
-						
-# 						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_tx_id)\n";
-# 
-# 						for my $idx ($first_tx_needed .. $cur_tx_id-1)
+# 						
+# 						# Logically, this shouldn't happen - if it does, it means the txlog was probably
+# 						# deleted but the peer state was not. So, try to auto-fix the peer state.
+# 						if(($peer->{last_tx_sent}||0) > $cur_tx_id)
 # 						{
-# 							# peer->push() [below] could change this while we're in
-# 							# the for() loop, hence why we check this again
-# 							next if $peer->host_down;
-# 
-# 							my $data = $db->[$idx];
-# 							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
-# 
-# 							# This should never happen ... why does it?
-# 							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
-# 							{
-# 								$tr->{rel_id} = $idx;
-# 							}
-# 
-# 							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
-# 							
-# 							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_tx_id) (relid ".($tr->{rel_id} || -1).")\n";
-# 							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_tx_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
-# 
-# 							# Just for debugging...
-# 							$tr->_dump_route_hist;
-# 
-# 							# If this TR has laready been to this node, then don't bother sending it
-# 							if($tr->has_been_here($peer->node_uuid))
-# 							{
-# 								$peer->update_begin();
-# 
-# 								# Update the tx# in the peer so our code doesn't think this peer is behind
-# 								$peer->{last_tx_sent} = $idx;
-# 								
-# 								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_tx_id, uuid: $tr->{uuid}\n";
-# 
-# 								$peer->update_end();
-# 								next;
-# 							}
-# 
-# 							#logmsg 'TRACE', "Mark1\n";
-# 							#my $lock = $peer->update_begin();
-# 							#if($lock)
 # 							$peer->update_begin();
-# 							{
-# 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_tx_id, uuid: $tr->{uuid} ...\n";
-# 								#logmsg 'TRACE', "Mark2\n";
-# 								if($peer->push($tr))
-# 								{
-# 									#logmsg 'TRACE', "Mark3\n";
-# 									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
-# 								}
-# 								else
-# 								{
-# 									$peer->{host_down} = 1;
-# 								}
-# 							}
-# 							#logmsg 'TRACE', "Mark4\n";
+# 							$peer->{last_tx_sent} = $cur_tx_id;
 # 							$peer->update_end();
-# 							#logmsg 'TRACE', "Mark5\n";
-# 
-# 							#last TX_SEND if $peer->host_down;
-# 
 # 						}
+# 
+# 						my $length = $cur_tx_id - $first_tx_needed;
+# 						if($length <= 0)
+# 						{
+# 							#debug "PeerServer: Peer $peer->{url} is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+# 							next;
+# 						}
+# 
+# 						logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+# 						my $tr = $length == 1 ?
+# 							HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
+# 							$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $peer->node_uuid);
+# 
+# 						#die "Created merged transaction: ".Dumper($tr);
+# 
+# 						$peer->update_begin();
+# 						{
+# 							logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs ALL transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+# 							#logmsg 'TRACE', "Mark2\n";
+# 							if($peer->push($tr))
+# 							{
+# 								#logmsg 'TRACE', "Mark3\n";
+# 								$peer->{last_tx_sent} = $cur_tx_id;
+# 							}
+# 							else
+# 							{
+# 								$peer->{host_down} = 1;
+# 							}
+# 						}
+# 						#logmsg 'TRACE', "Mark4\n";
+# 						$peer->update_end();
+# 						
+# # 						logmsg 'DEBUG', "PeerServer: Sending $length transactions to $peer->{url} (first_tx_needed: $first_tx_needed, current num: $cur_tx_id)\n";
+# # 
+# # 						for my $idx ($first_tx_needed .. $cur_tx_id-1)
+# # 						{
+# # 							# peer->push() [below] could change this while we're in
+# # 							# the for() loop, hence why we check this again
+# # 							next if $peer->host_down;
+# # 
+# # 							my $data = $db->[$idx];
+# # 							my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
+# # 
+# # 							# This should never happen ... why does it?
+# # 							if(!$tr->{rel_id} || $tr->{rel_id} < 0)
+# # 							{
+# # 								$tr->{rel_id} = $idx;
+# # 							}
+# # 
+# # 							#logmsg 'DEBUG', "PeerServer: Loaded tx $tr->{uuid}\n";
+# # 							
+# # 							#logmsg 'DEBUG', "PeerServer: Sending tx # $idx (up to $cur_tx_id) (relid ".($tr->{rel_id} || -1).")\n";
+# # 							logmsg 'DEBUG', "PeerServer: Tx # $idx/$cur_tx_id: $tr->{key} \t => ", ("'$tr->{data}'"||"(undef)"), "\n";
+# # 
+# # 							# Just for debugging...
+# # 							$tr->_dump_route_hist;
+# # 
+# # 							# If this TR has laready been to this node, then don't bother sending it
+# # 							if($tr->has_been_here($peer->node_uuid))
+# # 							{
+# # 								$peer->update_begin();
+# # 
+# # 								# Update the tx# in the peer so our code doesn't think this peer is behind
+# # 								$peer->{last_tx_sent} = $idx;
+# # 								
+# # 								logmsg 'DEBUG', "PeerServer: *** Peer '$peer->{url}' already seen tx # $idx/$cur_tx_id, uuid: $tr->{uuid}\n";
+# # 
+# # 								$peer->update_end();
+# # 								next;
+# # 							}
+# # 
+# # 							#logmsg 'TRACE', "Mark1\n";
+# # 							#my $lock = $peer->update_begin();
+# # 							#if($lock)
+# # 							$peer->update_begin();
+# # 							{
+# # 								logmsg 'DEBUG', "PeerServer: +++ Peer '$peer->{url}' needs tx # $idx/$cur_tx_id, uuid: $tr->{uuid} ...\n";
+# # 								#logmsg 'TRACE', "Mark2\n";
+# # 								if($peer->push($tr))
+# # 								{
+# # 									#logmsg 'TRACE', "Mark3\n";
+# # 									$peer->{last_tx_sent} = $idx; #$tr->{rel_id};
+# # 								}
+# # 								else
+# # 								{
+# # 									$peer->{host_down} = 1;
+# # 								}
+# # 							}
+# # 							#logmsg 'TRACE', "Mark4\n";
+# # 							$peer->update_end();
+# # 							#logmsg 'TRACE', "Mark5\n";
+# # 
+# # 							#last TX_SEND if $peer->host_down;
+# # 
+# # 						}
 
 						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
 						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
@@ -1881,6 +1883,13 @@ of software available.
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 			return http_respond($res, 'application/octet-stream', '{is_current:true}');
+		}
+
+		if($length > 500)
+		{
+			$length = 500;
+			$cur_tx_id = $first_tx_needed + $length;
+			debug "PeerServer: resp_tr_poll(): $node_uuid: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
 		}
 
 		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
