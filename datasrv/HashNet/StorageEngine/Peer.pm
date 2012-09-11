@@ -591,7 +591,11 @@ package HashNet::StorageEngine::Peer;
 
 		# Give a VERY generous timeout because if we are very far behind, it
 		# may take the peer a long time to compile the transaction
-		my $timed_out  = exec_timeout 60.0 * 10, sub { $json = get($url); };
+		#my $timed_out  = exec_timeout 60.0 * 10, sub { $json = get($url); };
+		
+		# 10 min was too generous....
+		my $timed_out  = exec_timeout 60.0, sub { $json = get($url); };
+		
 
 		if($timed_out)
 		{
@@ -670,7 +674,7 @@ package HashNet::StorageEngine::Peer;
 					#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
 					#	unless $tr->key =~ /^\/global\/nodes\//;
 
-					logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n";#.Dumper($tr);
+					logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n".Dumper($tr);
 
 					my $eng = $self->engine;
 

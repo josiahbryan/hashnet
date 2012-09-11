@@ -235,6 +235,13 @@ sub add_module
 		add_payload(scalar locate('AnyEvent/constants.pl'));
 	}
 	
+	if($file_key eq 'version.pm')
+	{
+		# Causes odd version::vxs errors if we package this in the file
+		print "$0: NOT adding version.pm\n";
+		return 0;
+	}
+	
 	my $other_key = shift; # just for output
 	
 	my $mod = $noncore_mod_info{$file_key} || die "Invalid file key: '$file_key'";
