@@ -202,7 +202,9 @@
 								var nodeInfoHtml = ""
 									+ "<b>" + node_info.name + "</b><br>"
 									+ geoString + "<br>"
-									+ "<i>" + node_info.hashnet_ver + "</i>";
+									+ "<i>" + node_info.hashnet_ver
+										+ (node_info.port != 8031 ? ":" + node_info.port : "") // only show port if not default hashnet port
+										+ "</i>";
 								
 								//var $shape = $('<div class="shape" data-shape="rectangle" style="left:'+nx+'px;top:'+ny+'px;">'+genNameHtml(node_info.name)+'</div>');
 								var $shape = $('<div class="shape" data-shape="circle" style="left:'+nx+'px;top:'+ny+'px;">'+verticalCenter(nodeInfoHtml)+'</div>');
@@ -300,8 +302,8 @@
 										var maxMinutes = 1000 * 60 * 10;
 										
 										// This will prevent the 'yellow' style from showing
-										if(diffMs > maxMinutes)
-											link_info.host_down = 1;
+										//if(diffMs > maxMinutes)
+										//	link_info.host_down = 1;
 											
 										var latencyString = 
 											link_info.host_down > 0 ? "<b style='color:red'>Host Down</b>" :
@@ -315,10 +317,12 @@
 											var diff = node_info.cur_tx_id - link_info.last_tx_sent;
 											// We define maxLateTx as the numHosts*numHosts because the number of tx queued during a normal cycle could be *at least* as many as their are hosts,
 											// *2 update periods, *2 more for buffer
-											var maxLateTx = Math.pow(numHosts, 2) * 2 * 2;
+											var maxLateTx = Math.pow(numHosts, 4) * 4;
 											//alert(diff);
-											txStatus = "<span style='color:" + (Math.abs(diff) < maxLateTx ? 'red' : 'green')+"'>"
-												+ diff + '/' + maxLateTx + (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
+											txStatus = diff == 0 ? "Data current " : "<span style='color:" + (Math.abs(diff) > maxLateTx ? 'red' : 'green')+"'>"
+												+ Math.abs(diff)
+												//+ '/' + maxLateTx
+												+ (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
 										}
 											
 										//console.debug(diffMs, diffDays,diffHrs,diffMins);

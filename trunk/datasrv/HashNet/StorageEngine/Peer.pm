@@ -124,7 +124,7 @@ package HashNet::StorageEngine::Peer;
 		my $file = $self->state_file;
 		
 		my $state = {};
-		debug "Peer: Loading state file '$file' in pid $$\n";
+#		debug "Peer: Loading state file '$file' in pid $$\n";
 		{
 			local $@;
 			eval
@@ -155,7 +155,7 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd}	 = $state->{last_tx_recd} || -1;
 		$self->{distance_metric} = $state->{distance_metric};
 		
-		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_recd} (+in)\n";
+#		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_recd} (+in)\n";
 	}
 
 	sub _lock_state
@@ -290,7 +290,7 @@ package HashNet::StorageEngine::Peer;
 			distance_metric => $self->distance_metric,
 		};
 		
-		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
+#		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
 		#print_stack_trace();
 
 		nstore($state, $file);
@@ -638,29 +638,55 @@ package HashNet::StorageEngine::Peer;
 		}
 		$self->update_end;
 
-		my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data->{batch});
-
-		# If the tr is valid...
-		if(defined $tr->key)
+		if(!$data->{batch})
 		{
-			#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
-			#	unless $tr->key =~ /^\/global\/nodes\//;
-			
-			logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n";
+			#logmsg "TRACE", "Peer: poll(): JSON: $json\n";
+			logmsg "TRACE", "Peer: poll(): Valid empty batch received, updated cur_tx_id to $data->{cur_tx_id}\n";
+		}
+		else
+		{
 
-			my $eng = $self->engine;
+			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data->{batch});
 
-			# We dont use eng->put() here because it constructs a new tr
-			if($tr->type eq 'TYPE_WRITE_BATCH')
+			#$self->tr_flag_db->lock_exclusive;
+
+			# Prevent recusrive updates of this $tr
+			if(
+				#$self->has_seen_tr($tr) ||
+				$tr->has_been_here) # it checks internal {route_hist} against our uuid
 			{
-				$eng->_put_local_batch($tr->data);
+				#$self->tr_flag_db->unlock;
+				logmsg "TRACE", "Peer: poll(): Already seen ", $tr->uuid, " - not processing\n";
 			}
 			else
 			{
-				$eng->_put_local($tr->key, $tr->data);
-			}
+				#$self->tr_flag_db->{$tr->uuid} = 1;
+				#$self->tr_flag_db->unlock;
 
-			$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
+
+				# If the tr is valid...
+				if(defined $tr->key)
+				{
+					#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
+					#	unless $tr->key =~ /^\/global\/nodes\//;
+
+					logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n";#.Dumper($tr);
+
+					my $eng = $self->engine;
+
+					# We dont use eng->put() here because it constructs a new tr
+					if($tr->type eq 'TYPE_WRITE_BATCH')
+					{
+						$eng->_put_local_batch($tr->data);
+					}
+					else
+					{
+						$eng->_put_local($tr->key, $tr->data);
+					}
+
+					$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
+				}
+			}
 		}
 	}
 	

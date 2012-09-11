@@ -55,7 +55,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0273;
+	our $VERSION = 0.0274;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -380,7 +380,7 @@ package HashNet::StorageEngine;
 		for my $txid ($tx_start .. $tx_end-1)
 		{
 			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
-			#next if $peer_uuid && $tr->has_been_here($peer_uuid);
+			next if $peer_uuid && $tr->has_been_here($peer_uuid);
 			
 			if($tr->type eq 'TYPE_WRITE_BATCH')
 			{
@@ -394,9 +394,13 @@ package HashNet::StorageEngine;
 			{
 				$namespace{$tr->key} = $tr->data;
 			}
-			#push @merged_uuids, $tr->uuid;
+			push @merged_uuids, $tr->uuid;
 		}
 
+		# We must indicate if the TR would contain no data because
+		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
+		return undef if !@merged_uuids;
+		
 		my @batch_list;
 		foreach my $key (keys %namespace)
 		{
@@ -405,7 +409,7 @@ package HashNet::StorageEngine;
 
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
 		$tr->update_route_history();
-		#$tr->{merged_uuid_list} = \@merged_uuids;
+		$tr->{merged_uuid_list} = \@merged_uuids;
 		return $tr;
 	}
 	
