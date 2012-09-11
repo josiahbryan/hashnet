@@ -771,7 +771,7 @@ package HashNet::StorageEngine::PeerServer;
 			# so that if we do have to upgrade, $self->bin_file
 			# is set so we know where to store the software
 			
-			# TODO DisabledForTesting
+			# NOTE DisabledForTesting
 			my $timer; $timer = AnyEvent->timer(after => 0.1, cb => sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
@@ -804,13 +804,13 @@ package HashNet::StorageEngine::PeerServer;
 					
 					# Make sure the peer is online, check latency, etc
 					
-					# TODO DisabledForTesting
-					#$peer->update_distance_metric();
+					# NOTE DisabledForTesting
+					$peer->update_distance_metric();
 					
 					$peer->poll();
 					
-					# TODO DisabledForTesting
-					#$peer->put_peer_stats(); #$engine);
+					# NOTE DisabledForTesting
+					$peer->put_peer_stats(); #$engine);
 					
 					#logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t\n" # '$peer->{host_down}'\n"
 					#	unless $peer->{host_down};
@@ -963,39 +963,39 @@ package HashNet::StorageEngine::PeerServer;
 # # 
 # # 						}
 
-						# TODO DisabledForTesting
+						# NOTE DisabledForTesting
 						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
-						#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
-						#$self->update_software($peer);
-						#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
+						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+						$self->update_software($peer);
+						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
 					}
 				}
 
-# TODO DisabledForTesting
-# 				$self->engine->begin_batch_update();
-# 				{
-# 					my $inf  = $self->{node_info};
-# 					my $uuid = $inf->{uuid};
-# 					my $key_path = '/global/nodes/'. $uuid;
-# 					
-# 					if(-f $self->{node_info_changed_flag_file})
-# 					{
-# 						unlink $self->{node_info_changed_flag_file};
-# 						#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-# 						foreach my $key (keys %$inf)
-# 						{
-# 							my $put_key = $key_path . '/' . $key;
-# 							my $val = $inf->{$key};
-# 							#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-# 							$self->engine->put($put_key, $val);
-# 						}
-# 					}
-# 				
-# 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
-# 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-# 					
-# 				}
-# 				$self->engine->end_batch_update();
+				# NOTE DisabledForTesting
+				$self->engine->begin_batch_update();
+				{
+					my $inf  = $self->{node_info};
+					my $uuid = $inf->{uuid};
+					my $key_path = '/global/nodes/'. $uuid;
+
+					if(-f $self->{node_info_changed_flag_file})
+					{
+						unlink $self->{node_info_changed_flag_file};
+						#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+						foreach my $key (keys %$inf)
+						{
+							my $put_key = $key_path . '/' . $key;
+							my $val = $inf->{$key};
+							#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+							$self->engine->put($put_key, $val);
+						}
+					}
+
+					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
+						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
+
+				}
+				$self->engine->end_batch_update();
 
 				undef $w;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
@@ -1869,13 +1869,13 @@ of software available.
 			return http_respond($res, 'application/octet-stream', '{"cur_tx_id":'.$cur_tx_id.'}');
 		}
 
-		my $first_tx_needed = $last_tx_recd + 1;
+		my $first_tx_needed = $last_tx_recd;# + 1;
 		logmsg 'TRACE', "PeerServer: resp_tr_poll(): $node_uuid: last_tx_recd: $last_tx_recd, cur_tx_id: $cur_tx_id\n";
 
 		if($cur_tx_id < 0)
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: No transactions in database, not transmitting anything\n";
-			return http_respond($res, 'application/octet-stream', '{"is_current":true}');
+			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id });
 			return;
 		}
 
@@ -1883,7 +1883,7 @@ of software available.
 		if($length <= 0)
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
-			return http_respond($res, 'application/octet-stream', '{"is_current":true}');
+			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id });
 		}
 
 		if($length > 500)
@@ -1895,11 +1895,11 @@ of software available.
 
 		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
 
-		my $tr = $length == 1 ?
-			HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
-			$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
+		#my $tr = $length == 1 ?
+		#	HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
+		#	$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
 
-		#die "Created merged transaction: ".Dumper($tr);
+		my $tr = $self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
 
 		my $peer = undef;
 		my @peers = @{ $self->engine->peers };
@@ -1911,7 +1911,7 @@ of software available.
 				last;
 			}
 		}
-		
+
 		if($peer)
 		{
 			$peer->update_begin();
@@ -1924,7 +1924,20 @@ of software available.
 			}
 			$peer->update_end();
 		}
-			
+
+
+		if(!defined $tr)
+		{
+			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
+			# so we tell $node_uuid it's current
+			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+
+			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id } );
+		}
+
+		#die "Created merged transaction: ".Dumper($tr);
+		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Sending tr: ".Dumper($tr);
+
 		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
 
 
