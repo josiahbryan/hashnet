@@ -29,105 +29,105 @@ package Socket;
 	}
 };
 
-# Override the start() method of ::Brick so we can add ForkManager
-package HTTP::Server::Brick::ForkLimited;
-{
-
-use base 'HTTP::Server::Brick';
-use Parallel::ForkManager;
-use HTTP::Status;
-
-# NOTE: This code is copied straight from Brick.pm - we just added the ForkManager code
-
-=head2 start
-
-Actually starts the server - this will loop indefinately, or until
-the process recieves a C<HUP> signal in which case it will return after servicing
-any current request, or waiting for the next timeout (which defaults to 5s - see L</new>).
-
-=cut
-
-sub start {
-    my $self = shift;
-    my $max_forks = shift || 25;
-    
-    my $pm = $self->{fork} ? Parallel::ForkManager->new($max_forks) : undef;
-
-    my $__server_should_run = 1;
-
-    # HTTP::Daemon chokes on multiple simultaneous requests
-    unless ($self->{leave_sig_pipe_handler_alone}) {
-        $self->{_old_sig_pipe_handler} = $SIG{'PIPE'};
-        $SIG{'PIPE'} = 'IGNORE';
-    }
-
-    $SIG{CHLD} = 'IGNORE' if $self->{fork};
-
-    $self->{daemon} = $self->{daemon_class}->new(
-        ReuseAddr => 1,
-        LocalPort => $self->{port},
-        LocalHost => $self->{host},
-        Timeout => 5,
-        @{ $self->{daemon_args} },
-       ) or die "Can't start daemon: $!";
-
-    # HTTP::Server::Daemon seems inconsistent in returning a string vs URI object
-    my $url_string = UNIVERSAL::can($self->{daemon}->url, 'as_string') ?
-      $self->{daemon}->url->as_string :
-        $self->{daemon}->url;
-
-    $self->_log(error => "Server started on $url_string");
-
-    while ($__server_should_run) {
-        my $conn = $self->{daemon}->accept or next;
-
-        # if we're a forking server, fork. The parent will wait for the next request.
-        # TODO: limit number of children
-        #next if $self->{fork} and fork;
-        next if $self->{fork} and $pm->start;
-        while (my $req = $conn->get_request) {
-
-          # Provide an X-Brick-Remote-IP header
-          my ($r_port, $r_iaddr) = Socket::unpack_sockaddr_in($conn->peername);
-          my $ip = Socket::inet_ntoa($r_iaddr);
-          $req->headers->remove_header('X-Brick-Remote-IP');
-          $req->header('X-Brick-Remote-IP' => $ip) if defined $ip;
-
-          my ($submap, $match) = $self->_map_request($req);
-
-          if ($submap) {
-              if (exists $submap->{path}) {
-                  $self->_handle_static_request( $conn, $req, $submap, $match);
-
-              } elsif (exists $submap->{handler}) {
-                  $self->_handle_dynamic_request( $conn, $req, $submap, $match);
-
-              } else {
-                  $self->_send_error($conn, $req, RC_INTERNAL_SERVER_ERROR, 'Corrupt Site Map');
-              }
-
-          } else {
-              $self->_send_error($conn, $req, RC_NOT_FOUND, ' Not Found in Site Map');
-          }
-        }
-
-        HashNet::Util::Logging::losgmsg('TRACE',"[HTTP Request End]\n\n");
-
-        $pm->finish if $self->{fork}; # TODO: I assume this exits so the next exit is unecessary ...
-        # should use a guard object here to protect against early exit leaving zombies
-        exit if $self->{fork};
-    }
-
-    $pm->wait_all_children if $self->{fork};
-
-    unless ($self->{leave_sig_pipe_handler_alone}) {
-        $SIG{'PIPE'} = $self->{_old_sig_pipe_handler};
-    }
-
-    1;
-}
-
-};
+# # Override the start() method of ::Brick so we can add ForkManager
+# package HTTP::Server::Brick::ForkLimited;
+# {
+# 
+# use base 'HTTP::Server::Brick';
+# use Parallel::ForkManager;
+# use HTTP::Status;
+# 
+# # NOTE: This code is copied straight from Brick.pm - we just added the ForkManager code
+# 
+# =head2 start
+# 
+# Actually starts the server - this will loop indefinately, or until
+# the process recieves a C<HUP> signal in which case it will return after servicing
+# any current request, or waiting for the next timeout (which defaults to 5s - see L</new>).
+# 
+# =cut
+# 
+# sub start {
+#     my $self = shift;
+#     my $max_forks = shift || 25;
+#     
+#     my $pm = $self->{fork} ? Parallel::ForkManager->new($max_forks) : undef;
+# 
+#     my $__server_should_run = 1;
+# 
+#     # HTTP::Daemon chokes on multiple simultaneous requests
+#     unless ($self->{leave_sig_pipe_handler_alone}) {
+#         $self->{_old_sig_pipe_handler} = $SIG{'PIPE'};
+#         $SIG{'PIPE'} = 'IGNORE';
+#     }
+# 
+#     $SIG{CHLD} = 'IGNORE' if $self->{fork};
+# 
+#     $self->{daemon} = $self->{daemon_class}->new(
+#         ReuseAddr => 1,
+#         LocalPort => $self->{port},
+#         LocalHost => $self->{host},
+#         Timeout => 5,
+#         @{ $self->{daemon_args} },
+#        ) or die "Can't start daemon: $!";
+# 
+#     # HTTP::Server::Daemon seems inconsistent in returning a string vs URI object
+#     my $url_string = UNIVERSAL::can($self->{daemon}->url, 'as_string') ?
+#       $self->{daemon}->url->as_string :
+#         $self->{daemon}->url;
+# 
+#     $self->_log(error => "Server started on $url_string");
+# 
+#     while ($__server_should_run) {
+#         my $conn = $self->{daemon}->accept or next;
+# 
+#         # if we're a forking server, fork. The parent will wait for the next request.
+#         # TODO: limit number of children
+#         #next if $self->{fork} and fork;
+#         next if $self->{fork} and $pm->start;
+#         while (my $req = $conn->get_request) {
+# 
+#           # Provide an X-Brick-Remote-IP header
+#           my ($r_port, $r_iaddr) = Socket::unpack_sockaddr_in($conn->peername);
+#           my $ip = Socket::inet_ntoa($r_iaddr);
+#           $req->headers->remove_header('X-Brick-Remote-IP');
+#           $req->header('X-Brick-Remote-IP' => $ip) if defined $ip;
+# 
+#           my ($submap, $match) = $self->_map_request($req);
+# 
+#           if ($submap) {
+#               if (exists $submap->{path}) {
+#                   $self->_handle_static_request( $conn, $req, $submap, $match);
+# 
+#               } elsif (exists $submap->{handler}) {
+#                   $self->_handle_dynamic_request( $conn, $req, $submap, $match);
+# 
+#               } else {
+#                   $self->_send_error($conn, $req, RC_INTERNAL_SERVER_ERROR, 'Corrupt Site Map');
+#               }
+# 
+#           } else {
+#               $self->_send_error($conn, $req, RC_NOT_FOUND, ' Not Found in Site Map');
+#           }
+#         }
+# 
+#         HashNet::Util::Logging::losgmsg('TRACE',"[HTTP Request End]\n\n");
+# 
+#         $pm->finish if $self->{fork}; # TODO: I assume this exits so the next exit is unecessary ...
+#         # should use a guard object here to protect against early exit leaving zombies
+#         exit if $self->{fork};
+#     }
+# 
+#     $pm->wait_all_children if $self->{fork};
+# 
+#     unless ($self->{leave_sig_pipe_handler_alone}) {
+#         $SIG{'PIPE'} = $self->{_old_sig_pipe_handler};
+#     }
+# 
+#     1;
+# }
+# 
+# };
 
 package HTTP::Server::Brick::PeerServerBase;
 {
@@ -971,9 +971,9 @@ package HashNet::StorageEngine::PeerServer;
 					}
 				}
 
-				# NOTE DisabledForTesting
-				$self->engine->begin_batch_update();
-				{
+# 				# NOTE DisabledForTesting
+ 				$self->engine->begin_batch_update();
+ 				{
 					my $inf  = $self->{node_info};
 					my $uuid = $inf->{uuid};
 					my $key_path = '/global/nodes/'. $uuid;
@@ -993,8 +993,8 @@ package HashNet::StorageEngine::PeerServer;
 
 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-
-				}
+# 
+ 				}
 				$self->engine->end_batch_update();
 
 				undef $w;
@@ -1903,12 +1903,15 @@ of software available.
 
 		my $peer = undef;
 		my @peers = @{ $self->engine->peers };
-		foreach my $tmp (@peers)
+		if($node_uuid)
 		{
-			if($tmp->node_uuid eq $node_uuid)
+			foreach my $tmp (@peers)
 			{
-				$peer = $tmp;
-				last;
+				if(($tmp->node_uuid||'') eq $node_uuid)
+				{
+					$peer = $tmp;
+					last;
+				}
 			}
 		}
 
