@@ -55,7 +55,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0276;
+	our $VERSION = 0.0277;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -412,6 +412,29 @@ package HashNet::StorageEngine;
 		$tr->{merged_uuid_list} = \@merged_uuids;
 		return $tr;
 	}
+	
+	sub generate_batch
+	{
+		my $self = shift;
+		my ($tx_start, $tx_end, $peer_uuid) = @_;
+		
+		my @batch;
+		my $db = $self->tx_db;
+		for my $txid ($tx_start .. $tx_end)
+		{
+			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
+			next if $peer_uuid && $tr->has_been_here($peer_uuid);
+			
+			push @batch, $tr->to_hash;
+		}
+
+		# We must indicate if the TR would contain no data because
+		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
+		return undef if !@batch;
+		
+		return \@batch;
+	}
+	
 	
 	sub put
 	{

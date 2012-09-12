@@ -24,6 +24,10 @@ getopts('hkf:c:d:p:n:', \%opts);
 my $bin_file = abs_path($opts{f} || $0);
 $bin_file =~ s/\.pl$/.bin/g;
 
+# For debugging/status messages
+my ($app_path,$app_name) = $bin_file =~ /(^.*\/)?([^\/]+)$/;
+
+
 if($opts{h})
 {
 	my $tmp = $HashNet::StorageEngine::PEERS_CONFIG_FILE;
@@ -125,26 +129,26 @@ if($opts{k})
 # 	$HashNet::StorageEngine::VERSION = $ver;
 # }
 
-info "$0: Creating StorageEngine...\n";
+info "$app_name: Creating StorageEngine...\n";
 my $con = HashNet::StorageEngine->new(
 	config	=> $opts{c},
 	db_root	=> $opts{d}
 );
 
-if(-f $bin_file)
-{
-	info "$0: Using bin_file to '$bin_file'\n";
-}
+# if(-f $bin_file)
+# {
+# 	info "$app_name: Using bin_file to '$bin_file'\n";
+# }
 
-info "$0: Creating PeerServer...\n";
+info "$app_name: Creating PeerServer...\n";
 my $srv = HashNet::StorageEngine::PeerServer->new(
-	engine	=> $con,
-	port	=> $opts{p},
-	config	=> $opts{n},
+	engine   => $con,
+	port     => $opts{p},
+	config   => $opts{n},
 	bin_file => $bin_file, 
 );
 
-info "$0: Running PeerServer...\n";
+info "$app_name: Running PeerServer...\n";
 $srv->run;
 
 

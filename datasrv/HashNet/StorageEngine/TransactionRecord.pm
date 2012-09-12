@@ -81,7 +81,8 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub update_route_history
 	{
 		my $self = shift;
-		my $relid = shift || -1;
+		my $relid = shift;
+		$relid = -1 if ! defined $relid;
 		push @{$self->{route_hist}}, {
 			uuid  => host_uuid(),
 			ts    => time(),
@@ -93,7 +94,8 @@ package HashNet::StorageEngine::TransactionRecord;
 	{
 		my $self = shift;
 		my $uuid = shift;
-		my $relid = shift || -1;
+		my $relid = shift;
+		$relid = -1 if ! defined $relid;
 		if(!$uuid)
 		{
 			warn "update_route_history_uuid: No UUID given";

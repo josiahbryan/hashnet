@@ -31,6 +31,10 @@ package HashNet::StorageEngine::Peer;
 	#use Net::Ping::External qw(ping);
 	use Data::Dumper;
 	use YAML::Tiny; # for load/save state
+	use DBM::Deep; # for our tr_flag datbase
+	# Explicitly include here for the sake of buildpacked.pl
+	use DBM::Deep::Engine::File;
+
 	
 	# This is included ONLY so buildpacked.pl picks it up for use by JSON on some older linux boxen
 	use JSON::backportPP;
@@ -88,6 +92,13 @@ package HashNet::StorageEngine::Peer;
 		$self->{host_down} = 0;
 		$self->{known_as} = $known_as;
 		$self->{engine} = $engine;
+		
+		my $db_root = $self->engine->db_root;
+
+		# Can be shared among peers on the same host because we use this to flag the GLOBAL UUID of
+		# the transaction - so it doesn't make sens to duplicate global data on the same host
+		$self->{tr_cache_file} = $db_root . '.tr_flags';
+		logmsg "TRACE", "Peer: Using transaction flag file $self->{tr_cache_file}\n";
 		
 		$self->_unlock_state(); # cleanup any old locks
 		
@@ -151,11 +162,15 @@ package HashNet::StorageEngine::Peer;
 		$self->{known_as}	 = $state->{known_as};
 		$self->{node_info}	 = $state->{node_info};
 		$self->{host_down}	 = $state->{host_down};
-		$self->{last_tx_sent}	 = $state->{last_tx_sent} || -1;
-		$self->{last_tx_recd}	 = $state->{last_tx_recd} || -1;
+		$self->{last_tx_sent}	 = $state->{last_tx_sent};
+		$self->{last_tx_recd}	 = $state->{last_tx_recd};
 		$self->{distance_metric} = $state->{distance_metric};
+		$self->{last_seen}	 = $state->{last_seen};
 		
-#		trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_recd} (+in)\n";
+		$state->{last_tx_sent} = -1 if ! defined $state->{last_tx_sent};
+		$state->{last_tx_recd} = -1 if ! defined $state->{last_tx_recd};
+		
+		#trace "Peer: Load peer state:  $self->{url} \t $self->{last_tx_recd} (+in)\n";
 	}
 
 	sub _lock_state
@@ -287,10 +302,11 @@ package HashNet::StorageEngine::Peer;
 			host_down	=> $self->host_down,
 			last_tx_sent	=> $self->last_tx_sent,
 			last_tx_recd	=> $self->last_tx_recd,
+			last_seen	=> $self->last_seen,
 			distance_metric => $self->distance_metric,
 		};
 		
-#		trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
+		#trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
 		#print_stack_trace();
 
 		nstore($state, $file);
@@ -304,6 +320,7 @@ package HashNet::StorageEngine::Peer;
 	sub known_as	{ shift->{known_as} }
 	sub engine	{ shift->{engine} }
 	sub node_info	{ shift->{node_info} || {} }
+	sub last_seen   { shift->{last_seen} }
 	
 	sub node_uuid   { shift->node_info->{uuid} }
 	sub node_name   { shift->node_info->{name} }
@@ -334,6 +351,14 @@ package HashNet::StorageEngine::Peer;
 		
 		$self->update_begin();
 		$self->{distance_metric} = $self->calc_distance_metric();
+		
+		if(!$self->{host_down})
+		{
+			my $date = `date`;
+			$date =~ s/[\r\n]//g;
+			$self->{last_seen} = $date;
+		}
+		 
 		$self->update_end();
 	}
 	
@@ -386,12 +411,8 @@ package HashNet::StorageEngine::Peer;
 		$self->engine->put("$key_root/last_tx_recd", $self->last_tx_recd)
 			if ($self->engine->get("$key_root/last_tx_recd")||0) != ($self->last_tx_recd||0);
 
-		if(!$self->host_down)
-		{
-			my $date = `date`;
-			$date =~ s/[\r\n]//g;
-			$self->engine->put("$key_root/last_seen", $date);
-		}
+		$self->engine->put("$key_root/last_seen", $self->last_seen)
+			if !$self->host_down;
 
 		# Calls end_batch_update automatically
 		$self->engine->end_batch_update;
@@ -569,6 +590,31 @@ package HashNet::StorageEngine::Peer;
 		
 		return $latency;
 	}
+	
+	sub tr_flag_db
+	{
+		my $self = shift;
+
+		if(!$self->{tr_flag_db} ||
+		  # Re-create the DBM::Deep object when we change PIDs -
+		  # e.g. when someone forks a process that we are in.
+		  # I learned the hard way (via multiple unexplainable errors)
+		  # that DBM::Deep does NOT like existing before forks and used
+		  # in child procs. (Ref: http://stackoverflow.com/questions/11368807/dbmdeep-unexplained-errors)
+		  ($self->{_tr_flag_db_pid}||0) != $$)
+		{
+			$self->{tr_flag_db} = DBM::Deep->new($self->{tr_cache_file});
+# 				file => $self->{tr_cache_file},
+# 				locking   => 1, # enabled by default, just here to remind me
+# 				autoflush => 1, # enabled by default, just here to remind me
+# 				#type => DBM::Deep->TYPE_ARRAY
+# 			);
+			warn "Error opening $self->{tr_cache_file}: $@ $!" if ($@ || $!) && !$self->{tr_flag_db};
+			$self->{_tr_flag_db_pid} = $$;
+		}
+		return $self->{tr_flag_db};
+	}
+
 
 	sub poll
 	{
@@ -639,56 +685,71 @@ package HashNet::StorageEngine::Peer;
 		if(defined $data->{cur_tx_id})
 		{
 			$self->{last_tx_recd} = $data->{cur_tx_id};
-		}
-		$self->update_end;
-
-		if(!$data->{batch})
-		{
-			#logmsg "TRACE", "Peer: poll(): JSON: $json\n";
-			logmsg "TRACE", "Peer: poll(): Valid empty batch received, updated cur_tx_id to $data->{cur_tx_id}\n";
+			logmsg "TRACE", "Peer: poll(): Updated cur_tx_id to $data->{cur_tx_id}\n";
 		}
 		else
 		{
+			logmsg "TRACE", "Peer: poll(): No cur_tx_id received in data\n";
+		}
+		$self->update_end;
+		
+		# Patch old data from previous versions
+		if(ref $data->{batch} eq 'HASH')
+		{
+			$data->{batch} = [$data->{batch}];
+		}
+		
+		my @batch = @{$data->{batch} || []};
+			
+		if(!@batch)
+		{
+			#logmsg "TRACE", "Peer: poll(): JSON: $json\n";
+			logmsg "TRACE", "Peer: poll(): Valid empty batch received, nothing done\n";
+		}
+		else
+		{
+			logmsg "TRACE", "Peer: poll(): Received \$data: ", Dumper $data;
 
-			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data->{batch});
-
-			#$self->tr_flag_db->lock_exclusive;
-
-			# Prevent recusrive updates of this $tr
-			if(
-				#$self->has_seen_tr($tr) ||
-				$tr->has_been_here) # it checks internal {route_hist} against our uuid
+			foreach my $data (@batch)
 			{
-				#$self->tr_flag_db->unlock;
-				logmsg "TRACE", "Peer: poll(): Already seen ", $tr->uuid, " - not processing\n";
-			}
-			else
-			{
-				#$self->tr_flag_db->{$tr->uuid} = 1;
-				#$self->tr_flag_db->unlock;
+				my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($data);
 
-
-				# If the tr is valid...
-				if(defined $tr->key)
+				$self->tr_flag_db->lock_exclusive;
+	
+				# Prevent recusrive updates of this $tr
+				if($self->tr_flag_db->{$tr->uuid} ||
+				   $tr->has_been_here) # it checks internal {route_hist} against our uuid
 				{
-					#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
-					#	unless $tr->key =~ /^\/global\/nodes\//;
-
-					logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n".Dumper($tr);
-
-					my $eng = $self->engine;
-
-					# We dont use eng->put() here because it constructs a new tr
-					if($tr->type eq 'TYPE_WRITE_BATCH')
+					$self->tr_flag_db->unlock;
+					logmsg "TRACE", "Peer: poll(): Already seen ", $tr->uuid, " - not processing\n";
+				}
+				else
+				{
+					$self->tr_flag_db->{$tr->uuid} = 1;
+					$self->tr_flag_db->unlock;
+	
+					# If the tr is valid...
+					if(defined $tr->key)
 					{
-						$eng->_put_local_batch($tr->data);
+						#logmsg "TRACE", "Peer: poll(): ", $tr->key, " => ", (ref($tr->data) ? Dumper($tr->data) : ($tr->data || '')), ($url ? " (from $url)" :""). "\n"
+						#	unless $tr->key =~ /^\/global\/nodes\//;
+	
+						#logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n".Dumper($tr);
+	
+						my $eng = $self->engine;
+	
+						# We dont use eng->put() here because it constructs a new tr
+						if($tr->type eq 'TYPE_WRITE_BATCH')
+						{
+							$eng->_put_local_batch($tr->data);
+						}
+						else
+						{
+							$eng->_put_local($tr->key, $tr->data);
+						}
+	
+						$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
 					}
-					else
-					{
-						$eng->_put_local($tr->key, $tr->data);
-					}
-
-					$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
 				}
 			}
 		}
