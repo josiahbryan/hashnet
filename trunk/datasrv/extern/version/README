@@ -1,0 +1,5 @@
+version::vpp is needed for compat on some older perls.
+However, on some of my development workstations, doing 'perl -MCPAN -e "install version::vpp"'
+doesn't actually install ::vpp - e.g. perl -Mversion::vpp fails to find vpp.pm.
+
+Therefore, I'm including it here so buildpacked.pl can still find it.
