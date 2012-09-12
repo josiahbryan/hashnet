@@ -5,7 +5,7 @@ use HashNet::StorageEngine; # to get $VERSION
 use HashNet::StorageEngine::PeerServer; # to get %HTTP_FILE_RESOURCES
 use Cwd qw/abs_path/; # for @inc_list
 
-my $up_ver = 1;
+my $up_ver = 0;
 
 my $main_file = 'dengpeersrv.pl';
 

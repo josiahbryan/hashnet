@@ -740,13 +740,13 @@ package HashNet::StorageEngine::PeerServer;
 		my $db_root = $self->engine->db_root;
 
 		$self->{node_info_changed_flag_file} = $db_root . '.node_info_changed_flag';
-		logmsg "TRACE", "Node info changed flag file is $self->{node_info_changed_flag_file}\n";
+		logmsg "TRACE", "PeerServer: Node info changed flag file is $self->{node_info_changed_flag_file}\n";
 
 		$self->{tr_cache_file} = $db_root . '.tr_flags';
 		#$self->{tr_cache_file} = "/tmp/test".$self->peer_port.".db";
 		#$self->{tr_cache_file} = $db_root."test".$self->peer_port.".db";
 		#$self->tr_flag_db->put(test => time());
-		logmsg "TRACE", "Using transaction flag file $self->{tr_cache_file}\n";
+		logmsg "TRACE", "PeerServer: Using transaction flag file $self->{tr_cache_file}\n";
 		#logmsg "DEBUG", "Test retrieve: ",$self->tr_flag_db->get('test'),"\n";
 
 
@@ -789,7 +789,7 @@ package HashNet::StorageEngine::PeerServer;
 			my $timeout_sub; $timeout_sub = sub
 			{
 				my $db = $engine->tx_db;
-				my $cur_tx_id = $db->length() || 0;
+				my $cur_tx_id = $db->length() -1;
 
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
 				my @peers = @{ $engine->peers };
@@ -993,23 +993,24 @@ package HashNet::StorageEngine::PeerServer;
 
 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-# 
- 				}
-				$self->engine->end_batch_update();
+ 
+  				}
+ 				$self->engine->end_batch_update();
 
 				undef $w;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
 				# or at least I couldn't get it working. This does work though.
-				$w = AnyEvent->timer (after => 30, cb => $timeout_sub );
+				$w = AnyEvent->timer (after => 15, cb => $timeout_sub );
 				
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 	
 			};
-			$w = AnyEvent->timer (after => 1, cb => $timeout_sub);
+			#$w = AnyEvent->timer (after => 1, cb => $timeout_sub);
 
 			logmsg "TRACE", "PeerServer: Starting timer event loop...\n";
 
-			# Sometimes it doesnt start without calling this explicitly
+			# Call the timeout sub explicitly because sometimes it would not
+			# run if we just set the timer, above
 			$timeout_sub->();
 			
 			# run the event loop, (should) never return
@@ -1229,20 +1230,24 @@ package HashNet::StorageEngine::PeerServer;
 				. "<td>".($_->host_down? "<i>Down</i>" : "<b>Up</b>")."</td>"
 				. "<td>" . ($_->{distance_metric} || "") . "</td>"
 				. "<td>" . ($_->{version} || '(Unknown)') . "</td>"
+				. "<td>" . (defined($_->{last_tx_sent}) ? $_->{last_tx_sent} : '?') . "</td>"
+				. "<td>" . ($_->{last_seen} || '?') . "</td>"
 				. "</tr>"
 			} @peers;
+			
+			my $tx = $self->engine->tx_db->length - 1;
 			
 			http_respond($res, 'text/html',
 				"<html>"
 				. "<head><title>Peers - HashNet StorageEngine Server</title></head>"
 				. "<body><h1><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle'></a> Peers - HashNet StorageEngine Server</h1>"
 				. "<link rel='stylesheet' type='text/css' href='/basicstyles.css' />"
-				. "<table border=1><thead><th>Peer</th><th>Status</th><th>Latency</th><th>Version</th></thead>"
+				. "<table border=1><thead><th>Peer</th><th>Status</th><th>Latency</th><th>Version</th><th>Last TX Sent</th><th>Last Seen</th></thead>"
 				. "<tbody>"
 				. join("\n", @rows)
 				. "</tbody></table>"
 				. "<hr/>"
-				. "<p><font size=-1><i>HashNet StorageEngine, Version <b>$HashNet::StorageEngine::VERSION</b>, date <b>". `date`. "</b></i></p>"
+				. "<p><font size=-1><i>HashNet StorageEngine, Version <b>$HashNet::StorageEngine::VERSION</b>, <b>$tx</b> transactions, date <b>". `date`. "</b></i></p>"
 				. "<script>setTimeout(function(){window.location.reload()}, 30000) // Peers are checked every 30 seconds on the server</script>"
 				. "</body></html>"
 			);
@@ -1858,10 +1863,11 @@ of software available.
 		my ($req, $res) = @_;
 
 		my $db = $self->engine->tx_db;
-		my $cur_tx_id = $db->length() || 0;
+		my $cur_tx_id = $db->length() -1;
 
 		my $node_uuid    = http_param($req, 'node_uuid') || '';
-		my $last_tx_recd = http_param($req, 'last_tx') || -1;
+		my $last_tx_recd = http_param($req, 'last_tx');
+		$last_tx_recd = -1 if !defined $last_tx_recd;
 
 		if(http_param($req, 'get_cur_tx_id'))
 		{
@@ -1869,7 +1875,7 @@ of software available.
 			return http_respond($res, 'application/octet-stream', '{"cur_tx_id":'.$cur_tx_id.'}');
 		}
 
-		my $first_tx_needed = $last_tx_recd;# + 1;
+		my $first_tx_needed = $last_tx_recd + 1;
 		logmsg 'TRACE', "PeerServer: resp_tr_poll(): $node_uuid: last_tx_recd: $last_tx_recd, cur_tx_id: $cur_tx_id\n";
 
 		if($cur_tx_id < 0)
@@ -1879,7 +1885,7 @@ of software available.
 			return;
 		}
 
-		my $length = $cur_tx_id - $first_tx_needed;
+		my $length = $cur_tx_id - $first_tx_needed + 1;
 		if($length <= 0)
 		{
 			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
@@ -1899,7 +1905,17 @@ of software available.
 		#	HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
 		#	$self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
 
-		my $tr = $self->engine->merge_transactions($first_tx_needed, $cur_tx_id, $node_uuid);
+		# Changing from merge_transactions to generate_batch. Why?
+		# - Merge transactions makes a NEW transaction out of a bunch of other transactions
+		# - Generate batch - returns a list of transaction hashrefs (e.g. Transaction::to_hash)
+		# Why?
+		# - Merged TRs would make a NEW tr entry in the tr log on the other peer - which would cause the cur_tx_id to bump, which would
+		# cause the that TR to be requested by the next peer, and so on and so forth - with no checks about the route history, etc,
+		# because each time we created a new merged TR.
+		# This way, we just make a batch listref of the TRs, and each is checked individually for route history and presence on this node 
+		# (or the receiving node) before processing/adding to the DB 
+		
+		my $listref = $self->engine->generate_batch($first_tx_needed, $cur_tx_id, $node_uuid);
 
 		my $peer = undef;
 		my @peers = @{ $self->engine->peers };
@@ -1929,7 +1945,7 @@ of software available.
 		}
 
 
-		if(!defined $tr)
+		if(!defined $listref)
 		{
 			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
 			# so we tell $node_uuid it's current
@@ -1941,12 +1957,15 @@ of software available.
 		#die "Created merged transaction: ".Dumper($tr);
 		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Sending tr: ".Dumper($tr);
 
-		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending merged batch as $tr->{uuid} ...\n";
+		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
 
 
+		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($listref), cur_tx_id => $cur_tx_id };
+		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: Sending \$data: ", Dumper $data;
+		
 		#logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
 		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
-		return http_respond($res, 'application/octet-stream', encode_json { batch => $tr->to_hash, cur_tx_id => $cur_tx_id } );
+		return http_respond($res, 'application/octet-stream', encode_json $data);
 	}
 
 	sub resp_get
@@ -2027,7 +2046,9 @@ of software available.
 		else
 		{
 			my $key = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
-			my $value = uri_unescape(http_param($req, 'data'));
+			my $value = http_param($req, 'data');
+			$value = http_param($req, 'value') if !defined $value;
+			$value = uri_unescape($value);
 
 			logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
 
