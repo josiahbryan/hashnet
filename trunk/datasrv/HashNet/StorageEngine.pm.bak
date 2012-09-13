@@ -55,7 +55,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0279;
+	our $VERSION = 0.0283;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -358,6 +358,7 @@ package HashNet::StorageEngine;
 	{
 		my $self = shift;
 		my @batch = @{ shift || {} };
+		my $timestamp = shift || undef;
 		if(!@batch)
 		{
 			logmsg "INFO", "StorageEngine: _put_local_batch(): No entries in batch list, nothing updated.\n";
@@ -366,7 +367,7 @@ package HashNet::StorageEngine;
 
 		foreach my $item (@batch)
 		{
-			$self->_put_local($item->{key}, $item->{val});
+			$self->_put_local($item->{key}, $item->{val}, $timestamp);
 		}
 	}
 
@@ -467,7 +468,7 @@ package HashNet::StorageEngine;
 		
 	sub _put_peers
 	{
-		my $t = shift;
+		my $self = shift;
 		my $key = shift;
 		my $val = shift;
 		
@@ -475,12 +476,12 @@ package HashNet::StorageEngine;
 		# Moved this call to _push_tr
 		#$tr->update_route_history;
 		
-		$t->_push_tr($tr);
+		$self->_push_tr($tr);
 	}
 	
 	sub _push_tr
 	{
-		my $t = shift;
+		my $self = shift;
 		my $tr = shift;
 
 		# Used by PeerServer to prevent "tag backs"
@@ -488,7 +489,7 @@ package HashNet::StorageEngine;
 
 		# Deref here in the hope of some small performance gain
 		# by not having to deref two more times below
-		my @peers = @{$t->{peers} || []};
+		my @peers = @{$self->{peers} || []};
 
 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
 
@@ -515,7 +516,7 @@ package HashNet::StorageEngine;
 		
 		# Lock the tx db so that we know the length() is not changed between the
 		# time we call push() and the time we call length() by another process.
-		my $db = $t->tx_db;
+		my $db = $self->tx_db;
 		$db->lock_exclusive();
 		eval
 		{
@@ -632,24 +633,38 @@ package HashNet::StorageEngine;
 
 	sub _put_local
 	{
-		my $t = shift;
+		my $self = shift;
 		my $key = shift;
 		my $val = shift;
+		my $timestamp = shift || undef;
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
 
 		# TODO: Sanatize key to remove any '..' or other potentially invalid file path values
-		my $key_path = $t->{db_root} . $key;
+		my $key_path = $self->{db_root} . $key;
 		mkpath($key_path) if !-d $key_path;
-
+		
 		my $key_file = $key_path . '/data';
-		store({ data => $val}, $key_file);
+		
+		if(defined $timestamp
+		   && -f $key_file)
+		{
+			my $key_data = retrieve($key_file) || {}; #->{data};
+			my $key_ts = $key_data->{timestamp};
+			if($timestamp < $key_ts)
+			{
+				logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $timestamp < stored ts $key_ts)\n";
+				return 0;
+			}
+		}
+
+		store({ data => $val, timestamp => $timestamp || time() }, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
 
-		return $t;
+		return 1;
 	}
 
 	sub sanatize_key
@@ -701,21 +716,22 @@ package HashNet::StorageEngine;
 		$key = '/'.$key if $key !~ /^\//;
 		
 # 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, undef, 'TYPE_READ');
-# 		push @{$t->{txqueue}}, $tr;
+# 		push @{$self->{txqueue}}, $tr;
 
 		# TODO Update timestamp fo $key in cache for aging purposes
 		#logmsg "TRACE", "get($key): Checking {cache} for $key\n";
-		#return $t->{cache}->{$key} if defined $t->{cache}->{$key};
+		#return $self->{cache}->{$key} if defined $self->{cache}->{$key};
 
 		my $key_path = $self->{db_root} . $key;
 		my $key_file = $key_path . '/data';
 
+		my $key_data = {};
 		my $val = undef;
 		if(-f $key_file)
 		{
 			#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
-			$val = retrieve($key_file)->{data};
-			return $val;
+			$key_data = retrieve($key_file) || {}; #->{data};
+			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
 		}
 
 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
@@ -751,13 +767,14 @@ package HashNet::StorageEngine;
 
 		#delete $self->{get_seen}->{$req_uuid};
 
-		return $val;
+		return wantarray ? ( data => $val, timestamp => time() ) : $val;
 	}
 
 	sub list
 	{
 		my $self = shift;
 		my $root = shift;
+		my $incl_meta = shift || 0;
 
 		my $db_root = $self->{db_root};
 
@@ -833,7 +850,14 @@ package HashNet::StorageEngine;
 			my $value = undef;
 			if(-f $key_file)
 			{
-				$value = retrieve($key_file)->{data};
+				if($incl_meta)
+				{
+					$value = retrieve($key_file);
+				}
+				else
+				{
+					$value = retrieve($key_file)->{data};
+				}
 			}
 			
 			#logmsg "TRACE", "StorageEngine: list(): key '$key' => '".($value||"")."'\n";

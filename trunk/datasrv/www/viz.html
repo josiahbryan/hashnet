@@ -3,11 +3,22 @@
 	<head> 
 		<title>HashNet Peer Visulization</title> 
 		<meta http-equiv="content-type" content="text/html;charset=utf-8" />
+		
+		
+		<link rel="stylesheet" href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.7.2/themes/smoothness/jquery-ui.css" />
+		<link rel="stylesheet" href="http://code.jquery.com/mobile/1.1.1/jquery.mobile-1.1.1.min.css"/>
+		
+		<link rel="stylesheet" type="text/css" href="http://dev.sencha.com/deploy/ext-4.1.0-gpl/resources/css/ext-all.css" /> 
+		<link rel="stylesheet" type="text/css" href="http://dev.sencha.com/deploy/ext-4.1.0-gpl/examples/shared/example.css" /> 
+ 
+		
+		
 		<style>
 			body { 
 				background-color:white; font-size:90%;
 				/*background-image:url(../img/dynamicAnchorBg.jpg); */
 				font-family:Helvetica;
+				padding: 1em;
 			}
 			
 			#header {
@@ -83,8 +94,10 @@
 	</head> 
 	<body onunload="jsPlumb.unload();">
 		
-		<div style='float:right;font-size:.85em'>
-			<i>Last updated <script>document.write(new Date())</script></i>
+		<div style='float:right;font-size:.85em' id='last-updated'>
+			<span class=date></span><br>
+			<a href='#' onclick='showChart();$(this).remove();return false;'>Show Chart</a>
+			
 		</div>
 		<h1 id=header><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle' style='margin-top:-15px'></a> HashNet StorageEngine Server</h1>
 
@@ -93,16 +106,296 @@
 		</div> 
 
 		<!-- http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js fails to load properly -->
+		<!-- Update 9/13/12: Loads now...-->
 		<!--<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.8.1/jquery.min.js'></script>-->
+		<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js'></script>
 		
 		<!-- jsPlumb fails with 1.8.1, so switching to code.jquery.com to get the old 1.7.1 -->
-		<script type='text/javascript' src='http://code.jquery.com/jquery-1.7.1.min.js'></script>
-		<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.13/jquery-ui.min.js'></script> 
+		<!--<script type='text/javascript' src='http://code.jquery.com/jquery-1.7.1.min.js'></script>-->
+		
+		<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.13/jquery-ui.min.js'></script>
+		 
+		<script type="text/javascript" charset="utf-8" src="http://cdn.sencha.io/ext-4.1.0-gpl/ext-all.js"></script>
 				
 		<script type='text/javascript' src='/js/jquery.jsPlumb-1.3.13-all-min.js'></script>
 		<!--<script type='text/javascript' src='/js/jquery.jsPlumb-1.3.13-all.js'></script>--> 
 		
 		<script>
+		Ext.require('Ext.chart.*');
+
+		window.chartData = { init: false }; // node_uuid_map: node_uuid_map };
+		window.showChart = function()
+		{
+			//window.chartData = { init: true, node_uuid_map: node_uuid_map };
+			var map_list = chartData.map_list;
+			var node_uuid_map = chartData.node_uuid_map;
+			
+			var chart;
+			var generateData = (function() 
+			{
+				var data = [], i = 0,
+					last = false,
+					date = new Date(), //2011, 1, 1, 12, 00, 00),
+					seconds = +date,
+					min = Math.min,
+					max = Math.max,
+					random = Math.random,
+					lastData = false;
+				
+					
+				return function() 
+				{
+					data = data.slice();
+					var ref = {
+						date:	new Date(), //Ext.Date.add(date, Ext.Date.MINUTE, i++),
+						//date:	Ext.Date.add(date, Ext.Date.MINUTE, i++),
+						//visits:	min(100, max(last? last.visits + (random() - 0.5) * 20 : random() * 100, 0)),
+						//views:	min(100, max(last? last.views + (random() - 0.5) * 10 : random() * 100, 0)),
+						//users:	min(100, max(last? last.users + (random() - 0.5) * 20 : random() * 100, 0))
+					};
+					//console.debug(ref.date);
+					date = ref.date;
+					
+					for(var uuid in node_uuid_map)
+					{
+						//ref[uuid] = min(100, max(last? last[uuid] + (random() - 0.5) * 20 : random() * 100, 0))
+						var delta = chartData.node_uuid_map[uuid].cur_tx_id - lastData[uuid];
+						if(delta == 0 && last && last[uuid] > 0)
+							delta = last[uuid];
+						ref[uuid] = lastData ? delta : 0;
+						//console.debug(uuid, "delta: ", delta, ", last: ", lastData[uuid]);
+					}
+					
+					lastData = {};
+					for(var uuid in node_uuid_map)
+					{
+						lastData[uuid] = chartData.node_uuid_map[uuid].cur_tx_id;
+					}
+					
+					data.push(ref);
+					
+					last = data[data.length -1];
+					return data;
+				};
+			})();
+			
+			
+// 			var group = false,
+// 				groupOp =
+// 				[
+// 					{
+// 						dateFormat: 'M d h m s',
+// 						groupBy: 'year,month,day,hour,minute second'
+// 					},
+// 					{
+// 						dateFormat: 'M d h m',
+// 						groupBy: 'year,month,day,hour'
+// 					}
+// 				];
+// 		
+// 			function regroup()
+// 			{
+// 				group = !group;
+// 				var axis = chart.axes.get(1),
+// 					selectedGroup	= groupOp[+group];
+// 					axis.dateFormat	= selectedGroup.dateFormat;
+// 					axis.groupBy	= selectedGroup.groupBy;
+// 					
+// 				chart.redraw();
+// 			}
+		
+			var fieldList = ['date'];
+			var uuidList = [];
+			var seriesList = [];
+			for(var uuid in node_uuid_map)
+			{
+				fieldList.push(uuid);
+				uuidList.push(uuid);
+				
+				seriesList.push(
+				{
+					type: 'line',
+					smooth: false,
+					axis: ['left', 'bottom'],
+					xField: 'date',
+					yField: uuid,
+					title: node_uuid_map[uuid].name,
+					displayName: node_uuid_map[uuid].name,
+					label: {
+						display: 'none',
+						field: uuid,
+						renderer: function(v) { return v >> 0; },
+						'text-anchor': 'middle'
+					},
+					markerConfig:
+					{
+						radius: 5,
+						size: 5
+					},
+					
+				});
+			}
+			
+			
+			var store = Ext.create('Ext.data.JsonStore',
+			{
+				//fields: ['date', 'visits', 'views', 'users'],
+				fields: fieldList,
+				data: generateData()
+			});
+		
+			var getData = function() 
+			{
+				var gs = generateData();
+				var toDate = timeAxis.toDate,
+				    lastDate = gs[gs.length - 1].date,
+				    markerIndex = chart.markerIndex || 0;
+				
+				if (+toDate < +lastDate)
+				{
+					markerIndex = 1;
+					timeAxis.toDate = lastDate;
+					//timeAxis.fromDate = Ext.Date.add(Ext.Date.clone(timeAxis.fromDate), Ext.Date.MINUTE, 1);
+					timeAxis.fromDate = Ext.Date.add(Ext.Date.clone(timeAxis.toDate), Ext.Date.MINUTE, -5);
+					//toDate: Ext.Date.add(new Date(), Ext.Date.MINUTE, 1),
+					//console.debug(timeAxis.fromDate, timeAxis.toDate);
+					chart.markerIndex = markerIndex;
+				}
+				store.loadData(gs);
+				
+			};
+			var intr = setInterval(getData, 15 * 1000); // * 1000);
+			setTimeout(getData, 1000);
+		
+			Ext.create('Ext.Window',
+			{
+				width: 500,
+				height: 300,
+				minHeight: 200,
+				minWidth: 250,
+				hidden: false,
+				maximizable: true,
+				title: 'Transaction Activity',
+				renderTo: Ext.getBody(),
+				layout: 'fit',
+				opacity: 0.7,
+				
+				items: [
+				{
+					xtype: 'chart',
+					style: 'background:#fff',
+					id: 'chartCmp',
+					store: store,
+					shadow: false,
+					animate: true,
+					
+					legend: {
+						position: 'right'
+					},
+				
+					
+					axes:
+					[
+						{
+							type: 'Numeric',
+							grid: true,
+							minimum: 0,
+							maximum: 100,
+							position: 'left',
+							fields: uuidList, //['views', 'visits', 'users'],
+							title: 'Number of Transactions',
+							grid: {
+								odd: {
+									fill: '#dedede',
+									stroke: '#ddd',
+									'stroke-width': 0.5
+								}
+							}
+						},
+						{
+							type: 'Time',
+							position: 'bottom',
+							fields: 'date',
+							title: 'Time',
+							dateFormat: 'M d h m s',
+							groupBy: 'year,month,day,hour,minute',
+							aggregateOp: 'sum',
+							constrain: true,
+							fromDate: new Date(), //new Date(2011, 1, 1),
+							toDate: Ext.Date.add(new Date(), Ext.Date.MINUTE, 5), //new Date(2011, 1, 7),
+							//toDate: Ext.Date.add(new Date(), Ext.Date.SECOND, 3), //new Date(2011, 1, 7),
+							grid: true
+						}
+					],
+					
+					series: seriesList,
+// 					[
+// 						{
+// 							type: 'line',
+// 							smooth: false,
+// 							axis: ['left', 'bottom'],
+// 							xField: 'date',
+// 							yField: 'visits',
+// 							label: {
+// 								display: 'none',
+// 								field: 'visits',
+// 								renderer: function(v) { return v >> 0; },
+// 								'text-anchor': 'middle'
+// 							},
+// 							markerConfig:
+// 							{
+// 								radius: 5,
+// 								size: 5
+// 							}
+// 						},
+// 						{
+// 							type: 'line',
+// 							axis: ['left', 'bottom'],
+// 							smooth: false,
+// 							xField: 'date',
+// 							yField: 'views',
+// 							label: {
+// 								display: 'none',
+// 								field: 'visits',
+// 								renderer: function(v) { return v >> 0; },
+// 								'text-anchor': 'middle'
+// 							},
+// 							markerConfig: {
+// 								radius: 5,
+// 								size: 5
+// 							}
+// 						},
+// 						{
+// 							type: 'line',
+// 							axis: ['left', 'bottom'],
+// 							smooth: false,
+// 							xField: 'date',
+// 							yField: 'users',
+// 							label: {
+// 								display: 'none',
+// 								field: 'visits',
+// 								renderer: function(v) { return v >> 0; },
+// 								'text-anchor': 'middle'
+// 							},
+// 							markerConfig:
+// 							{
+// 								radius: 5,
+// 								size: 5
+// 							}
+// 						}
+// 					]
+					
+					_foobar: {}
+				}]
+			});
+			
+			chart = Ext.getCmp('chartCmp');
+			var timeAxis = chart.axes.get(1);
+			
+		};
+		
+		//Ext.onReady(showChart);
+		
 		;(function() {
 
 			function verticalCenter(str)
@@ -173,240 +466,267 @@
 				}
 			}
 
-			window.jsPlumbCode = {
-					
-				init : function() {
+			window.pollServer = function()
+			{
+			
+				showLoading();
 				
-					showLoading();
-					
-					$.ajax({
-						type: "GET",
-						url: '/db/viz/nodeinfo.js',
-						error: function(data)
+				$.ajax({
+					type: "GET",
+					url: '/db/viz/nodeinfo.js',
+					error: function(data)
+					{
+						//console.debug(url + ":error:",data);
+						//showConLost();
+						hideLoading();
+					},
+					success: function(data)
+					{
+						$("#last-updated .date").html("<i>Last updated "+(new Date())+"</i>");
+						
+						var map_list = data;
+						if(typeof(map_list) != 'object')
 						{
-							//console.debug(url + ":error:",data);
-							//showConLost();
-							hideLoading();
-						},
-						success: function(data)
+							eval("map_list="+map_list);
+						}
+						
+						var $container = $("#viz");
+						
+						// Remove all inner blocks
+						$container.children().each(function() {
+							$(this).remove();
+						});
+						
+						
+						var node_uuid_map = {};
+						for(var idx in map_list)
 						{
-							var map_list = data;
-							if(typeof(map_list) != 'object')
-							{
-								eval("map_list="+map_list);
-							}
+							var node_info = map_list[idx];
 							
-							var node_uuid_map = {};
-							for(var idx in map_list)
+							var nx = node_info.x, ny = node_info.y;
+							
+							var userSetPosition = readCookie(node_info.uuid+".position");
+							if(userSetPosition)
 							{
-								var node_info = map_list[idx];
-								
-								var nx = node_info.x, ny = node_info.y;
-								
-// 								var userSetPosition = readCookie(node_info.uuid+".position");
-// 								if(userSetPosition)
-// 								{
-// 									var list = userSetPosition.split(",");
-// 									nx = parseFloat(list[0]);
-// 									ny = parseFloat(list[1]);
-// 								}
+								var list = userSetPosition.split(",");
+								nx = parseFloat(list[0]);
+								ny = parseFloat(list[1]);
+							}
 
-								var geoList = node_info.geo_info.split(", ");
-								// Lat         Lng
-								geoList.pop(); geoList.pop();
-								// Country
-								geoList.pop();
-								
-								var geoString = geoList.join(", ");
-								
-								var nodeInfoHtml = ""
-									+ "<b>" + node_info.name + "</b><br>"
-									+ geoString + "<br>"
-									+ "<i>" + node_info.hashnet_ver
-										+ (node_info.port != 8031 ? ":" + node_info.port : "") // only show port if not default hashnet port
-										+ "</i>";
-								
-								//var $shape = $('<div class="shape" data-shape="rectangle" style="left:'+nx+'px;top:'+ny+'px;">'+genNameHtml(node_info.name)+'</div>');
-								var $shape = $('<div class="shape" data-shape="circle" style="left:'+nx+'px;top:'+ny+'px;">'+verticalCenter(nodeInfoHtml)+'</div>');
-								$("#viz").append($shape);
-								
-								$shape.attr('uuid', node_info.uuid);
-								
-								$shape.bind( "dragstop", function(event, ui) {
-									var pos  = $(this).offset();
-									var uuid = $(this).attr('uuid');
-									//console.debug(uuid, pos.left,pos.top);
-									createCookie(uuid+".position", pos.left+','+pos.top);
-									$.ajax({
-										type: "POST",
-										url: '/db/viz/store_pos',
-										data:
-										{
-											uuid: uuid,
-											x:    pos.left,
-											y:    pos.top,
-										},
-										success: function(data)
-										{
-										}
-									});
-								});
-								
-								node_info.shapeRef = $shape;
-								node_uuid_map[node_info.uuid] = node_info;
-							}
+							var geoList = node_info.geo_info.split(", ");
+							// Lat         Lng
+							geoList.pop(); geoList.pop();
+							// Country
+							geoList.pop();
 							
-							jsPlumb.importDefaults({
-								Connector:"StateMachine",
-								//Connector:"Flowchart",
-								//Connector: [ "Bezier", { curviness:500 } ],
-								PaintStyle:{ lineWidth:3, strokeStyle:"#ffa500", "dashstyle":"2 4" },
-								Endpoint:[ "Dot", { radius:5 } ],
-								EndpointStyle:{ fillStyle:"#ffa500" }
+							var geoString = geoList.join(", ");
+							
+							var nodeInfoHtml = ""
+								+ "<b>" + node_info.name + "</b><br>"
+								+ geoString + "<br>"
+								+ "<i>" + node_info.hashnet_ver
+									+ (node_info.port != 8031 ? ":" + node_info.port : "") // only show port if not default hashnet port
+									+ " ("+node_info.cur_tx_id+")"
+									+ "</i>";
+							
+							//var $shape = $('<div class="shape" data-shape="rectangle" style="left:'+nx+'px;top:'+ny+'px;">'+genNameHtml(node_info.name)+'</div>');
+							var $shape = $('<div class="shape" data-shape="circle" style="left:'+nx+'px;top:'+ny+'px;">'+verticalCenter(nodeInfoHtml)+'</div>');
+							$container.append($shape);
+							
+							$shape.attr('uuid', node_info.uuid);
+							
+							$shape.bind( "dragstop", function(event, ui) {
+								var pos  = $(this).offset();
+								var uuid = $(this).attr('uuid');
+								//console.debug(uuid, pos.left,pos.top);
+								createCookie(uuid+".position", pos.left+','+pos.top);
+								$.ajax({
+									type: "POST",
+									url: '/db/viz/store_pos',
+									data:
+									{
+										uuid: uuid,
+										x:    pos.left,
+										y:    pos.top,
+									},
+									success: function(data)
+									{
+									}
+								});
 							});
 							
-							var con_created = {};
+							node_info.shapeRef = $shape;
+							node_uuid_map[node_info.uuid] = node_info;
+						}
+						
+						jsPlumb.importDefaults({
+							Connector:"StateMachine",
+							//Connector:"Flowchart",
+							//Connector: [ "Bezier", { curviness:500 } ],
+							PaintStyle:{ lineWidth:3, strokeStyle:"#ffa500", "dashstyle":"2 4" },
+							Endpoint:[ "Dot", { radius:5 } ],
+							EndpointStyle:{ fillStyle:"#ffa500" }
+						});
+						
+						var con_created = {};
+						
+						var cd = new Date();//"Thu Sep 06 2012 14:12:06 GMT-0400 (EDT)");
+						//console.debug(cd);
+						//console.debug(map_list);
+						var numHosts = map_list.length;
+						
+						window.chartData.node_uuid_map = node_uuid_map;
+						window.chartData.map_list = map_list;
+						
+						//if(!window.chartData.init)
+						//	showChart();
+						
+						for(var idx in map_list)
+						{
+							var node_info = map_list[idx];
+							var node_uuid = node_info.uuid;
+						
+							//if(idx == 0)
+							// console.debug(node_info.uuid, node_info.cur_tx_id);
 							
-							var cd = new Date();//"Thu Sep 06 2012 14:12:06 GMT-0400 (EDT)");
-							//console.debug(cd);
-							//console.debug(map_list);
-							var numHosts = map_list.length;
-							
-							for(var idx in map_list)
+							for(var link_idx in node_info.links)
 							{
-								var node_info = map_list[idx];
-								var node_uuid = node_info.uuid;
-									
-								for(var link_idx in node_info.links)
+								var link_info = node_info.links[link_idx];
+								var link_uuid = link_info.uuid;
+								var peer_info = node_uuid_map[link_info.uuid];
+								
+								var con_key = link_uuid>node_uuid ? link_uuid+'|'+node_uuid : node_uuid+'|'+link_uuid;
+								//console.debug(con_key);
+								
+								if(!con_created[con_key])
 								{
-									var link_info = node_info.links[link_idx];
-									var link_uuid = link_info.uuid;
-									var peer_info = node_uuid_map[link_info.uuid];
+									var $src  = node_info.shapeRef;
+									var $dest = peer_info.shapeRef;
 									
-									var con_key = link_uuid>node_uuid ? link_uuid+'|'+node_uuid : node_uuid+'|'+link_uuid;
-									//console.debug(con_key);
+									//con_created[con_key] = true;
 									
-									if(!con_created[con_key])
+									var pd = new Date(link_info.last_seen);
+									
+									//var diffMs = Math.abs(cd - pd);
+									//var diffMin = diffMs / 1000 / 60;
+									var diffMs = Math.abs(pd - cd); // milliseconds between now & Christmas
+									var diffDays = Math.round(diffMs / 86400000); // days
+									var diffHrs = Math.round((diffMs % 86400000) / 3600000); // hours
+									var diffMins = Math.round(((diffMs % 86400000) % 3600000) / 60000); // minutes
+									var diffSecs = Math.round((((diffMs % 86400000) % 3600000) % 60000) / 1000); // seconds
+									
+									var agoList = [];
+									if(diffDays > 0)
+										agoList.push(diffDays+" day"+(diffDays>1?"s":""));
+									else
 									{
-										var $src  = node_info.shapeRef;
-										var $dest = peer_info.shapeRef;
-										
-										//con_created[con_key] = true;
-										
-										var pd = new Date(link_info.last_seen);
-										
-										//var diffMs = Math.abs(cd - pd);
-										//var diffMin = diffMs / 1000 / 60;
-										var diffMs = Math.abs(pd - cd); // milliseconds between now & Christmas
-										var diffDays = Math.round(diffMs / 86400000); // days
-										var diffHrs = Math.round((diffMs % 86400000) / 3600000); // hours
-										var diffMins = Math.round(((diffMs % 86400000) % 3600000) / 60000); // minutes
-										var diffSecs = Math.round((((diffMs % 86400000) % 3600000) % 60000) / 1000); // seconds
-										
-										var agoList = [];
-										if(diffDays > 0)
-											agoList.push(diffDays+" day"+(diffDays>1?"s":""));
-										else
-										{
-											if(diffHrs > 0)
-												agoList.push(diffHrs+" hr"+(diffHrs>1?"s":""));
-											if(diffMins > 0)
-												agoList.push(diffMins+" min");
-											if(diffSecs > 0 && diffMins <= 0)
-												agoList.push(diffSecs+" sec");
-											if(agoList.length <= 0)
-												agoList.push("Less than 1 sec");
-										}
-										
-										var timeAgo = agoList.length <= 0 ? "" : (agoList.join(", ") + " ago");
-										var maxMinutes = 1000 * 60 * 10;
-										
-										// This will prevent the 'yellow' style from showing
-										//if(diffMs > maxMinutes)
-										//	link_info.host_down = 1;
-											
-										var latencyString = 
-											link_info.host_down > 0 ? "<b style='color:red'>Host Down</b>" :
-											link_info.latency   > 0 ? sprintf("%d ms latency",Math.round(link_info.latency * 1000))
-											: "Unknown latency";
-										
-										
-										var txStatus = '';
-										if(link_info.last_tx_sent)
-										{
-											var diff = node_info.cur_tx_id - link_info.last_tx_sent;
-											// We define maxLateTx as the numHosts*numHosts because the number of tx queued during a normal cycle could be *at least* as many as their are hosts,
-											// *2 update periods, *2 more for buffer
-											var maxLateTx = Math.pow(numHosts, 4) * 4;
-											//alert(diff);
-											txStatus = diff == 0 ? "Data current " : "<span style='color:" + (Math.abs(diff) > maxLateTx ? 'red' : 'green')+"'>"
-												+ Math.abs(diff)
-												//+ '/' + maxLateTx
-												+ (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
-										}
-											
-										//console.debug(diffMs, diffDays,diffHrs,diffMins);
-										
-										jsPlumb.connect({
-											source: $src.get(0),  // just pass in the current node in the selector for source 
-											target: $dest.get(0),
-											//here we supply a different anchor for source and for target, and we get the element's "data-shape"
-											//attribute to tell us what shape we should use.
-											anchors:
-											[
-												[ "Perimeter", { shape: $src.attr("data-shape")  }],
-												[ "Perimeter", { shape: $dest.attr("data-shape") }]
-											],
-											
-											paintStyle:
-												link_info.host_down>0 ? { lineWidth:1, strokeStyle:"red",    "dashstyle":"1 10" } :
-												diffMs > maxMinutes ?   { lineWidth:3, strokeStyle:"yellow", "dashstyle":"4 4" } :
-															{ lineWidth:3, strokeStyle:"green", /* "dashstyle":"2 4" */},
-											
-											endpointStyle:{ fillStyle: link_info.host_down>0 ? "red" : diffMs > maxMinutes ? "yellow": "green" },
-											
-											overlays:[
-												[ "Label", { label: txStatus + timeAgo+"<br>"+latencyString, location: 0.1, cssClass: "peer_info" } ],
-											]
-										});
-										
-										
+										if(diffHrs > 0)
+											agoList.push(diffHrs+" hr"+(diffHrs>1?"s":""));
+										if(diffMins > 0)
+											agoList.push(diffMins+" min");
+										if(diffSecs > 0 && diffMins <= 0)
+											agoList.push(diffSecs+" sec");
+										if(agoList.length <= 0)
+											agoList.push("Less than 1 sec");
 									}
+									
+									var timeAgo = agoList.length <= 0 ? "" : (agoList.join(", ") + " ago");
+									var maxMinutes = 1000 * 60 * 10;
+									
+									// This will prevent the 'yellow' style from showing
+									//if(diffMs > maxMinutes)
+									//	link_info.host_down = 1;
+										
+									var latencyString = 
+										link_info.host_down > 0 ? "<b style='color:red'>Host Down</b>" :
+										link_info.latency   > 0 ? sprintf("%d ms latency",Math.round(link_info.latency * 1000))
+										: "Unknown latency";
+									
+									
+									var txStatus = '';
+									if(link_info.last_tx_sent)
+									{
+										var diff = node_info.cur_tx_id - link_info.last_tx_sent;
+										// We define maxLateTx as the numHosts*numHosts because the number of tx queued during a normal cycle could be *at least* as many as their are hosts,
+										// *2 update periods, *2 more for buffer
+										var maxLateTx = Math.pow(numHosts, 4) * 4;
+										//alert(diff);
+										txStatus = diff == 0 ? "Data current " : "<span style='color:" + (Math.abs(diff) > maxLateTx ? 'red' : 'green')+"'>"
+											+ Math.abs(diff)
+											//+ '/' + maxLateTx
+											+ (diff > 0 ? ' tx behind' : ' tx ahead') + '</span> ';
+									}
+										
+									//console.debug(diffMs, diffDays,diffHrs,diffMins);
+									
+									jsPlumb.connect({
+										source: $src.get(0),  // just pass in the current node in the selector for source 
+										target: $dest.get(0),
+										//here we supply a different anchor for source and for target, and we get the element's "data-shape"
+										//attribute to tell us what shape we should use.
+										anchors:
+										[
+											[ "Perimeter", { shape: $src.attr("data-shape")  }],
+											[ "Perimeter", { shape: $dest.attr("data-shape") }]
+										],
+										
+										paintStyle:
+											link_info.host_down>0 ? { lineWidth:1, strokeStyle:"red",    "dashstyle":"1 10" } :
+											diffMs > maxMinutes ?   { lineWidth:3, strokeStyle:"yellow", "dashstyle":"4 4" } :
+														{ lineWidth:3, strokeStyle:"green", /* "dashstyle":"2 4" */},
+										
+										endpointStyle:{ fillStyle: link_info.host_down>0 ? "red" : diffMs > maxMinutes ? "yellow": "green" },
+										
+										overlays:[
+											[ "Label", { label: txStatus + timeAgo+"<br>"+latencyString, location: 0.1, cssClass: "peer_info" } ],
+										]
+									});
+									
+									
 								}
 							}
-							
-							// NOTE here we are just using getSelector so we don't have to rewrite the code for each of the supported libraries.
-							// you can just use the approriate selector from the library you're using, if you want to. like $(".shape) on jquery, for example.
-							var shapes = jsPlumb.getSelector(".shape");
-								
-							// make everything draggable
-							jsPlumb.draggable(shapes);
-							
-							hideLoading();
-							
-		// 						
-		// 					// loop through them and connect each one to each other one.
-		// 					for (var i = 0; i < shapes.length; i++)
-		// 					{
-		// 						for (var j = i + 1; j < shapes.length; j++)
-		// 						{
-		// 							jsPlumb.connect({
-		// 								source: shapes[i],  // just pass in the current node in the selector for source 
-		// 								target: shapes[j],
-		// 								// here we supply a different anchor for source and for target, and we get the element's "data-shape"
-		// 								// attribute to tell us what shape we should use.
-		// 								anchors:
-		// 								[
-		// 									[ "Perimeter", { shape: $(shapes[i]).attr("data-shape")  }],
-		// 									[ "Perimeter", { shape: $(shapes[j]).attr( "data-shape") }]
-		// 								]
-		// 							});				
-		// 						}	
-		// 					}
 						}
-					});
-				}
+						
+						// NOTE here we are just using getSelector so we don't have to rewrite the code for each of the supported libraries.
+						// you can just use the approriate selector from the library you're using, if you want to. like $(".shape) on jquery, for example.
+						var shapes = jsPlumb.getSelector(".shape");
+							
+						// make everything draggable
+						jsPlumb.draggable(shapes);
+						
+						hideLoading();
+						
+	// 						
+	// 					// loop through them and connect each one to each other one.
+	// 					for (var i = 0; i < shapes.length; i++)
+	// 					{
+	// 						for (var j = i + 1; j < shapes.length; j++)
+	// 						{
+	// 							jsPlumb.connect({
+	// 								source: shapes[i],  // just pass in the current node in the selector for source 
+	// 								target: shapes[j],
+	// 								// here we supply a different anchor for source and for target, and we get the element's "data-shape"
+	// 								// attribute to tell us what shape we should use.
+	// 								anchors:
+	// 								[
+	// 									[ "Perimeter", { shape: $(shapes[i]).attr("data-shape")  }],
+	// 									[ "Perimeter", { shape: $(shapes[j]).attr( "data-shape") }]
+	// 								]
+	// 							});				
+	// 						}	
+	// 					}
+					}
+				});
 			}
+			
+			window.jsPlumbCode = {
+						
+				init : function() {
+					setInterval(pollServer, 15 * 1000);
+					pollServer();
+				}
+			};
+				
 		
 		})();
 		
@@ -419,6 +739,8 @@
 			jsPlumbCode.init();
 			
 		});
+		
+		
 		
 		/**
 		sprintf() for JavaScript 0.7-beta1
@@ -603,9 +925,10 @@
 			argv.unshift(fmt);
 			return sprintf.apply(null, argv);
 		};
+		
+
 
 		</script>
 		<img src='/images/circle.png' style='display:none'>
-		<script>setTimeout(function(){window.location.reload()}, 30000) // Peers are checked every 30 seconds on the server</script>
-</body> 
+	</body> 
 </html>

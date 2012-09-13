@@ -1000,7 +1000,7 @@ package HashNet::StorageEngine::PeerServer;
 				undef $w;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
 				# or at least I couldn't get it working. This does work though.
-				$w = AnyEvent->timer (after => 15, cb => $timeout_sub );
+				$w = AnyEvent->timer (after => 30, cb => $timeout_sub );
 				
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 	
@@ -1160,7 +1160,7 @@ package HashNet::StorageEngine::PeerServer;
 				
 			}
 			
-			my $list = $self->engine->list($path);
+			my $list = $self->engine->list($path, 1); # 1 = include meta
 			
 			my $output = http_param($req, 'output') || 'html';
 			if($output eq 'json')
@@ -1173,13 +1173,15 @@ package HashNet::StorageEngine::PeerServer;
 
 			my $last_base = '';
 			my @rows = map {
-				my $value = ($list->{$_} || '');
+				my $value = ($list->{$_}->{data} || '');
+				my $ts    = ($list->{$_}->{timestamp} || '-');
 				#$value =~ s/$path/<b>$path<\/b>/;
 				my @base = split /\//; pop @base; my $b=join('',@base);
 				my $out = ""
 				. "<tr".($b ne $last_base ? " class=divider-top":"").">"
 				. "<td>". stylize_key($_, $path)     ."</td>"
 				. "<td>". $value ."</td>"
+				. "<td>". $ts ."</td>"
 				. "</tr>";
 				$last_base = $b;
 				$out;
@@ -1194,7 +1196,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "<body><h1><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle'></a> Query - HashNet StorageEngine Server</h1>"
 				. "<form action='/db/search'>Search: <input name=path value='$path'> <input type=submit value='Search'></form>"
 				. "<h3>" . ($path eq '/' ? "All Results" : "Results for '$path'") . "</h3>"
-				. "<table border=1><thead><th>Key</th><th>Value</th></thead>"
+				. "<table border=1><thead><th>Key</th><th>Value</th><th>TS</th></thead>"
 				. "<tbody>"
 				. join("\n", @rows)
 				. "</tbody></table>"
@@ -1834,11 +1836,11 @@ of software available.
 				# We dont use eng->put() here because it constructs a new tr
 				if($tr->type eq 'TYPE_WRITE_BATCH')
 				{
-					$eng->_put_local_batch($tr->data);
+					$eng->_put_local_batch($tr->data, $tr->timestamp);
 				}
 				else
 				{
-					$eng->_put_local($tr->key, $tr->data);
+					$eng->_put_local($tr->key, $tr->data, $tr->timestamp);
 				}
 				
 				$eng->_push_tr($tr, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
