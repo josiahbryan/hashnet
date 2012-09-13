@@ -1,16 +1,28 @@
 <!doctype html> 
 <html> 
 	<head> 
-		<title>HashNet Visulization Test</title> 
+		<title>HashNet Peer Visulization</title> 
 		<meta http-equiv="content-type" content="text/html;charset=utf-8" />
-		<!--<link rel="stylesheet" href="css/jsPlumbDemo.css">-->
-		<!--<link rel="stylesheet" href="css/perimeterAnchorsDemo.css">-->
 		<style>
 			body { 
 				background-color:white; font-size:90%;
 				/*background-image:url(../img/dynamicAnchorBg.jpg); */
 				font-family:Helvetica;
 			}
+			
+			#header {
+				color:rgb(220,220,220);
+				font-size:4em;
+				margin:0;
+				text-shadow: 0.0em 0.0em .1em rgb(220,220,220);
+			}
+			
+			#header img
+			{
+				opacity:0.20;
+				filter:alpha(opacity=20);
+			}
+			
 			
 			.shape {
 				z-index:2;
@@ -70,18 +82,26 @@
 		</style>
 	</head> 
 	<body onunload="jsPlumb.unload();">
-	
-		<div style="position:absolute"> 
-			<div id="demo"></div> 
+		
+		<div style='float:right;font-size:.85em'>
+			<i>Last updated <script>document.write(new Date())</script></i>
+		</div>
+		<h1 id=header><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle' style='margin-top:-15px'></a> HashNet StorageEngine Server</h1>
+
+		<div style="position:absolute;margin-top:-6em"> 
+			<div id="viz"></div> 
 		</div> 
 
-		<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js'></script>
+		<!-- http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js fails to load properly -->
+		<!--<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jquery/1.8.1/jquery.min.js'></script>-->
+		
+		<!-- jsPlumb fails with 1.8.1, so switching to code.jquery.com to get the old 1.7.1 -->
+		<script type='text/javascript' src='http://code.jquery.com/jquery-1.7.1.min.js'></script>
 		<script type='text/javascript' src='http://ajax.googleapis.com/ajax/libs/jqueryui/1.8.13/jquery-ui.min.js'></script> 
 				
 		<script type='text/javascript' src='/js/jquery.jsPlumb-1.3.13-all-min.js'></script>
 		<!--<script type='text/javascript' src='/js/jquery.jsPlumb-1.3.13-all.js'></script>--> 
 		
-		<!--  demo code --> 
 		<script>
 		;(function() {
 
@@ -153,7 +173,7 @@
 				}
 			}
 
-			window.jsPlumbDemo = {
+			window.jsPlumbCode = {
 					
 				init : function() {
 				
@@ -208,7 +228,7 @@
 								
 								//var $shape = $('<div class="shape" data-shape="rectangle" style="left:'+nx+'px;top:'+ny+'px;">'+genNameHtml(node_info.name)+'</div>');
 								var $shape = $('<div class="shape" data-shape="circle" style="left:'+nx+'px;top:'+ny+'px;">'+verticalCenter(nodeInfoHtml)+'</div>');
-								$("#demo").append($shape);
+								$("#viz").append($shape);
 								
 								$shape.attr('uuid', node_info.uuid);
 								
@@ -396,7 +416,7 @@
 			document.onselectstart = function () { return false; };
 			
 			jsPlumb.setRenderMode(jsPlumb.SVG);
-			jsPlumbDemo.init();
+			jsPlumbCode.init();
 			
 		});
 		
@@ -587,7 +607,5 @@
 		</script>
 		<img src='/images/circle.png' style='display:none'>
 		<script>setTimeout(function(){window.location.reload()}, 30000) // Peers are checked every 30 seconds on the server</script>
-		<!--<hr size=1>-->
-		<i>Last updated <script>document.write(new Date())</script></i>
 </body> 
 </html>

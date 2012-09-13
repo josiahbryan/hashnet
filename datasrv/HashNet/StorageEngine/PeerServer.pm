@@ -1209,7 +1209,7 @@ package HashNet::StorageEngine::PeerServer;
 		sub stylize_url
 		{
 			my $u = URI->new(shift);
-			return "<span class=proto>http://</span><span class=host>".$u->host."</span>:<span class=port>".$u->port."</span><span class=path>".$u->path."</span>";
+			return "<span class=url><span class=proto>http://</span><span class=host>".$u->host."</span>:<span class=port>".$u->port."</span><span class=path>".$u->path."</span></span>";
 		}
 		
 		# setup a page to list peers
@@ -1226,7 +1226,7 @@ package HashNet::StorageEngine::PeerServer;
 			# Only will load changes if changed in another thread
 			my @rows = map { "" 
 				. "<tr>"
-				. "<td><a href='$_->{url}' title='Try to visit $_->{url}' class=url>" . stylize_url($_->{url}). "</a></td>"
+				. "<td><a href='$_->{url}' title='Try to visit $_->{url}'>" . ($_->{node_info}->{name} || stylize_url($_->{url})). "</a></td>"
 				. "<td>".($_->host_down? "<i>Down</i>" : "<b>Up</b>")."</td>"
 				. "<td>" . ($_->{distance_metric} || "") . "</td>"
 				. "<td>" . ($_->{version} || '(Unknown)') . "</td>"

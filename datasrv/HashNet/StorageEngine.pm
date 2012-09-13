@@ -55,7 +55,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0278;
+	our $VERSION = 0.028;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';

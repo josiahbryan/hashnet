@@ -1,6 +1,7 @@
 body, table td, table th { font-family: Tahoma, verdana, Arial, Sans-Serif; }
 table td { font-size: 85% }
 table th { background: black; color: white; }
+table td a { text-decoration: none; color: black; }
 a.url { color: gray; text-decoration: none; }
 a.url .host { color: black; font-weight: bold; }
 a.url .port { font-style:italic; color: black }
