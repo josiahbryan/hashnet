@@ -737,15 +737,15 @@ package HashNet::StorageEngine::Peer;
 						#logmsg "TRACE", "Peer: poll(): Received ", $tr->key, ", tr UUID $tr->{uuid}", ($url ? " (from $url)" :""). "\n".Dumper($tr);
 	
 						my $eng = $self->engine;
-	
+						
 						# We dont use eng->put() here because it constructs a new tr
 						if($tr->type eq 'TYPE_WRITE_BATCH')
 						{
-							$eng->_put_local_batch($tr->data);
+							$eng->_put_local_batch($tr->data, $tr->timestamp);
 						}
 						else
 						{
-							$eng->_put_local($tr->key, $tr->data);
+							$eng->_put_local($tr->key, $tr->data, $tr->timestamp);
 						}
 	
 						$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
