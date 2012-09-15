@@ -300,7 +300,7 @@
 							type: 'Numeric',
 							grid: true,
 							minimum: 0,
-							maximum: 100,
+							maximum: 50,
 							position: 'left',
 							fields: uuidList, //['views', 'visits', 'users'],
 							title: 'Number of Transactions',
@@ -505,6 +505,7 @@
 							
 							var nx = node_info.x, ny = node_info.y;
 							
+							/*
 							var userSetPosition = readCookie(node_info.uuid+".position");
 							if(userSetPosition)
 							{
@@ -512,6 +513,7 @@
 								nx = parseFloat(list[0]);
 								ny = parseFloat(list[1]);
 							}
+							*/
 
 							var geoList = node_info.geo_info.split(", ");
 							// Lat         Lng
@@ -930,5 +932,6 @@
 
 		</script>
 		<img src='/images/circle.png' style='display:none'>
+		<script>setTimeout(function(){window.location.reload()}, 15 * 60 * 1000)</script>
 	</body> 
 </html>
