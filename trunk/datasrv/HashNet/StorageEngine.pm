@@ -155,6 +155,37 @@ package HashNet::StorageEngine;
 		$self->_list_peers();
 		
 		$self->save_peers();
+
+		# Check how far behind - if we are more than 500 tx behind a peer, clone the DB from that peer
+		my @peer_refs = @{ $self->{peers} || [] };
+		my $cloned_at = 0;
+		foreach my $peer (@peer_refs)
+		{
+			my $last_tx_recd = $peer->last_tx_recd;
+			my $cur_tx_id    = $peer->{cur_tx_id};
+			my $delta = $cur_tx_id - $last_tx_recd;
+			if($delta > 500)
+			{
+				trace "StorageEngine: More than 500 tx behind $peer->{url} ($peer->{node_info}->{name}), cloning database\n";
+				$self->clone_database($peer);
+				$cloned_at = $cur_tx_id;
+				last;
+			}
+		}
+
+		if($cloned_at > 0)
+		{
+			trace "StorageEngine: Cloned database at tx# $cloned_at, resetting last_tx_sent/recd on all peers\n";
+			my $cur_tx_id = $self->tx_db->length -1;
+			foreach my $peer (@peer_refs)
+			{
+				# We assume all *other* peers are at the same tx level (approx)
+				$peer->{last_tx_recd} = $cloned_at;
+
+				# Set all other peers to the current txid we have
+				$peer->{last_tx_sent} = $cur_tx_id;
+			}
+		}
 		
 		#die Dumper $self->{peers};
 
@@ -162,6 +193,30 @@ package HashNet::StorageEngine;
 		
 		return $self;
 	};
+
+	sub clone_database
+	{
+		my $self = shift;
+		my $peer = shift;
+
+		my $upgrade_url = $peer->url . '/clone_db';
+
+		my $tmp_file = '/tmp/hashnet-db-clone.tar.gz';
+
+		logmsg "INFO", "StorageEngine: clone_database(): Downloading database tar from $upgrade_url to $tmp_file\n";
+
+		getstore($upgrade_url, $tmp_file);
+
+		logmsg "INFO", "StorageEngine: clone_database(): Download finished.\n";
+
+		my $decomp_cmd = "tar zx -C ".$self->$db_root." -f $tmp_file";
+
+		trace "StorageEngine: clone_database(): Decompressing: '$decomp_cmd'\n";
+
+		system($decomp_cmd);
+
+		return 1;
+	}
 
 	sub db_root { shift->{db_root} }
 	
