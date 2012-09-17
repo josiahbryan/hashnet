@@ -578,6 +578,7 @@ package HashNet::StorageEngine::Peer;
 		my $data = decode_json($json);
 		$self->{version} = $data->{version};
 		$self->{node_info} = $data->{node_info};
+		$self->{cur_tx_id} = $data->{cur_tx_id};
 		#$self->{ver_string} = $data->{ver_string};
 		
 		if($self->{host_down})
@@ -755,11 +756,24 @@ package HashNet::StorageEngine::Peer;
 		}
 	}
 	
-	# TODO: Add support for a 'tr_pull' method to pull transactions if *this* host cannot receive tr_push's
 	sub push
 	{
 		my $self = shift;
-		my $tr = shift;
+		my $tr_batch = shift;
+		my $end_tx_id = shift || -1;
+		
+		if(ref $tr_batch eq 'HASH')
+		{
+			$tr_batch = [%{$tr_batch || {}}];
+		}
+		elsif(ref $tr_batch eq 'HashNet::StorageEngine::TransactionRecord')
+		{
+			$tr_batch = [$tr_batch->to_hash];
+		}
+
+		my @uuids_expected;
+		push @uuids_expected, $_->{uuid} foreach @{$tr_batch || []};
+		
 		my $url = $self->{url};
 		$url =~ s/\/$//g;
 		$url .= '/tr_push';
@@ -770,182 +784,103 @@ package HashNet::StorageEngine::Peer;
 			return 0;
 		}
 
-		# Set in StorageEngine now, only if we return a true value from push()
-		#$t->{last_tx_sent} = $self->{rel_id};
-
-		#my $payload = "data=".$tr->to_bytes;
-# 		my $payload = "data=".uri_escape($tr->to_json);
-# 		
-# 		# We only need to include peer_url to prevent recursion (or at least try to prevent it)
-# 		if(HashNet::StorageEngine::PeerServer->active_server)
-# 		{
-# 			$payload .= '&peer_url='. $self->{known_as} if $self->{known_as};
-# 		}
-
-
-
-		#my $payload_encrypted = $payload; #HashNet::Cipher->cipher->encrypt($payload);
-		
-# 		trace "Peer: push($url): Pushing transaction: $payload\n"
-# 			unless $tr->key =~ /^\/global\/system\/peers\//;
-
-		# LWP::Simple::Post
-		#my $r = post($url, $payload);
- 		#my $final_url = $url . '?' . $payload;
-
 		my $post_url = $url;
-		my $payload = {
-			data => $tr->to_json,
-			#uri_escape($tr->to_json);
-			peer_url => $self->{known_as},
+		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch), cur_tx_id => $cur_tx_id, node_uuid => $self->node_uuid };
+		my $payload =
+		{
+			data => encode_json($data),
 		};
 
- 		
-# 		trace "Peer: push($url): Post URL: '$post_url'\n"
-# 			unless $tr->key =~ /^\/global\/nodes\//;
-			
-		# NOTE I disabled the usage of AE's http_get() routine because test results showed that it
-		# increased the latency of push transactions from 16ms to over 60ms when using http_get()
-		# to push transactions between peers.
-		
-# 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
-# 		if($peer_server)
-# 		{
-# 			# If we're NOT using a peer_server (e.g. a command that logs in, pushes a value, then exits without starting an event loop)
-# 			# the http_get() call FAILS to EVER hit the peer - even though AnyEvent says the condvar should work and auto-start an event
-# 			# loop.
-# 			
-# 			# So, we only use the http_get() call if we're NOT under the server - that is, until we fix or can find out why http_get fails 
-# 			# outside of the peer server.
-# 		
-# 			# AnyEvent::HTTP
-# 	# 		http_post($url, $payload_encrypted, sub {
-# 	# 			my ($data, $headers) = @_;
-# 	# 			print "[TRACE] Peer: push($url): Data rx'd: [$data]\n";
-# 	# 			return;
-# 	# 		});
-# 	
-# 			my $cv = AnyEvent->condvar;
-# 			$self->{cvars} ||= [];
-# 			push @{$self->{cvars}}, $cv;
-# 			
-# 			http_get($final_url, sub {
-# 				my ($data, $headers) = @_;
-# 				$data ||= '';
-# 				
-# 				#print "[TRACE] Peer: push($url): Data rx'd: [$data]\n";
-# 				#return;
-# 				
-# 				$cv->send;
-# 				
-# 	# 			my @cvs = @{$self->{cvars}};
-# 	# 			@cvs = grep {$_ != $cv} @cvs;
-# 	# 			$self->{cvars} = \@cvs;
-# 	# 			
-# 	# 			undef $cv;
-# 			});
-# 
-# 		}
-# 		else
- 		{
-# 			# We don't care if we ever get a result from a TR push right now, so fork and forget
-# 			if(!fork)
-# 			{
-# 				my $r = get($final_url);
-# 				$r ||= '';
-# 				trace "Peer: push($url): Data rx'd: [$r]\n";
-# 				exit;
-# 			}
-# 			
-# 			$self->{child_forks} ++;
-# 			if($self->{child_forks} >= 10)
-# 			{
-# 				print "[TRACE] Peer: Collecting $self->{child_forks} children...\n";
-# 				#while( waitpid(-1,WNOHANG)>0 ) {}
-# 				wait();
-# 				print "[TRACE] Peer: Done collecting children.\n";
-# 				$self->{child_forks} = 0;
-# 				#die "test done";
-# 			}
-			
-			
-			# I've disabled the fork logic, above, because the children *never* exit
-			# (e.g. ps shows more and more 'perl' instances forking, even though exit is hit.)
-			# This happens regardless of whether we IGNORE the CHLD signal, call waitpid()
-			# in a tight loop, or call wait() directly - none of those clears the dead forks
-			# off the process table. After 5k-10k put() calls in the same process using fork(),
-			# the system *will* eventually grind to a halt.
-			
-			# Therefore, we just use get() directly, wraped in an alarm to prevent remote host
-			# from freezing our loop.
-			
-			# Testing 10k put()'s in a loop gave an average time of 20ms per put() call to a
-			# peer running on localhost. Additionally, anecdotal observations of peers running
-			# over SSH tunnels this weekend showed latencies for /db/ver requests anywhere from
-			# 0.05 to 1.5 seconds - so this timeout should be more than enough for "normal"
-			# operations.
- 			my $timeout = 999.0;
- 			
- 			my $result = undef;
 
-			if(!$self->{ua})
+		# Testing 10k put()'s in a loop gave an average time of 20ms per put() call to a
+		# peer running on localhost. Additionally, anecdotal observations of peers running
+		# over SSH tunnels this weekend showed latencies for /db/ver requests anywhere from
+		# 0.05 to 1.5 seconds - so this timeout should be more than enough for "normal"
+		# operations.
+		my $timeout = 999.0;
+
+		my $json = undef;
+
+		if(!$self->{ua})
+		{
+			$self->{ua} = LWP::UserAgent->new;
+			$self->{ua}->timeout(10);
+			$self->{ua}->env_proxy;
+		}
+
+		my $ua = $self->{ua};
+
+		#trace "Peer: push($url): Starting push, timeout:$timeout\n";
+		my $start = time();
+		#trace "Peer: push(): post_ur:$post_url, payload:".Dumper($payload);
+		#my $timed_out = exec_timeout $timeout, sub{ $result = get($final_url) };
+		my $timed_out = exec_timeout $timeout, sub
+		{
+			my $response = $ua->post($post_url, $payload);
+
+			if ($response->is_success)
 			{
-				$self->{ua} = LWP::UserAgent->new;
-				$self->{ua}->timeout(10);
-				$self->{ua}->env_proxy;
+				$json = $response->decoded_content;  # or whatever
 			}
-			
-			my $ua = $self->{ua};
-							
-			#trace "Peer: push($url): Starting push, timeout:$timeout\n";
-			my $start = time();
-			#trace "Peer: push(): post_ur:$post_url, payload:".Dumper($payload);
- 			#my $timed_out = exec_timeout $timeout, sub{ $result = get($final_url) };
-			my $timed_out = exec_timeout $timeout, sub
+			else
 			{
-				my $response = $ua->post($post_url, $payload);
+				debug "Peer: push($post_url): Error while posting: ", $response->status_line, "\n";
+				#die $response->status_line;
+			}
+		};
 
-				if ($response->is_success)
-				{
-					$result = $response->decoded_content;  # or whatever
-				}
-				else
-				{
-					debug "Peer: push($post_url): Error while posting: ", $response->status_line, "\n";
-					#die $response->status_line;
-				}
+		my $end = time();
+		my $diff = $end - $start;
+		#trace "Peer: push($url): Done push, timed_out?'$timed_out', diff:'$diff'\n";
+
+		if($timed_out)
+		{
+			debug "Peer: push($url): Timeout while trying to push transaction to $post_url";
+			return 0;
+		}
+
+		#trace "Peer: push($url): Data rx'd: [$result]\n";
+		my $rx_uuid_list;
+		if(!$json)
+		{
+			debug "Peer: push($url): No data received from transaction push\n";
+			return 0;
+		}
+
+		my $data;
+		{
+			local $@;
+			eval
+			{
+				$rx_uuid_list = decode_json($json);
 			};
-			
- 			my $end = time();
- 			my $diff = $end - $start;
- 			#trace "Peer: push($url): Done push, timed_out?'$timed_out', diff:'$diff'\n";
-			
-			if($timed_out)
+
+			if($@)
 			{
-				debug "Peer: push($url): Timeout while trying to push transaction to $post_url";
-				return 0;
-			}
-			
-			#trace "Peer: push($url): Data rx'd: [$result]\n";
-			my $rx_uuid = $result;
-			$rx_uuid =~ s/[\r\n]//g;
-			$rx_uuid =~ s/(^\s+|\s+$)//g;
-			
-			if(!$rx_uuid)
-			{
-				debug "Peer: push($url): No data received from transaction push\n";
-				return 0;
-			}
-			
-			if($rx_uuid ne $tr->uuid)
-			{
-				debug "Peer: push($url): Error pushing: value returned ($rx_uuid) does not match the UUID we pushed ($tr->{uuid})\n";
+				logmsg "TRACE", "Peer: push($url): Error parsing JSON from server: $@, data: $json\n";
 				return 0;
 			}
 		}
-		
-		
-		# TODO: add a timestamp and global sequence number (??) to transactions!
+
+		my %uuids_rxd;
+		eval
+		{
+			%uuids_rxd = map { $_ =>  1 } @{$rx_uuid_list || []};
+		};
+		if($@)
+		{
+			logmsg "TRACE", "Peer: push($url): Error checking rx'd uuid list: $@\n";
+		}
+
+		foreach my $uuid (@uuids_expected)
+		{
+			if(!defined $uuids_rxd{$uuid})
+			{
+				debug "Peer: push($url): Error pushing: uuid $uuid missing from results returned from server\n";
+				return 0;
+			}
+		}
+
 		return 1;
 	}
 	

@@ -101,7 +101,7 @@
 		</div>
 		<h1 id=header><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle' style='margin-top:-15px'></a> HashNet StorageEngine Server</h1>
 
-		<div style="position:absolute;margin-top:-6em"> 
+		<div style="position:absolute;top:0;left:0">
 			<div id="viz"></div> 
 		</div> 
 
@@ -215,12 +215,12 @@
 				seriesList.push(
 				{
 					type: 'line',
-					smooth: false,
+					smooth: true,
 					axis: ['left', 'bottom'],
 					xField: 'date',
 					yField: uuid,
 					title: node_uuid_map[uuid].name,
-					displayName: node_uuid_map[uuid].name,
+					//displayName: node_uuid_map[uuid].name,
 					label: {
 						display: 'none',
 						field: uuid,
