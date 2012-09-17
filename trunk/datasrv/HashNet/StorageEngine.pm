@@ -398,13 +398,16 @@ package HashNet::StorageEngine;
 			return;
 		}
 
+		# _put_local_batch will set the 'edit_num' key for each item in _batch_list so the edit_nums are stored in the $tr (by way of the reference given below)
+		$self->_put_local_batch($self->{_batch_list});
+		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', $self->{_batch_list}, 'TYPE_WRITE_BATCH');
+		
 		# Moved this call to _push_tr
 		#$tr->update_route_history;
 
 		$self->_push_tr($tr);
-		$self->_put_local_batch($self->{_batch_list});
-
+		
 		undef $self->{_batch_list};
 		$self->{_batch_update} = 0;
 	}
@@ -422,7 +425,8 @@ package HashNet::StorageEngine;
 
 		foreach my $item (@batch)
 		{
-			$self->_put_local($item->{key}, $item->{val}, $timestamp);
+			$item->{edit_num} =
+				$self->_put_local($item->{key}, $item->{val}, $timestamp);
 		}
 	}
 
@@ -517,8 +521,8 @@ package HashNet::StorageEngine;
 
 		logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
 
-		$self->_put_peers($key, $val);
-		$self->_put_local($key, $val);
+		my $edit_num = $self->_put_local($key, $val);
+		$self->_put_peers($key, $val, $edit_num);
 	}
 		
 	sub _put_peers
@@ -526,8 +530,11 @@ package HashNet::StorageEngine;
 		my $self = shift;
 		my $key = shift;
 		my $val = shift;
+		my $edit_num = shift || undef;
 		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
+		
+		$tr->{edit_num} = $edit_num;
 		# Moved this call to _push_tr
 		#$tr->update_route_history;
 		
@@ -691,7 +698,8 @@ package HashNet::StorageEngine;
 		my $self = shift;
 		my $key = shift;
 		my $val = shift;
-		my $timestamp = shift || undef;
+		my $check_timestamp = shift || undef;
+		my $check_edit_num  = shift || undef; 
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
@@ -702,24 +710,41 @@ package HashNet::StorageEngine;
 		
 		my $key_file = $key_path . '/data';
 		
-		if(defined $timestamp
-		   && -f $key_file)
+		my $edit_num = 0;
+		#if(defined $timestamp
+		#   && -f $key_file)
+		if(-f $key_file)
 		{
-			my $key_data = retrieve($key_file) || {}; #->{data};
-			my $key_ts = $key_data->{timestamp};
-			if($timestamp < $key_ts)
+			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
+			
+			$edit_num = $key_data->{edit_num};
+			
+			if(defined $check_timestamp)
 			{
-				logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $timestamp < stored ts $key_ts)\n";
-				return 0;
+				my $key_ts = $key_data->{timestamp};
+				if($check_timestamp < $key_ts)
+				{
+					logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $check_timestamp < stored ts $key_ts)\n";
+					return undef;
+				}
+			}
+			
+			if(defined $check_edit_num &&
+			   $check_edit_num < $edit_num)
+			{
+				logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+				return undef;
 			}
 		}
 
-		store({ data => $val, timestamp => $timestamp || time() }, $key_file);
+		$edit_num ++;
+		
+		store({ data => $val, timestamp => $timestamp || time(), edit_num => $edit_num }, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
 
-		return 1;
+		return $edit_num;
 	}
 
 	sub sanatize_key
@@ -808,6 +833,9 @@ package HashNet::StorageEngine;
 			if(defined ($val = $p->pull($key, $req_uuid)))
 			{
 				logmsg "TRACE", "StorageEngine: get(): Pulled $key from peer $p->{url}\n";
+				
+				# TODO Revisit this - since we're putting an item without sending out a new TR, and since
+				# _put_local incs the edit_num, we probably will have a newer edit_num than our peers - at least for a short while...
 				$self->_put_local($key, $val);
 				last;
 			}

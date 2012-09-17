@@ -50,6 +50,7 @@ package HashNet::StorageEngine::TransactionRecord;
 			# Eash hash has:
 			# 	- uuid	- host UUIDs where this transaction has been (HashNet::StorageEngine::PeerServer->node_info->{uuid})
 			#	- ts	- timestamp received/generated at the host
+		$self->{edit_num} = undef; # edit number to be propogated amongst all peers - we theorize it should stay in sync, testing to be done...
 		
 		$self->{local_timestamp} = time(); # for sequencing for pull peers
 			# NOTE NOT stored by to_hash/from_hash
@@ -67,6 +68,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub is_valid { shift->{is_valid} }
 	sub rel_id { shift->{rel_id} }
 	sub merged_uuid_list { shift->{merged_uuid_list} || [] }
+	sub edit_num { shift->{edit_num} }
 
 	sub host_uuid()
 	{
@@ -169,6 +171,8 @@ package HashNet::StorageEngine::TransactionRecord;
 			route_hist => \@hist,
 			# Only created by HashNet::StorageEngine->merge_transactions(), and used by PeerServer when receiving a merged tx
 			merged_uuid_list => $self->{merged_uuid_list},
+			# set by StorageEngine in _put_peers and _put_local_batch, used (indirectly) by _put_local for received transactions
+			edit_num => $elf->{edit_num},
 		}
 	}
 
@@ -234,6 +238,7 @@ package HashNet::StorageEngine::TransactionRecord;
 		$obj->{rel_id}    = $hash->{rel_id};
 		$obj->{route_hist} = $hash->{route_hist};
 		$obj->{merged_uuid_list} = $hash->{merged_uuid_list};
+		$obj->{edit_num} = $hash->{edit_num};
 		return $obj;
 	}
 };
