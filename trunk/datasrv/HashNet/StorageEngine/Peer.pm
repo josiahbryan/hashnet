@@ -785,7 +785,7 @@ package HashNet::StorageEngine::Peer;
 		}
 
 		my $post_url = $url;
-		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch), cur_tx_id => $cur_tx_id, node_uuid => $self->node_uuid };
+		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch), cur_tx_id => $end_tx_id, node_uuid => $self->node_uuid };
 		my $payload =
 		{
 			data => encode_json($data),

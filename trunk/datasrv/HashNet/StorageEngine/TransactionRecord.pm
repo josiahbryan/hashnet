@@ -172,7 +172,7 @@ package HashNet::StorageEngine::TransactionRecord;
 			# Only created by HashNet::StorageEngine->merge_transactions(), and used by PeerServer when receiving a merged tx
 			merged_uuid_list => $self->{merged_uuid_list},
 			# set by StorageEngine in _put_peers and _put_local_batch, used (indirectly) by _put_local for received transactions
-			edit_num => $elf->{edit_num},
+			edit_num => $self->{edit_num},
 		}
 	}
 

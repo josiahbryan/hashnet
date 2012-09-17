@@ -209,7 +209,7 @@ package HashNet::StorageEngine;
 
 		logmsg "INFO", "StorageEngine: clone_database(): Download finished.\n";
 
-		my $decomp_cmd = "tar zx -C ".$self->$db_root." -f $tmp_file";
+		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file";
 
 		trace "StorageEngine: clone_database(): Decompressing: '$decomp_cmd'\n";
 
@@ -739,7 +739,7 @@ package HashNet::StorageEngine;
 
 		$edit_num ++;
 		
-		store({ data => $val, timestamp => $timestamp || time(), edit_num => $edit_num }, $key_file);
+		store({ data => $val, timestamp => $check_timestamp || time(), edit_num => $edit_num }, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;

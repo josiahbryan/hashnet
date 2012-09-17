@@ -772,7 +772,7 @@ package HashNet::StorageEngine::PeerServer;
 			# is set so we know where to store the software
 			
 			# NOTE DisabledForTesting
-			my $timer; $timer = AnyEvent->timer(after => 0.1, cb => sub
+			my $reg_timer; $reg_timer = AnyEvent->timer(after => 0.1, cb => sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
 				my @peers = @{ $engine->peers };
@@ -782,15 +782,12 @@ package HashNet::StorageEngine::PeerServer;
 					$self->reg_peer($peer);
 				}
 				logmsg "INFO", "PeerServer: Registration complete\n";
-				undef $timer;
+				undef $reg_timer;
 			});
 			
-			my $w;
-			my $timeout_sub; $timeout_sub = sub
+			my $peer_check_timer;
+			my $peer_check_sub; $peer_check_sub = sub
 			{
-				my $db = $engine->tx_db;
-				my $cur_tx_id = $db->length() -1;
-
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
 				my @peers = @{ $engine->peers };
 
@@ -807,26 +804,25 @@ package HashNet::StorageEngine::PeerServer;
 					# NOTE DisabledForTesting
 					$peer->update_distance_metric();
 					
-					$peer->poll();
+					#$peer->poll();
 					
 					# NOTE DisabledForTesting
 					$peer->put_peer_stats(); #$engine);
-					
-					#logmsg "INFO", "PeerServer: Peer check: $peer->{url} \t $peer->{distance_metric} \t\n" # '$peer->{host_down}'\n"
-					#	unless $peer->{host_down};
-					#next;
-					
-					if(!$peer->host_down && !$self->is_this_peer($peer->url))
-					{
-						$self->push_outstanding_transactions($peer);
-						
-						# NOTE DisabledForTesting
-						# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
-						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
-						$self->update_software($peer);
-						logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
-					}
+
+					# NOTE DisabledForTesting
+					# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
+					logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+					$self->update_software($peer);
+					logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
 				}
+
+
+				undef $peer_check_timer;
+				# Yes, I know AE has an 'interval' property - but it does not seem to work,
+				# or at least I couldn't get it working. This does work though.
+				$peer_check_timer = AnyEvent->timer (after => 60, cb => $peer_check_sub );
+
+				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 
 # 				# NOTE DisabledForTesting
  				$self->engine->begin_batch_update();
@@ -848,18 +844,51 @@ package HashNet::StorageEngine::PeerServer;
 						}
 					}
 
+					my $db = $engine->tx_db;
+					my $cur_tx_id = $db->length() -1;
+
 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
- 
+
   				}
  				$self->engine->end_batch_update();
 
-				undef $w;
+			};
+
+			# Start the timer running by calling an initial check
+			$peer_check_sub->();
+
+			my $peer_poll_timer;
+			my $peer_poll_sub; $peer_poll_sub= sub
+			{
+				logmsg "INFO", "PeerServer: Push/pulling peers\n";
+				my @peers = @{ $engine->peers };
+
+				#@peers = (); # TODO JUST FOR DEBUGGING
+
+				foreach my $peer (@peers)
+				{
+					$peer->load_changes();
+
+					if(!$peer->host_down && !$self->is_this_peer($peer->url))
+					{
+						if($peer->{poll_only})
+						{
+							$peer->poll();
+						}
+						else
+						{
+							$self->push_outstanding_transactions($peer);
+						}
+					}
+				}
+
+				undef $peer_poll_timer;
 				# Yes, I know AE has an 'interval' property - but it does not seem to work,
 				# or at least I couldn't get it working. This does work though.
-				$w = AnyEvent->timer (after => 30, cb => $timeout_sub );
+				$peer_poll_timer = AnyEvent->timer (after => 1, cb => $peer_poll_sub );
 				
-				logmsg "INFO", "PeerServer: Peer check complete\n\n";
+				logmsg "INFO", "PeerServer: Push/pull complete\n\n";
 	
 			};
 			#$w = AnyEvent->timer (after => 1, cb => $timeout_sub);
@@ -868,7 +897,7 @@ package HashNet::StorageEngine::PeerServer;
 
 			# Call the timeout sub explicitly because sometimes it would not
 			# run if we just set the timer, above
-			$timeout_sub->();
+			$peer_poll_sub->();
 			
 			# run the event loop, (should) never return
 			AnyEvent::Loop::run();
