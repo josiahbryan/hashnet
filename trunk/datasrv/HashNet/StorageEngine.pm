@@ -297,8 +297,10 @@ package HashNet::StorageEngine;
 		my $url = shift;
 		my $known_as = shift  || undef;
 		my $bulk_mode = shift || 0;
+		my $peer_uuid = shift || undef;
 
-		my ($peer_uuid) = HashNet::StorageEngine::Peer->is_valid_peer($url);
+		($peer_uuid) = HashNet::StorageEngine::Peer->is_valid_peer($url)
+			if ! defined $peer_uuid;
 
 		# In "bulk mode", we assume the user knows what they're doing - so we dont reject a peer just because we don't get a UUID from it
 		if(!$bulk_mode)
@@ -730,7 +732,7 @@ package HashNet::StorageEngine;
 		my $check_timestamp = shift || undef;
 		my $check_edit_num  = shift || undef;
 		 
-		trace "StorageEngine: _put_local(): '$key' \t => ", ("'$val'" || '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;

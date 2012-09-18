@@ -1262,6 +1262,8 @@ package HashNet::StorageEngine::PeerServer;
 		#logmsg "DEBUG", "PeerServer: Saving config to $CONFIG_FILE\n";
 		YAML::Tiny::DumpFile($CONFIG_FILE, $config);
 
+		return if ! $self->{node_info_changed_flag_file};
+
 		# The timer loop will check for the existance of this file and push the node info into the storage engine
 		open(FILE,">$self->{node_info_changed_flag_file}") || warn "Unable to write to $self->{node_info_changed_flag_file}: $!";
 		print FILE "1\n";
@@ -2230,8 +2232,9 @@ of software available.
 		my $peer_ip  = $req->{host} || '';
 		$peer_ip = (my_ip_list())[0] if !$peer_ip || $peer_ip eq '127.0.0.1';
 		
-		my $peer_url = http_param($req, 'peer_url') || 'http://' . $peer_ip . ':' . $self->peer_port() . '/db' ;
-		my $peer_ver = http_param($req, 'ver') || 0;
+		my $peer_url  = http_param($req, 'peer_url') || 'http://' . $peer_ip . ':' . $self->peer_port() . '/db' ;
+		my $peer_ver  = http_param($req, 'ver') || 0;
+		my $peer_uuid = http_param($req, 'uuid') || undef;
 		
 		#logmsg "DEBUG", "PeerServer: resp_reg_peer(): \$peer_url: $peer_url, given parm: ", http_param($req, 'peer_url'), "\n";
 		
@@ -2267,7 +2270,7 @@ of software available.
 
 		foreach my $possible_url (@list_to_check)
 		{
-			my $result = $self->engine->add_peer($possible_url);
+			my $result = $self->engine->add_peer($possible_url, undef, undef, $peer_uuid);
 
 			# >0 means it's added
 			# <0 means it's already in the list
@@ -2303,7 +2306,7 @@ of software available.
 				logmsg "DEBUG", "PeerServer: resp_reg_peer(): Local URL '$local_url' valid, trying to add to engine\n";
 				#$final_url = $local_url;
 
-				my $result = $self->engine->add_peer($local_url);
+				my $result = $self->engine->add_peer($local_url, undef, undef, $peer_uuid);
 
 				# >0 means it's added
 				# <0 means it's already in the list
