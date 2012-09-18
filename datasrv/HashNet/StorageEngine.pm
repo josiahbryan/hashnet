@@ -32,7 +32,7 @@ package HashNet::StorageEngine;
 	#		- Consider using Object::Event
 	
 	use base qw/Object::Event/;
-	use Storable qw/freeze thaw store retrieve/;
+	use Storable qw/freeze thaw nstore retrieve/;
 	use File::Path qw/mkpath/;
 	use Data::Dumper;
 	use Time::HiRes qw/time sleep/;
@@ -770,7 +770,7 @@ package HashNet::StorageEngine;
 
 		$edit_num ++;
 		
-		store({ data => $val, timestamp => $check_timestamp || time(), edit_num => $edit_num }, $key_file);
+		nstore({ data => $val, timestamp => $check_timestamp || time(), edit_num => $edit_num }, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
