@@ -327,6 +327,8 @@ package HashNet::StorageEngine::Peer;
 	
 	sub last_tx_recd { shift->{last_tx_recd} }
 	sub last_tx_sent { shift->{last_tx_sent} }
+	
+	sub poll_only   { shift->{poll_only} }
 
 # 	# Use settors for last_tx_* so we can save_state immediately
 # 	sub set_last_tx_recd
@@ -390,7 +392,9 @@ package HashNet::StorageEngine::Peer;
 		my $my_root = '/global/nodes/'.$my_uuid.'/peers';
 		my $key_root = $my_root.'/'.$other_uuid;
 
-		$self->engine->begin_batch_update();
+		my $in_batch = $self->engine->in_batch_update;
+		
+		$self->engine->begin_batch_update() if ! $in_batch;
 		
 		my $flag = $self->host_down ? 1:0;
 		my $cur_flag = $self->engine->get("$key_root/host_down") || 0;
@@ -414,8 +418,8 @@ package HashNet::StorageEngine::Peer;
 		$self->engine->put("$key_root/last_seen", $self->last_seen)
 			if !$self->host_down;
 
-		# Calls end_batch_update automatically
-		$self->engine->end_batch_update;
+		# Calls end_batch_update automatically, only if not already in a batch update by external caller
+		$self->engine->end_batch_update if !$in_batch;
 
 		#$self->engine->put("$key_root/latency", $self->distance_metric);
 	}
