@@ -731,6 +731,8 @@ package HashNet::StorageEngine;
 		my $val = shift;
 		my $check_timestamp = shift || undef;
 		my $check_edit_num  = shift || undef;
+
+		return if ! defined $key;
 		 
 		trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
 		
@@ -783,6 +785,7 @@ package HashNet::StorageEngine;
 	sub sanatize_key
 	{
 		my $key = shift;
+		return $key if !defined $key;
 		if($key =~ /([^A-Za-z0-9 _.\-\/])/)
 		{
 			$@ = "Invalid character in key: '$1'";
@@ -889,7 +892,7 @@ package HashNet::StorageEngine;
 	sub list
 	{
 		my $self = shift;
-		my $root = shift;
+		my $root = shift || '/';
 		my $incl_meta = shift || 0;
 
 		my $db_root = $self->{db_root};
