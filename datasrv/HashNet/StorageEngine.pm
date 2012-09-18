@@ -38,6 +38,7 @@ package HashNet::StorageEngine;
 	use Time::HiRes qw/time sleep/;
 	use Cwd qw/abs_path/;
 	use DBM::Deep;
+	use LWP::Simple qw/getstore/; # for clone database
 
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
@@ -162,8 +163,9 @@ package HashNet::StorageEngine;
 		foreach my $peer (@peer_refs)
 		{
 			my $last_tx_recd = $peer->last_tx_recd || 0;
-			my $cur_tx_id    = $peer->{cur_tx_id}  || 0;
+			my $cur_tx_id    = $peer->cur_tx_id    || 0;
 			my $delta = $cur_tx_id - $last_tx_recd;
+			#print Dumper $last_tx_recd, $cur_tx_id, $delta;
 			if($delta > 500)
 			{
 				trace "StorageEngine: More than 500 tx behind $peer->{url} ($peer->{node_info}->{name}), cloning database\n";
@@ -172,22 +174,35 @@ package HashNet::StorageEngine;
 				last;
 			}
 		}
-
+		
 		if($cloned_at > 0)
 		{
 			trace "StorageEngine: Cloned database at tx# $cloned_at, resetting last_tx_sent/recd on all peers\n";
 			my $cur_tx_id = $self->tx_db->length -1;
+			#debug "StorageEngine: \$cur_tx_id: $cur_tx_id\n"; 
 			foreach my $peer (@peer_refs)
 			{
+				#debug "StorageEngine: Resetting peer $peer->{url} to $cloned_at / $cur_tx_id\n";
+				$peer->update_begin;
+				
 				# We assume all *other* peers are at the same tx level (approx)
 				$peer->{last_tx_recd} = $cloned_at;
 
 				# Set all other peers to the current txid we have
 				$peer->{last_tx_sent} = $cur_tx_id;
+				
+				$peer->update_end;
+# 				$peer->{engine} = undef;
+# 				print Dumper $peer;
+# 				$peer->{engine} = $self;
 			}
+			
+			info "StorageEngine: Clone finished\n";
 		}
 		
-		#die Dumper $self->{peers};
+		#print Dumper $self->{peers};
+		#die Dumper \@peer_refs;
+		#die "Test done";
 
 		#print STDERR "[DEBUG] StorageEngine: new: mark3\n";
 		
@@ -434,7 +449,7 @@ package HashNet::StorageEngine;
 		foreach my $item (@batch)
 		{
 			$item->{edit_num} =
-				$self->_put_local($item->{key}, $item->{val}, $timestamp);
+				$self->_put_local($item->{key}, $item->{val}, $timestamp, $item->{edit_num});
 		}
 	}
 
@@ -640,26 +655,32 @@ package HashNet::StorageEngine;
 				if(defined $peer_server &&
 				   $peer_server->is_this_peer($p->url))
 				{
-					my $lock = $p->update_begin();
+					#my $lock = 
+					$p->update_begin();
 					$p->{last_tx_sent} = $tr->{rel_id};
 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - it's our local peer and local is active.\n";
+					$p->update_end;
 					next;
 				}
 				
 				if(defined $skip_peer_url &&
 				   $p->url eq $skip_peer_url)
 				{
-					my $lock = $p->update_begin();
+					#my $lock =
+					$p->update_begin();
 					$p->{last_tx_sent} = $tr->{rel_id};
 					#logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " by request of caller.\n";
+					$p->update_end;
 					next;
 				}
 
 				if(defined $p->node_uuid &&
 				   $tr->has_been_here($p->node_uuid))
 				{
-					my $lock = $p->update_begin();
+					#my $lock = 
+					$p->update_begin();
 					$p->{last_tx_sent} = $tr->{rel_id};
+					$p->update_end;
 
 					logmsg "TRACE", "StorageEngine: _push_tr(): Not pushing to ", $p->url, " - routing history shows it was already on that host.\n";
 					next;
@@ -707,7 +728,9 @@ package HashNet::StorageEngine;
 		my $key = shift;
 		my $val = shift;
 		my $check_timestamp = shift || undef;
-		my $check_edit_num  = shift || undef; 
+		my $check_edit_num  = shift || undef;
+		 
+		trace "StorageEngine: _put_local(): '$key' \t => ", ("'$val'" || '(undef)'), "\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;

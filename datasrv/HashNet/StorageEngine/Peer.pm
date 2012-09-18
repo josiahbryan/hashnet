@@ -329,6 +329,7 @@ package HashNet::StorageEngine::Peer;
 	sub last_tx_sent { shift->{last_tx_sent} }
 	
 	sub poll_only   { shift->{poll_only} }
+	sub cur_tx_id   { shift->{cur_tx_id} }
 
 # 	# Use settors for last_tx_* so we can save_state immediately
 # 	sub set_last_tx_recd
@@ -569,18 +570,18 @@ package HashNet::StorageEngine::Peer;
 		{
 			info "Peer: calc_distance_metric($url): Timed out while updating metrics, marking down\n";
 			$self->{host_down} = 1;
-			return 555;
+			return undef;
 		}
 
 		if(!$json)
 		{
 			logmsg "WARN", "Peer: calc_distance_metric($url): Empty string from $ver_url, marking down\n";
 			$self->{host_down} = 1;
-			return 999;
+			return undef;
 		}
 		
 		my $data = decode_json($json);
-		$self->{version} = $data->{version};
+		$self->{version}   = $data->{version};
 		$self->{node_info} = $data->{node_info};
 		$self->{cur_tx_id} = $data->{cur_tx_id};
 		#$self->{ver_string} = $data->{ver_string};
@@ -789,7 +790,15 @@ package HashNet::StorageEngine::Peer;
 		}
 
 		my $post_url = $url;
-		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch), cur_tx_id => $end_tx_id, node_uuid => $self->node_uuid };
+		my $data =
+		{
+			batch     => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch),
+			cur_tx_id => $end_tx_id,
+			node_uuid => $self->node_uuid,
+		};
+		
+		#debug "Peer: push($url): Data dump: ", Dumper($data);
+		 
 		my $payload =
 		{
 			data => encode_json($data),

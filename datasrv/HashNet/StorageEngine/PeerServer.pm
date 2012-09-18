@@ -705,6 +705,8 @@ package HashNet::StorageEngine::PeerServer;
 		
 		# Sometimes doesn't work...
 		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		
+		return $code_sub;
 	};
 	
 	sub set_timeout($$)
@@ -720,6 +722,8 @@ package HashNet::StorageEngine::PeerServer;
 		};
 		
 		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		
+		return $code_sub;
 	}
 	
 
@@ -839,7 +843,8 @@ package HashNet::StorageEngine::PeerServer;
 				logmsg "INFO", "PeerServer: Push complete\n\n";
 			};
 			
-			set_repeat_timeout  5.0, sub
+			# NOTE DisabledForTesting
+			set_repeat_timeout  15.0, sub
 			{
 				logmsg "INFO", "PeerServer: Pulling from poll-only peers\n";
 				
@@ -850,14 +855,15 @@ package HashNet::StorageEngine::PeerServer;
 					
 					$peer->poll()
 						if  $peer->poll_only &&
-						   !$peer->host_down &&
+						   #!$peer->host_down &&
 						   !$self->is_this_peer($peer->url);
 				}
 				
 				logmsg "INFO", "PeerServer: Pulling complete\n\n";
 			};
 			
-			set_repeat_timeout 60.0, sub
+			# NOTE DisabledForTesting
+			my $check_sub = set_repeat_timeout 60.0, sub
 			{
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
 				
@@ -921,6 +927,8 @@ package HashNet::StorageEngine::PeerServer;
 	
 				$self->engine->end_batch_update();
 			};
+			
+			$check_sub->();
 			
 			logmsg "TRACE", "PeerServer: Starting timer event loop...\n";
 
@@ -1084,15 +1092,17 @@ package HashNet::StorageEngine::PeerServer;
 
 			my $last_base = '';
 			my @rows = map {
-				my $value = ($list->{$_}->{data} || '');
+				my $value = ($list->{$_}->{data}      || '');
 				my $ts    = ($list->{$_}->{timestamp} || '-');
+				my $en    = ($list->{$_}->{edit_num}  || '-');
 				#$value =~ s/$path/<b>$path<\/b>/;
 				my @base = split /\//; pop @base; my $b=join('',@base);
 				my $out = ""
 				. "<tr".($b ne $last_base ? " class=divider-top":"").">"
 				. "<td>". stylize_key($_, $path)     ."</td>"
 				. "<td>". $value ."</td>"
-				. "<td>". $ts ."</td>"
+				#. "<td>". $ts ."</td>"
+				. "<td>". $en ."</td>"
 				. "</tr>";
 				$last_base = $b;
 				$out;
@@ -1107,7 +1117,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "<body><h1><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle'></a> Query - HashNet StorageEngine Server</h1>"
 				. "<form action='/db/search'>Search: <input name=path value='$path'> <input type=submit value='Search'></form>"
 				. "<h3>" . ($path eq '/' ? "All Results" : "Results for '$path'") . "</h3>"
-				. "<table border=1><thead><th>Key</th><th>Value</th><th>TS</th></thead>"
+				. "<table border=1><thead><th>Key</th><th>Value</th><th>Edit#</th></thead>"
 				. "<tbody>"
 				. join("\n", @rows)
 				. "</tbody></table>"
@@ -1746,7 +1756,7 @@ of software available.
 		}
 		else
 		{
-			logmsg "TRACE", "PeerServer: resp_tr_push(): Received \$data: ", Dumper $data;
+			#logmsg "TRACE", "PeerServer: resp_tr_push(): Received \$data: ", Dumper $data;
 
 			foreach my $hash (@batch)
 			{
@@ -1783,7 +1793,7 @@ of software available.
 						}
 						else
 						{
-							$eng->_put_local($tr->key, $tr->data, $tr->timestamp);
+							$eng->_put_local($tr->key, $tr->data, $tr->timestamp, $tr->edit_num);
 						}
 
 						$eng->_push_tr($tr); #, $peer_url); # peer_url is the url of the peer to skip when using it out to peers
@@ -1841,7 +1851,11 @@ of software available.
 		{
 			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
 			# so we tell $node_uuid it's current
-			debug "PeerServer: push_outstanding_transactions(): $node_uuid: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			debug "PeerServer: push_outstanding_transactions(): $node_uuid: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send. Updating peer's last_tx_sent to $cur_tx_id\n";
+			
+			$peer->update_begin;
+			$peer->{last_tx_sent} = $cur_tx_id;
+			$peer->update_end;
 		}
 		else
 		{

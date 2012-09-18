@@ -191,8 +191,9 @@ package HashNet::StorageEngine::TransactionRecord;
 			}
 			return \@new_array;
 		}
-		elsif(ref $ref eq 'HASH' ||
-		      ref $ref eq 'DBM::Deep::Hash')
+		#elsif(ref $ref eq 'HASH' ||
+		#      ref $ref eq 'DBM::Deep::Hash')
+		else
 		{
 			my %new_hash;
 			my %old_hash = %$ref;
