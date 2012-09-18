@@ -440,7 +440,7 @@ package HashNet::StorageEngine::PeerServer;
 		
 		#@discovery_urls = ($peer->{known_as}) if $peer->{known_as};
 		
-		my $payload = "peer_url=" . uri_escape(join('|', @discovery_urls)) . "&ver=$HashNet::StorageEngine::VERSION";
+		my $payload = "peer_url=" . uri_escape(join('|', @discovery_urls)) . "&ver=$HashNet::StorageEngine::VERSION&uuid=".$self->node_info->{uuid};
 		#my $payload_encrypted = $payload; #HashNet::Cipher->cipher->encrypt($payload);
 		
 		# LWP::Simple
