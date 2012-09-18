@@ -685,6 +685,43 @@ package HashNet::StorageEngine::PeerServer;
 		$req->{_params_parser} ||= $parser;
 		return $parser->params->{$key};
 	}
+	
+	sub set_repeat_timeout($$)
+	{
+		my ($time, $code_sub) = @_;
+		my $timer_ref;
+		my $wrapper_sub; $wrapper_sub = sub {
+			
+			$code_sub->();
+			
+			undef $timer_ref;
+			# Yes, I know AE has an 'interval' property - but it does not seem to work,
+			# or at least I couldn't get it working. This does work though.
+			$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		};
+		
+		# Initial call starts the timer
+		#$wrapper_sub->();
+		
+		# Sometimes doesn't work...
+		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+	};
+	
+	sub set_timeout($$)
+	{
+		my ($time, $code_sub) = @_;
+		my $timer_ref;
+		my $wrapper_sub; $wrapper_sub = sub {
+			
+			$code_sub->();
+			
+			undef $timer_ref;
+			undef $wrapper_sub;
+		};
+		
+		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+	}
+	
 
 	our $CONFIG_FILE= ['/etc/dengpeersrv.cfg','/root/dengpeersrv.cfg','/opt/hashnet/datasrv/dengpeersrv.cfg'];
 
@@ -772,7 +809,7 @@ package HashNet::StorageEngine::PeerServer;
 			# is set so we know where to store the software
 			
 			# NOTE DisabledForTesting
-			my $reg_timer; $reg_timer = AnyEvent->timer(after => 0.1, cb => sub
+			set_timeout         1.0, sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
 				my @peers = @{ $engine->peers };
@@ -781,18 +818,54 @@ package HashNet::StorageEngine::PeerServer;
 					# Try to register as a peer (locks state file automatically)
 					$self->reg_peer($peer);
 				}
-				logmsg "INFO", "PeerServer: Registration complete\n";
-				undef $reg_timer;
-			});
+				logmsg "INFO", "PeerServer: Registration complete\n\n";
+			};
+
+			set_repeat_timeout  1.0, sub
+			{
+				logmsg "INFO", "PeerServer: Pushing any transactions to push peers\n";
+				
+				my @peers = @{ $engine->peers };
+				foreach my $peer (@peers)
+				{
+					$peer->load_changes();
+
+					$self->push_outstanding_transactions($peer)
+						if !$peer->poll_only &&
+						   !$peer->host_down &&
+						   !$self->is_this_peer($peer->url);
+				}
+
+				logmsg "INFO", "PeerServer: Push complete\n\n";
+			};
 			
-			my $peer_check_timer;
-			my $peer_check_sub; $peer_check_sub = sub
+			set_repeat_timeout  5.0, sub
+			{
+				logmsg "INFO", "PeerServer: Pulling from poll-only peers\n";
+				
+				my @peers = @{ $engine->peers };
+				foreach my $peer (@peers)
+				{
+					$peer->load_changes();
+					
+					$peer->poll()
+						if  $peer->poll_only &&
+						   !$peer->host_down &&
+						   !$self->is_this_peer($peer->url);
+				}
+				
+				logmsg "INFO", "PeerServer: Pulling complete\n\n";
+			};
+			
+			set_repeat_timeout 60.0, sub
 			{
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
+				
 				my @peers = @{ $engine->peers };
-
 				#@peers = (); # TODO JUST FOR DEBUGGING
 				
+				$self->engine->begin_batch_update();
+ 				
 				foreach my $peer (@peers)
 				{
 					$peer->load_changes();
@@ -804,6 +877,7 @@ package HashNet::StorageEngine::PeerServer;
 					# NOTE DisabledForTesting
 					$peer->update_distance_metric();
 					
+					# Polling moved above
 					#$peer->poll();
 					
 					# NOTE DisabledForTesting
@@ -817,20 +891,14 @@ package HashNet::StorageEngine::PeerServer;
 				}
 
 
-				undef $peer_check_timer;
-				# Yes, I know AE has an 'interval' property - but it does not seem to work,
-				# or at least I couldn't get it working. This does work though.
-				$peer_check_timer = AnyEvent->timer (after => 60, cb => $peer_check_sub );
-
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
-
-# 				# NOTE DisabledForTesting
- 				$self->engine->begin_batch_update();
- 				{
+				
+				# NOTE DisabledForTesting
+				{
 					my $inf  = $self->{node_info};
 					my $uuid = $inf->{uuid};
 					my $key_path = '/global/nodes/'. $uuid;
-
+	
 					if(-f $self->{node_info_changed_flag_file})
 					{
 						unlink $self->{node_info_changed_flag_file};
@@ -843,62 +911,19 @@ package HashNet::StorageEngine::PeerServer;
 							$self->engine->put($put_key, $val);
 						}
 					}
-
+	
 					my $db = $engine->tx_db;
 					my $cur_tx_id = $db->length() -1;
-
+	
 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-
-  				}
- 				$self->engine->end_batch_update();
-
-			};
-
-			# Start the timer running by calling an initial check
-			$peer_check_sub->();
-
-			my $peer_poll_timer;
-			my $peer_poll_sub; $peer_poll_sub= sub
-			{
-				logmsg "INFO", "PeerServer: Push/pulling peers\n";
-				my @peers = @{ $engine->peers };
-
-				#@peers = (); # TODO JUST FOR DEBUGGING
-
-				foreach my $peer (@peers)
-				{
-					$peer->load_changes();
-
-					if(!$peer->host_down && !$self->is_this_peer($peer->url))
-					{
-						if($peer->{poll_only})
-						{
-							$peer->poll();
-						}
-						else
-						{
-							$self->push_outstanding_transactions($peer);
-						}
-					}
 				}
-
-				undef $peer_poll_timer;
-				# Yes, I know AE has an 'interval' property - but it does not seem to work,
-				# or at least I couldn't get it working. This does work though.
-				$peer_poll_timer = AnyEvent->timer (after => 1, cb => $peer_poll_sub );
-				
-				logmsg "INFO", "PeerServer: Push/pull complete\n\n";
 	
+				$self->engine->end_batch_update();
 			};
-			#$w = AnyEvent->timer (after => 1, cb => $timeout_sub);
-
+			
 			logmsg "TRACE", "PeerServer: Starting timer event loop...\n";
 
-			# Call the timeout sub explicitly because sometimes it would not
-			# run if we just set the timer, above
-			$peer_poll_sub->();
-			
 			# run the event loop, (should) never return
 			AnyEvent::Loop::run();
 			

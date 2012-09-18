@@ -161,8 +161,8 @@ package HashNet::StorageEngine;
 		my $cloned_at = 0;
 		foreach my $peer (@peer_refs)
 		{
-			my $last_tx_recd = $peer->last_tx_recd;
-			my $cur_tx_id    = $peer->{cur_tx_id};
+			my $last_tx_recd = $peer->last_tx_recd || 0;
+			my $cur_tx_id    = $peer->{cur_tx_id}  || 0;
 			my $delta = $cur_tx_id - $last_tx_recd;
 			if($delta > 500)
 			{
@@ -383,8 +383,16 @@ package HashNet::StorageEngine;
 	sub begin_batch_update
 	{
 		my $self = shift;
-		$self->{_batch_update} = 1;
-		$self->{_batch_list}   = [];
+		if(!$self->{_batch_update})
+		{
+			$self->{_batch_update} = 1;
+			$self->{_batch_list}   = [];
+		}
+	}
+	
+	sub in_batch_update
+	{
+		return shift->{_batch_update} || 0;
 	}
 
 	sub end_batch_update
