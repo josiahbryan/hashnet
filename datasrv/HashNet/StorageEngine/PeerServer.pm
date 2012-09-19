@@ -452,9 +452,9 @@ package HashNet::StorageEngine::PeerServer;
 		HashNet::StorageEngine::Peer::exec_timeout(10.0, sub
 		{
 			$r = LWP::Simple::get($final_url);
-			$r ||= '';
+			$r = '' if !defined $r;
 		});
-		
+
 		if($r eq '')
 		{
 			logmsg "TRACE", "PeerServer: reg_peer(): No valid response when trying to register with peer at $url, marking as host_down\n";
@@ -2328,6 +2328,32 @@ of software available.
 
 		logmsg "DEBUG", "PeerServer: resp_reg_peer(): Register options: $peer_url, final_url: $final_url\n";
 		#print "Content-Type: text/plain\r\n\r\n", $final_url, "\n";
+
+		if($final_url && $peer_uuid)
+		{
+			my $peer = undef;
+			my @peers = @{ $self->engine->peers };
+			foreach my $tmp (@peers)
+			{
+				if(($tmp->node_uuid||'') eq $peer_uuid)
+				{
+					$peer = $tmp;
+					last;
+				}
+			}
+
+			if($peer)
+			{
+				$peer->load_changes();
+				if($peer->{host_down})
+				{
+					$peer->update_begin();
+					logmsg 'DEBUG', "PeerServer: resp_reg_peer(): Peer $peer->{url} was down, marking up\n";
+					$peer->{host_down} = 0;
+					$peer->update_end();
+				}
+			}
+		}
 		
 		http_respond($res, 'text/plain', $final_url);
 
