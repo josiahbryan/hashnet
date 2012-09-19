@@ -56,7 +56,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0284;
+	our $VERSION = 0.0286;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -205,7 +205,27 @@ package HashNet::StorageEngine;
 		#die "Test done";
 
 		#print STDERR "[DEBUG] StorageEngine: new: mark3\n";
-		
+
+		my $db_data_ver_file = $self->db_root . '/.db_ver';
+		my $db_ver = 0;
+		$db_ver = retrieve($db_data_ver_file)->{ver} if -f $db_data_ver_file;
+
+		# Added nstore in ver 0.0285
+		if($db_ver < 0.0285)
+		{
+			my $hash = $self->list;
+			info "StorageEngine: Loading and re-storing all keys so they get converted to 'network byte order' on disk (see Storable module) ...\n";
+			$self->begin_batch_update;
+			$self->put($_, $hash->{$_}) foreach keys %$hash;
+			$self->end_batch_update;
+			info "StorageEngine: Restore done\n";
+		}
+
+		if($db_ver != $VERSION)
+		{
+			nstore({ ver => $VERSION }, $db_data_ver_file);
+		}
+				
 		return $self;
 	};
 

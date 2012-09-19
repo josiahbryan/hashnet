@@ -1823,18 +1823,18 @@ of software available.
 		$last_tx_sent = -1 if !defined $last_tx_sent;
 
 		my $first_tx_needed = $last_tx_sent + 1;
-		logmsg 'TRACE', "PeerServer: push_outstanding_transactions(): $node_uuid: last_tx_sent: $last_tx_sent, cur_tx_id: $cur_tx_id\n";
+		logmsg 'TRACE', "PeerServer: push_outstanding_transactions(): $peer->{url}: last_tx_sent: $last_tx_sent, cur_tx_id: $cur_tx_id\n";
 
 		if($cur_tx_id < 0)
 		{
-			debug "PeerServer: push_outstanding_transactions(): $node_uuid: No transactions in database, not transmitting anything\n";
+			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: No transactions in database, not transmitting anything\n";
 			return;
 		}
 
 		my $length = $cur_tx_id - $first_tx_needed + 1;
 		if($length <= 0)
 		{
-			debug "PeerServer: push_outstanding_transactions(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 			return;
 		}
 
@@ -1842,10 +1842,10 @@ of software available.
 		{
 			$length = 500;
 			$cur_tx_id = $first_tx_needed + $length;
-			debug "PeerServer: push_outstanding_transactions(): $node_uuid: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
+			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
 		}
 
-		logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+		logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
 
 		my $listref = $self->engine->generate_batch($first_tx_needed, $cur_tx_id, $node_uuid);
 
@@ -1853,7 +1853,7 @@ of software available.
 		{
 			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
 			# so we tell $node_uuid it's current
-			debug "PeerServer: push_outstanding_transactions(): $node_uuid: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send. Updating peer's last_tx_sent to $cur_tx_id\n";
+			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send. Updating peer's last_tx_sent to $cur_tx_id\n";
 			
 			$peer->update_begin;
 			$peer->{last_tx_sent} = $cur_tx_id;
@@ -1863,9 +1863,9 @@ of software available.
 		{
 
 			#die "Created merged transaction: ".Dumper($tr);
-			#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Sending tr: ".Dumper($tr);
+			#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $peer->{url}: +++ Sending tr: ".Dumper($tr);
 
-			logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
+			logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
 			
 			if($peer->push($listref, $cur_tx_id))
 			{
@@ -1873,11 +1873,11 @@ of software available.
 				$peer->{last_tx_sent} = $cur_tx_id;
 				$peer->update_end;
 
-				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $node_uuid: Peer successfully received all tx, updating last sent # to $cur_tx_id\n";
+				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer successfully received all tx, updating last sent # to $cur_tx_id\n";
 			}
 			else
 			{
-				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $node_uuid: Error pushing to peer, marking down\n";
+				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: Error pushing to peer, marking down\n";
 				$peer->update_begin;
 				$peer->{host_down} = 1;
 				$peer->update_end;
@@ -2233,8 +2233,8 @@ of software available.
 		$peer_ip = (my_ip_list())[0] if !$peer_ip || $peer_ip eq '127.0.0.1';
 		
 		my $peer_url  = http_param($req, 'peer_url') || 'http://' . $peer_ip . ':' . $self->peer_port() . '/db' ;
-		my $peer_ver  = http_param($req, 'ver') || 0;
-		my $peer_uuid = http_param($req, 'uuid') || undef;
+		my $peer_ver  = http_param($req, 'ver')      || 0;
+		my $peer_uuid = http_param($req, 'uuid')     || undef;
 		
 		#logmsg "DEBUG", "PeerServer: resp_reg_peer(): \$peer_url: $peer_url, given parm: ", http_param($req, 'peer_url'), "\n";
 		
@@ -2270,7 +2270,8 @@ of software available.
 
 		foreach my $possible_url (@list_to_check)
 		{
-			my $result = $self->engine->add_peer($possible_url, undef, undef, $peer_uuid);
+			#my $result = $self->engine->add_peer($possible_url, undef, undef, $peer_uuid);
+			my $result = $self->engine->add_peer($possible_url);
 
 			# >0 means it's added
 			# <0 means it's already in the list
@@ -2306,7 +2307,8 @@ of software available.
 				logmsg "DEBUG", "PeerServer: resp_reg_peer(): Local URL '$local_url' valid, trying to add to engine\n";
 				#$final_url = $local_url;
 
-				my $result = $self->engine->add_peer($local_url, undef, undef, $peer_uuid);
+				#my $result = $self->engine->add_peer($local_url, undef, undef, $peer_uuid);
+				my $result = $self->engine->add_peer($local_url);
 
 				# >0 means it's added
 				# <0 means it's already in the list
