@@ -827,26 +827,26 @@ package HashNet::StorageEngine::PeerServer;
 
 			set_repeat_timeout  1.0, sub
 			{
-				logmsg "INFO", "PeerServer: Pushing any transactions to push peers\n";
+				#logmsg "TRACE", "PeerServer: Pushing any transactions to push peers\n";
 				
 				my @peers = @{ $engine->peers };
 				foreach my $peer (@peers)
 				{
 					$peer->load_changes();
 
-					$self->push_outstanding_transactions($peer)
+					$self->push_needed($peer)
 						if !$peer->poll_only &&
 						   !$peer->host_down &&
 						   !$self->is_this_peer($peer->url);
 				}
 
-				logmsg "INFO", "PeerServer: Push complete\n\n";
+				#logmsg "TRACE", "PeerServer: Push complete\n\n";
 			};
 			
 			# NOTE DisabledForTesting
 			set_repeat_timeout  15.0, sub
 			{
-				logmsg "INFO", "PeerServer: Pulling from poll-only peers\n";
+				#logmsg "TRACE", "PeerServer: Pulling from poll-only peers\n";
 				
 				my @peers = @{ $engine->peers };
 				foreach my $peer (@peers)
@@ -859,7 +859,7 @@ package HashNet::StorageEngine::PeerServer;
 						   !$self->is_this_peer($peer->url);
 				}
 				
-				logmsg "INFO", "PeerServer: Pulling complete\n\n";
+				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
 			};
 			
 			# NOTE DisabledForTesting
@@ -891,14 +891,11 @@ package HashNet::StorageEngine::PeerServer;
 
 					# NOTE DisabledForTesting
 					# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
-					logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+					#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
 					$self->update_software($peer);
-					logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
+					#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
 				}
 
-
-				logmsg "INFO", "PeerServer: Peer check complete\n\n";
-				
 				# NOTE DisabledForTesting
 				{
 					my $inf  = $self->{node_info};
@@ -926,6 +923,8 @@ package HashNet::StorageEngine::PeerServer;
 				}
 	
 				$self->engine->end_batch_update();
+
+				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 			};
 			
 			$check_sub->();
@@ -1771,7 +1770,7 @@ of software available.
 				   $tr->has_been_here) # it checks internal {route_hist} against our uuid
 				{
 					$self->tr_flag_db->unlock;
-					logmsg "TRACE", "Peer: poll(): Already seen ", $tr->uuid, " - not processing\n";
+					logmsg "TRACE", "PeerServer: resp_tr_push(): Already seen ", $tr->uuid, " - not processing\n";
 				}
 				else
 				{
@@ -1809,7 +1808,7 @@ of software available.
 		http_respond($res, 'text/plain', encode_json( \@uuid_list ) ); #"Received $tr: " . $tr->key .  " => " . ($tr->data || ''));
 	}
 
-	sub push_outstanding_transactions
+	sub push_needed
 	{
 		my $self = shift;
 		my $peer = shift;
@@ -1823,18 +1822,18 @@ of software available.
 		$last_tx_sent = -1 if !defined $last_tx_sent;
 
 		my $first_tx_needed = $last_tx_sent + 1;
-		logmsg 'TRACE', "PeerServer: push_outstanding_transactions(): $peer->{url}: last_tx_sent: $last_tx_sent, cur_tx_id: $cur_tx_id\n";
+		#logmsg 'TRACE', "PeerServer: push_needed(): $peer->{url}: last_tx_sent: $last_tx_sent, cur_tx_id: $cur_tx_id\n";
 
 		if($cur_tx_id < 0)
 		{
-			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: No transactions in database, not transmitting anything\n";
+			debug "PeerServer: push_needed(): $peer->{url}: No transactions in database, not transmitting anything\n";
 			return;
 		}
 
 		my $length = $cur_tx_id - $first_tx_needed + 1;
 		if($length <= 0)
 		{
-			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			#debug "PeerServer: push_needed(): $peer->{url}: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 			return;
 		}
 
@@ -1842,10 +1841,10 @@ of software available.
 		{
 			$length = 500;
 			$cur_tx_id = $first_tx_needed + $length;
-			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
+			debug "PeerServer: push_needed(): $peer->{url}: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
 		}
 
-		logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+		#logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
 
 		my $listref = $self->engine->generate_batch($first_tx_needed, $cur_tx_id, $node_uuid);
 
@@ -1853,7 +1852,7 @@ of software available.
 		{
 			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
 			# so we tell $node_uuid it's current
-			debug "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send. Updating peer's last_tx_sent to $cur_tx_id\n";
+			debug "PeerServer: push_needed(): $peer->{url}: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send. Updating peer's last_tx_sent to $cur_tx_id\n";
 			
 			$peer->update_begin;
 			$peer->{last_tx_sent} = $cur_tx_id;
@@ -1865,7 +1864,8 @@ of software available.
 			#die "Created merged transaction: ".Dumper($tr);
 			#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $peer->{url}: +++ Sending tr: ".Dumper($tr);
 
-			logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
+			#logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
+			logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: +++ Peer needs transctions tx $first_tx_needed - $cur_tx_id ($length tx)...\n";
 			
 			if($peer->push($listref, $cur_tx_id))
 			{
@@ -1873,11 +1873,12 @@ of software available.
 				$peer->{last_tx_sent} = $cur_tx_id;
 				$peer->update_end;
 
-				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: Peer successfully received all tx, updating last sent # to $cur_tx_id\n";
+				#logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: Peer successfully received all tx, updating last sent # to $cur_tx_id\n";
+				logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: Peer successfully received all tx\n";
 			}
 			else
 			{
-				logmsg 'DEBUG', "PeerServer: push_outstanding_transactions(): $peer->{url}: Error pushing to peer, marking down\n";
+				logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: Error pushing to peer, marking down\n";
 				$peer->update_begin;
 				$peer->{host_down} = 1;
 				$peer->update_end;
@@ -2477,13 +2478,13 @@ of software available.
 			foreach my $peer_uuid (@peers)
 			{
 				my $peer = $nodes->{$peer_uuid};
-				my $geo = $peer->{geo_info};
-				if(!$geo)
-				{
-					warn "No geo info for peer $peer_uuid";
-					next;
-				}
-				my ($lat, $lng) = $geo =~ /, (-?\d+\.\d+), (-?\d+\.\d+)/;
+#				my $geo = $peer->{geo_info};
+# 				if(!$geo)
+# 				{
+# 					warn "No geo info for peer $peer_uuid";
+# 					next;
+# 				}
+#				my ($lat, $lng) = $geo =~ /, (-?\d+\.\d+), (-?\d+\.\d+)/;
 				
 				#print STDERR "\t -> $peer->{name} ($lat, $lng)\n";
 				
