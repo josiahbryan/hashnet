@@ -10,18 +10,20 @@ use File::Path qw/rmtree/;
 #my $tmp_dbroot = '/tmp/hashnet/db';
 #rmtree($tmp_dbroot);
 
-my $con = HashNet::StorageEngine->new();#db_root => $tmp_dbroot);
+my $con = HashNet::StorageEngine->new(config => 'montest.cfg');#db_root => $tmp_dbroot);
 
-#$con->put('/global/date', `date`);
+#$con->put('/date', `date`);
+
+my $start_date = $con->get('/test');
 
 my $done = 0;
 while(!$done)
 {
 	print "Waiting, ", `date`;
-	my $val = $con->get('/global/test');
-	if($val > 0)
+	my $val = $con->get('/test');
+	if($val != $start_date)
 	{
-		print "Got val at ", `date`;
+		print "Got val $val (old $start_date) at ", `date`;
 		$done = 1;	
 	}
 	sleep 1;

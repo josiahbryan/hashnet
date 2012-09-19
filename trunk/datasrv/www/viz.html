@@ -127,6 +127,7 @@
 		window.showChart = function()
 		{
 			//window.chartData = { init: true, node_uuid_map: node_uuid_map };
+			window.chartData.init = true;
 			var map_list = chartData.map_list;
 			var node_uuid_map = chartData.node_uuid_map;
 			
@@ -300,7 +301,7 @@
 							type: 'Numeric',
 							grid: true,
 							minimum: 0,
-							maximum: 50,
+							//maximum: 50,
 							position: 'left',
 							fields: uuidList, //['views', 'visits', 'users'],
 							title: 'Number of Transactions',
@@ -394,7 +395,7 @@
 			
 		};
 		
-		Ext.onReady(showChart);
+		//Ext.onReady(showChart);
 		
 		;(function() {
 
@@ -440,6 +441,9 @@
 			
 			window.showLoading = function()
 			{
+				// Disable for now
+				return;
+				
 				//console.debug("Connection Lost...");
 				if(window.LoadingVisible)
 					return;
@@ -580,8 +584,8 @@
 						window.chartData.node_uuid_map = node_uuid_map;
 						window.chartData.map_list = map_list;
 						
-						//if(!window.chartData.init)
-						//	showChart();
+						if(!window.chartData.init)
+							showChart();
 						
 						for(var idx in map_list)
 						{

@@ -56,7 +56,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0286;
+	our $VERSION = 0.0287;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -539,7 +539,24 @@ package HashNet::StorageEngine;
 		
 		return \@batch;
 	}
-	
+
+	sub elide_string
+	{
+		my $string = shift;
+		my $max_len = shift || 50;
+
+		my $len = length($string);
+		if($len > $max_len)
+		{
+			my $elide = '...';
+			my $buff  = ($max_len - length($elide)) / 2;
+			my $b1    = substr($string,      0, $buff);
+			my $b2    = substr($string, -$buff, $buff);
+			$string   = "${b1}...${b2}";
+		}
+		return $string;
+		
+	}
 	
 	sub put
 	{
@@ -557,14 +574,16 @@ package HashNet::StorageEngine;
 
 		$key = '/'.$key if $key !~ /^\//;
 
+		#trace "StorageEngine: put(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+
 		if($self->{_batch_update})
 		{
-			logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
+			#logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
 			push @{$self->{_batch_list}}, {key=>$key, val=>$val};
 			return;
 		}
 
-		logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
+		#logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
 
 		my $edit_num = $self->_put_local($key, $val);
 		$self->_put_peers($key, $val, $edit_num);
@@ -754,7 +773,8 @@ package HashNet::StorageEngine;
 
 		return if ! defined $key;
 		 
-		trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		#trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
@@ -774,20 +794,20 @@ package HashNet::StorageEngine;
 			
 			$edit_num = $key_data->{edit_num};
 			
-			if(defined $check_timestamp)
-			{
-				my $key_ts = $key_data->{timestamp};
-				if($check_timestamp < $key_ts)
-				{
-					logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $check_timestamp < stored ts $key_ts)\n";
-					return undef;
-				}
-			}
+# 			if(defined $check_timestamp)
+# 			{
+# 				my $key_ts = $key_data->{timestamp};
+# 				if($check_timestamp < $key_ts)
+# 				{
+# 					logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $check_timestamp < stored ts $key_ts)\n";
+# 					return undef;
+# 				}
+# 			}
 			
 			if(defined $check_edit_num &&
 			   $check_edit_num < $edit_num)
 			{
-				logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+				logmsg "ERROR", "StorageEngine: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
 				return undef;
 			}
 		}
