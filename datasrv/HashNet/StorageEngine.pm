@@ -39,6 +39,7 @@ package HashNet::StorageEngine;
 	use Cwd qw/abs_path/;
 	use DBM::Deep;
 	use LWP::Simple qw/getstore/; # for clone database
+	use File::Temp qw/tempfile tempdir/; # for mimetype detection
 
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
@@ -774,7 +775,7 @@ package HashNet::StorageEngine;
 		return if ! defined $key;
 		 
 		#trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
-		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", (defined $val ? "'" . elide_string($val, 35) . "'" : '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", (defined $val ? "'" . elide_string($val, 40) . "'" : '(undef)'), "\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
@@ -813,8 +814,33 @@ package HashNet::StorageEngine;
 		}
 
 		$edit_num ++;
+
+		my $mimetype = 'text/plain';
+		if(defined $val && $val =~ /[^\t\n\x20-x7e]/)
+		{
+			# Write the data to a tempfile
+			my ($fh, $filename) = tempfile();
+			print $fh $val;
+			close($fh);
+
+			# Use 'file' to deduct the mimetype of the data contained therein
+			$mimetype = `file -b --mime-type $filename`;
+			$mimetype =~ s/[\r\n]//g;
+
+			# Remove the temp file so we dont leave data laying around
+			unlink($filename);
+
+			# Just informational
+			trace "StorageEngine: _put_local(): Found mime '$mimetype' for '", elide_string($key), "'\n";
+		}
 		
-		nstore({ data => $val, timestamp => $check_timestamp || time(), edit_num => $edit_num }, $key_file);
+		nstore({
+				data		=> $val,
+				timestamp	=> $check_timestamp || time(),
+				edit_num	=> $edit_num,
+				mimetype	=> $mimetype,
+			},
+			$key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
