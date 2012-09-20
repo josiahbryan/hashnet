@@ -11,6 +11,8 @@ package HashNet::StorageEngine::TransactionRecord;
 	
 	use UUID::Generator::PurePerl;
 	
+	use MIME::Base64::Perl; # for encoding/decoding binary data
+	
 	use HashNet::StorageEngine::PeerServer; # for node_info->{uuid}
 	use HashNet::Util::Logging;
 	
@@ -34,8 +36,8 @@ package HashNet::StorageEngine::TransactionRecord;
 		my $type = shift || TYPE_WRITE;
 
 		$self->{is_valid} =
-			$mode eq MODE_KV  ? $key && $data :
-			$mode eq MODE_SQL ? $key
+			$mode eq MODE_KV  ? ($key && $data ? 1:0):
+			$mode eq MODE_SQL ? ($key ? 1:0)
 			: 0;
 
 		$self->{mode} = $mode;
@@ -157,7 +159,7 @@ package HashNet::StorageEngine::TransactionRecord;
 		{
 			push @hist, { uuid => $tmp->{uuid}, ts => $tmp->{ts} };
 		}
-		return {
+		my $hash = {
 			mode	=> $self->{mode},
 			key	=> $self->{key},
 			# _clean_ref() creates a pure hash-/array-ref structure
@@ -173,7 +175,41 @@ package HashNet::StorageEngine::TransactionRecord;
 			merged_uuid_list => $self->{merged_uuid_list},
 			# set by StorageEngine in _put_peers and _put_local_batch, used (indirectly) by _put_local for received transactions
 			edit_num => $self->{edit_num},
+		};
+		
+		# Here we're trying to be "smarter" than the JSON module.
+		# By default, JSON will encode binary data with escape sequences. For example, here's the start of a PNG image:
+		#	PNG\r\n\u001a\n\u0000\u0000\u0000\rIHDR\u0000\u0000
+		# However, for a 345-byte PNG image, the JSON equivelant is approx 950 bytes long, 
+		# while a base64 encoding of the same data is only 467 bytes.
+		# Therefore, for {data} elements that are NOT references AND contain unprintable (/[^\t\n\x20-x7e]/) characters, 
+		# we base64 encode and add a flag to the hash telling the from_hash() routine to do appros decoding
+		
+		# Note that this is NOT relevant for storing in the transaction database, since DBM::Deep does it's own serliazation
+		# of hashes (e.g. we don't use to_json for that storage) - however, we do this here since the transaction
+		# doesn't know if the return from to_hash() is going to json or just being stored - so we are proactive here at a slight cost.
+		 
+		if(!ref($hash->{data}) && defined($hash->{data}) &&
+			$hash->{data} =~ /[^\t\n\x20-x7e]/)
+		{
+			$hash->{data} = encode_base64($hash->{data});
+			$hash->{data_base64} = 1;
 		}
+		elsif($hash->{type} eq TYPE_WRITE_BATCH)
+		{
+			my @batch = @{ $hash->{data} || {} };
+			foreach my $item (@batch)
+			{
+				if(!ref($item->{val}) && defined($item->{val}) &&
+					$item->{val} =~ /[^\t\n\x20-x7e]/)
+				{
+					$item->{val} = encode_base64($item->{val});
+					$item->{val_base64} = 1;
+				}
+			}
+		}
+		
+		return $hash;
 	}
 
 	sub _clean_ref
@@ -228,18 +264,39 @@ package HashNet::StorageEngine::TransactionRecord;
 	{
 		my $class = shift;
 		my $hash = shift;
+		
+		# See discussion in to_hash() on why base64 instead of relying on direct storage
+		if($hash->{data_base64})
+		{
+			$hash->{data} = decode_base64($hash->{data});
+		}
+		# Check for base64 encoded data in the batch list
+		elsif($hash->{type} eq TYPE_WRITE_BATCH)
+		{
+			my @batch = @{ $hash->{data} || {} };
+			foreach my $item (@batch)
+			{
+				if($item->{val_base64})
+				{
+					$item->{val} = decode_base64($item->{val});
+					delete $item->{val_base64};
+				}
+			}
+		}
+		
 		my $obj = $class->new(
 			$hash->{mode},
 			$hash->{key},
 			$hash->{data},
 			$hash->{type},
 		);
-		$obj->{uuid}      = $hash->{uuid};
-		$obj->{timestamp} = $hash->{timestamp};
-		$obj->{rel_id}    = $hash->{rel_id};
+		$obj->{uuid}       = $hash->{uuid};
+		$obj->{timestamp}  = $hash->{timestamp};
+		$obj->{rel_id}     = $hash->{rel_id};
 		$obj->{route_hist} = $hash->{route_hist};
 		$obj->{merged_uuid_list} = $hash->{merged_uuid_list};
-		$obj->{edit_num} = $hash->{edit_num};
+		$obj->{edit_num}   = $hash->{edit_num};
+		
 		return $obj;
 	}
 };

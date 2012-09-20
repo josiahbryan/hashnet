@@ -10,6 +10,7 @@ use warnings;
 package Socket;
 {
 	no warnings 'redefine'; # disable warning 'Subroutine sockaddr_in redefined at HashNet/StorageEngine/PeerServer.pm line ...'
+	use Carp qw/croak/;
 	
 	sub sockaddr_in 
 	{
