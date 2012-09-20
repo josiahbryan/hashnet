@@ -1416,11 +1416,11 @@ package HashNet::StorageEngine::PeerServer;
 
 				eval {
 					my $geo_info = join(', ',
-						$record->city,
-						$record->region,
-						$record->country_code,
-						$record->latitude,
-						$record->longitude);
+						$record->city || '',
+						$record->region || '',
+						$record->country_code || '',
+						$record->latitude || '',
+						$record->longitude || '');
 
 					$set->('geo_info', $geo_info)
 						if ($inf->{geo_info}||'') ne $geo_info;
