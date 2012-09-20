@@ -475,48 +475,48 @@ package HashNet::StorageEngine;
 		}
 	}
 
-	sub merge_transactions
-	{
-		my $self = shift;
-		my ($tx_start, $tx_end, $peer_uuid) = @_;
-		my %namespace;
-		my @merged_uuids;
-		my $db = $self->tx_db;
-		for my $txid ($tx_start .. $tx_end-1)
-		{
-			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
-			next if $peer_uuid && $tr->has_been_here($peer_uuid);
-			
-			if($tr->type eq 'TYPE_WRITE_BATCH')
-			{
-				my @batch = @{ $tr->data || [] };
-				foreach my $item (@batch)
-				{
-					$namespace{$item->{key}} = $item->{val};
-				}
-			}
-			else
-			{
-				$namespace{$tr->key} = $tr->data;
-			}
-			push @merged_uuids, $tr->uuid;
-		}
-
-		# We must indicate if the TR would contain no data because
-		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
-		return undef if !@merged_uuids;
-		
-		my @batch_list;
-		foreach my $key (keys %namespace)
-		{
-			push @batch_list, { key => $key, val => $namespace{$key} };
-		}
-
-		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
-		$tr->update_route_history();
-		$tr->{merged_uuid_list} = \@merged_uuids;
-		return $tr;
-	}
+# 	sub merge_transactions
+# 	{
+# 		my $self = shift;
+# 		my ($tx_start, $tx_end, $peer_uuid) = @_;
+# 		my %namespace;
+# 		my @merged_uuids;
+# 		my $db = $self->tx_db;
+# 		for my $txid ($tx_start .. $tx_end-1)
+# 		{
+# 			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
+# 			next if $peer_uuid && $tr->has_been_here($peer_uuid);
+# 			
+# 			if($tr->type eq 'TYPE_WRITE_BATCH')
+# 			{
+# 				my @batch = @{ $tr->data || [] };
+# 				foreach my $item (@batch)
+# 				{
+# 					$namespace{$item->{key}} = $item->{val};
+# 				}
+# 			}
+# 			else
+# 			{
+# 				$namespace{$tr->key} = $tr->data;
+# 			}
+# 			push @merged_uuids, $tr->uuid;
+# 		}
+# 
+# 		# We must indicate if the TR would contain no data because
+# 		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
+# 		return undef if !@merged_uuids;
+# 		
+# 		my @batch_list;
+# 		foreach my $key (keys %namespace)
+# 		{
+# 			push @batch_list, { key => $key, val => $namespace{$key} };
+# 		}
+# 
+# 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
+# 		$tr->update_route_history();
+# 		$tr->{merged_uuid_list} = \@merged_uuids;
+# 		return $tr;
+# 	}
 	
 	sub generate_batch
 	{
@@ -774,7 +774,7 @@ package HashNet::StorageEngine;
 		return if ! defined $key;
 		 
 		#trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
-		trace "StorageEngine: _put_local(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", (defined $val ? "'" . elide_string($val, 35) . "'" : '(undef)'), "\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
