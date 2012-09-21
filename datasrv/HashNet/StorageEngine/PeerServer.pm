@@ -137,7 +137,7 @@ use base 'HTTP::Server::Brick';
 use Parallel::ForkManager;
 use HTTP::Status;
 
-# NOTE: This code is copied straight from Brick.pm - we just added the ForkManager code
+# NOTE: This code is copied straight from Brick.pm - we just added the 'refresh peers' call and the $conn hook
 
 =head2 start
 
@@ -183,15 +183,22 @@ sub start {
         # if we're a forking server, fork. The parent will wait for the next request.
         # TODO: limit number of children
         next if $self->{fork} and fork;
+
+        #$self->{current_conn} = $conn;
+        #$self->_log(error => "Current connection '$conn'");
+
         while (my $req = $conn->get_request) {
 
           $peer_server->engine->refresh_peers;
+          $peer_server->{current_conn} = $conn;
 
           # Provide an X-Brick-Remote-IP header
           my ($r_port, $r_iaddr) = Socket::unpack_sockaddr_in($conn->peername);
           my $ip = Socket::inet_ntoa($r_iaddr);
           $req->headers->remove_header('X-Brick-Remote-IP');
           $req->header('X-Brick-Remote-IP' => $ip) if defined $ip;
+
+          $ENV{REMOTE_ADDR} = $ip;
 
           my ($submap, $match) = $self->_map_request($req);
 
@@ -2103,7 +2110,65 @@ of software available.
 		my ($req, $res) = @_;
 		
 		#print Dumper \@_;
-		#logmsg "TRACE", "PeerServer: resp_ver(): Version query from ", $req->{host}, "\n"; 
+		logmsg "TRACE", "PeerServer: resp_ver(): Version query from ", $ENV{REMOTE_ADDR}, " on connection reference ", $self->{current_conn}, "\n";
+		
+		my $conn = $self->{current_conn};
+		#print $conn "HTTP/1.1 200 OK\nContent-Type: text/html\r\n\r\n\r\n<h1>Hello, World!</h1>";
+# 		print $conn "HTTP/1.1 200 OK\n";
+# 		print $conn "Content-type: multipart/x-mixed-replace; boundary=endofsection\n\n";
+# 		
+# 		print $conn "Content-type: text/plain\n"
+# 			."\n"
+# 			."After a few seconds this will go away and the logo will appear...\n"
+# 			."--endofsection\n\n";
+# 			
+# 		sleep 1;
+# 		
+# 		print $conn "Content-type: text/plain\n"
+# 			."\n"
+# 			."New line!\n"
+# 			."--endofsection\n";
+
+# 
+# print $conn q{HTTP/1.1 200 OK
+# Date: Sun, 23 Apr 2006 19:19:11 GMT
+# Content-Type: multipart/x-mixed-replace;boundary="goofup101"
+# 
+# --goofup101
+# Content-type: text/plain
+# 
+# <div>
+# <div class='message'>You said: Knock knock</div>
+# </div>
+# 
+# --goofup101
+# };
+# 
+# sleep 1;
+# 
+# print $conn q{
+# Content-type: text/plain
+# 
+# <div>
+# <div class='message'>You said: Who's there?</div>
+# </div>
+# 
+# --goofup101--
+# };
+		
+# 		print $conn "Content-Type: image/png\n"
+# 			."\n";
+# 			
+# 		open(FILE,"<www/images/hashnet-logo.png");
+# 		print $conn $_ while $_ = <FILE>;
+# 		close(FILE);
+# 		
+# 		print $conn "\n"
+# 			."--endofsection\n";
+
+		close($conn);
+		return 1;
+	
 		
 		my $ver = $HashNet::StorageEngine::VERSION;
 
@@ -2172,7 +2237,7 @@ of software available.
 # 		print $_ while $_ = <F>;
 # 		close(F);
 
-		logmsg "TRACE", "PeerServer: resp_bin_file(): Serving $bin_file to ", $req->{host}, "\n";
+		logmsg "TRACE", "PeerServer: resp_bin_file(): Serving $bin_file to ", $ENV{REMOTE_ADDR}, "\n";
 
 		my @buffer;
 		push @buffer, $_ while $_ = <F>;
@@ -2231,7 +2296,7 @@ of software available.
 		my ($req, $res) = @_;
 		
 		# Get the ip to guess the peer_url if not provided
-		my $peer_ip  = $req->{host} || '';
+		my $peer_ip  = $ENV{REMOTE_ADDR} || '';
 		$peer_ip = (my_ip_list())[0] if !$peer_ip || $peer_ip eq '127.0.0.1';
 		
 		my $peer_url  = http_param($req, 'peer_url') || 'http://' . $peer_ip . ':' . $self->peer_port() . '/db' ;

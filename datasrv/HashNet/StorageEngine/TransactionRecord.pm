@@ -190,7 +190,8 @@ package HashNet::StorageEngine::TransactionRecord;
 		# doesn't know if the return from to_hash() is going to json or just being stored - so we are proactive here at a slight cost.
 		 
 		if(!ref($hash->{data}) && defined($hash->{data}) &&
-			$hash->{data} =~ /[^\t\n\x20-x7e]/)
+			#$hash->{data} =~ /[^\t\n\x20-x7e]/)
+			$hash->{data} =~ /[^[:print:]]/)
 		{
 			$hash->{data} = encode_base64($hash->{data});
 			$hash->{data_base64} = 1;
@@ -201,7 +202,8 @@ package HashNet::StorageEngine::TransactionRecord;
 			foreach my $item (@batch)
 			{
 				if(!ref($item->{val}) && defined($item->{val}) &&
-					$item->{val} =~ /[^\t\n\x20-x7e]/)
+					#$item->{val} =~ /[^\t\n\x20-x7e]/)
+					$item->{val} =~ /[^[:print:]]/)
 				{
 					$item->{val} = encode_base64($item->{val});
 					$item->{val_base64} = 1;

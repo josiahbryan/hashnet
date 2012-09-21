@@ -171,7 +171,7 @@ package HashNet::StorageEngine;
 # 				$delta = 501;
 # 			}
 			#print Dumper $last_tx_recd, $cur_tx_id, $delta;
-			trace "StorageEngine: Clone check for $peer->{url} ($peer->{node_info}->{name}): cur_tx_id: $cur_tx_id, last_tx_recd: $last_tx_recd, delta: $delta\n";
+			trace "StorageEngine: Clone check for ", ($peer->{url}||'?'), " (", ($peer->{node_info}->{name}||'?'), "): cur_tx_id: $cur_tx_id, last_tx_recd: $last_tx_recd, delta: $delta\n";
 			if($delta > 500)
 			{
 				trace "StorageEngine: More than 500 tx behind $peer->{url} ($peer->{node_info}->{name}), cloning database\n";
@@ -821,17 +821,25 @@ package HashNet::StorageEngine;
 		$edit_num ++;
 
 		my $mimetype = 'text/plain';
-		if(defined $val && $val =~ /[^\t\n\x20-x7e]/)
+		#if(defined $val && $val =~ /([^\t\n\x20-x7e])/)
+		if(defined $val && $val =~ /[^[:print:]]/)
 		{
+			#trace "StorageEngine: _put_local(): Trigger char: '$1', ", ord($1), "\n";
+			
 			# Write the data to a tempfile
 			my ($fh, $filename) = tempfile();
 			print $fh $val;
 			close($fh);
 
 			# Use 'file' to deduct the mimetype of the data contained therein
-			$mimetype = `file -b --mime-type $filename`;
-			$mimetype =~ s/[\r\n]//g;
-
+			#$mimetype = `file -b --mime-type $filename`;
+			#$mimetype =~ s/[\r\n]//g;
+			
+			# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
+			# because older versions of `file' don't recognize --mime-type
+			$mimetype = `file -b -i $filename`;
+			$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
+			
 			# Remove the temp file so we dont leave data laying around
 			unlink($filename);
 
