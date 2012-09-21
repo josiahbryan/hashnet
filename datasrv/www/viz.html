@@ -600,6 +600,15 @@
 								var link_info = node_info.links[link_idx];
 								var link_uuid = link_info.uuid;
 								var peer_info = node_uuid_map[link_info.uuid];
+
+								if(!peer_info)
+								{
+									if(window.console && window.console.debug)
+									{
+										console.debug("link ", link_info, " does not exist in node_uuid_map: ", node_uuid_map);
+										continue;
+									}
+								}
 								
 								var con_key = link_uuid>node_uuid ? link_uuid+'|'+node_uuid : node_uuid+'|'+link_uuid;
 								//console.debug(con_key);
@@ -616,10 +625,10 @@
 									//var diffMs = Math.abs(cd - pd);
 									//var diffMin = diffMs / 1000 / 60;
 									var diffMs = Math.abs(pd - cd); // milliseconds between now & Christmas
-									var diffDays = Math.round(diffMs / 86400000); // days
-									var diffHrs = Math.round((diffMs % 86400000) / 3600000); // hours
-									var diffMins = Math.round(((diffMs % 86400000) % 3600000) / 60000); // minutes
-									var diffSecs = Math.round((((diffMs % 86400000) % 3600000) % 60000) / 1000); // seconds
+									var diffDays = parseInt(diffMs / 86400000); // days
+									var diffHrs = parseInt((diffMs % 86400000) / 3600000); // hours
+									var diffMins = parseInt(((diffMs % 86400000) % 3600000) / 60000); // minutes
+									var diffSecs = parseInt((((diffMs % 86400000) % 3600000) % 60000) / 1000); // seconds
 									
 									var agoList = [];
 									if(diffDays > 0)
