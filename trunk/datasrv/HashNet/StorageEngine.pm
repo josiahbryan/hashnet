@@ -166,7 +166,12 @@ package HashNet::StorageEngine;
 			my $last_tx_recd = $peer->last_tx_recd || 0;
 			my $cur_tx_id    = $peer->cur_tx_id    || 0;
 			my $delta = $cur_tx_id - $last_tx_recd;
+# 			if($peer->{url} eq 'http://192.168.0.7:8031/db')
+# 			{
+# 				$delta = 501;
+# 			}
 			#print Dumper $last_tx_recd, $cur_tx_id, $delta;
+			trace "StorageEngine: Clone check for $peer->{url} ($peer->{node_info}->{name}): cur_tx_id: $cur_tx_id, last_tx_recd: $last_tx_recd, delta: $delta\n";
 			if($delta > 500)
 			{
 				trace "StorageEngine: More than 500 tx behind $peer->{url} ($peer->{node_info}->{name}), cloning database\n";
