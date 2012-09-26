@@ -15,6 +15,7 @@ package HashNet::StorageEngine::TransactionRecord;
 	
 	use HashNet::StorageEngine::PeerServer; # for node_info->{uuid}
 	use HashNet::Util::Logging;
+	use Data::Dumper;
 	
 	my $ug = UUID::Generator::PurePerl->new();
 	
@@ -264,10 +265,13 @@ package HashNet::StorageEngine::TransactionRecord;
 		my $class = shift;
 		my $hash = shift;
 		
+		#trace "TransactionRecord: from_hash(): Dumper of hash: ",Dumper($hash);
+		
 		# See discussion in to_hash() on why base64 instead of relying on direct storage
 		if($hash->{data_base64})
 		{
 			$hash->{data} = decode_base64($hash->{data});
+			delete $hash->{data_base64};
 		}
 		# Check for base64 encoded data in the batch list
 		elsif($hash->{type} eq TYPE_WRITE_BATCH)

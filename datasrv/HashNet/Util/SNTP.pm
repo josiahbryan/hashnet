@@ -146,11 +146,11 @@ use Time::HiRes qw(time);
 		vec($rin, fileno($remote), 1) = 1;
 		
 		select($rout=$rin, undef, $eout=$rin, $timeout)
-		or do {print "No answer from $server\n"; exit};
+		or do {print "No answer from $server\n"; return undef};
 		
 		# receive the ntp-message from the server
 		$remote -> recv($ntp_msg, length($ntp_msg))
-			or do {print "Receive error from $server ($!)\n"; exit};
+			or do {print "Receive error from $server ($!)\n"; return undef};
 		
 		# measure local time AFTER timeserver query
 		$LocalTime2 = time();
@@ -359,6 +359,11 @@ use Time::HiRes qw(time);
 		info "SNTP: Connecting to NTP source '$server'...\n";
 		
 		$ntp_msg = get_ntp_time;
+		if(!defined $ntp_msg)
+		{
+			warn "SNTP: Unable to sync time with '$server'\n";
+			return undef;
+		}
 		
 		interpret_ntp_data($ntp_msg);
 		

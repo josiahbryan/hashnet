@@ -40,6 +40,7 @@ package HashNet::StorageEngine;
 	use DBM::Deep;
 	use LWP::Simple qw/getstore/; # for clone database
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
+	use JSON::PP qw/encode_json decode_json/; # for stringify routine
 
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
@@ -58,7 +59,7 @@ package HashNet::StorageEngine;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0288;
+	our $VERSION = 0.029;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -673,9 +674,11 @@ package HashNet::StorageEngine;
 			$tr->update_route_history($tr->{rel_id});
 
 			# Let the DB worry about serialization (instead of using to_json)
-			$db->push($tr->to_hash);
+			my $hash = $tr->to_hash;
+			$db->push($hash);
 
 			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
+			#debug "StorageEngine: _push_tr(): tr dump: ",Dumper($hash);
 		};
 		if($@)
 		{
@@ -782,6 +785,53 @@ package HashNet::StorageEngine;
 # 			}
 		}
 	}
+	
+	sub discover_mimetype
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		
+		# Write the data to a tempfile
+		my ($fh, $filename) = tempfile();
+		print $fh $value;
+		close($fh);
+
+		# Use 'file' to deduct the mimetype of the data contained therein
+		#$mimetype = `file -b --mime-type $filename`;
+		#$mimetype =~ s/[\r\n]//g;
+		
+		# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
+		# because older versions of `file' don't recognize --mime-type
+		my $mimetype = `file -b -i $filename`;
+		$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
+		
+		# Remove the temp file so we dont leave data laying around
+		unlink($filename);
+		
+		return $mimetype;
+	}
+	
+	sub printable_value
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		return undef if !defined $value;
+		
+		if(ref($value))
+		{
+			return encode_json(HashNet::StorageEngine::TransactionRecord::_clean_ref($value));
+		}
+		elsif($value =~ /[^[:print:]]/)
+		{
+			# contains unprintable characters
+			my $mimetype = discover_mimetype($value);
+			return "($mimetype, ".length($value)." bytes)";
+		}
+		else
+		{
+			return "'$value'";
+		}
+	}
 
 	sub _put_local
 	{
@@ -794,7 +844,9 @@ package HashNet::StorageEngine;
 		return if ! defined $key;
 		 
 		#trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
-		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", (defined $val ? "'" . elide_string($val, 40) . "'" : '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", 
+			(defined $val ? elide_string(printable_value($val)) : '(undef)'), 
+			"\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
@@ -838,22 +890,7 @@ package HashNet::StorageEngine;
 		{
 			#trace "StorageEngine: _put_local(): Trigger char: '$1', ", ord($1), "\n";
 			
-			# Write the data to a tempfile
-			my ($fh, $filename) = tempfile();
-			print $fh $val;
-			close($fh);
-
-			# Use 'file' to deduct the mimetype of the data contained therein
-			#$mimetype = `file -b --mime-type $filename`;
-			#$mimetype =~ s/[\r\n]//g;
-			
-			# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
-			# because older versions of `file' don't recognize --mime-type
-			$mimetype = `file -b -i $filename`;
-			$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
-			
-			# Remove the temp file so we dont leave data laying around
-			unlink($filename);
+			my $mimetype = discover_mimetype($val);
 
 			# Just informational
 			trace "StorageEngine: _put_local(): Found mime '$mimetype' for '", elide_string($key), "'\n";
