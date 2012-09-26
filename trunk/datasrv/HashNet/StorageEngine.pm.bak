@@ -39,6 +39,8 @@ package HashNet::StorageEngine;
 	use Cwd qw/abs_path/;
 	use DBM::Deep;
 	use LWP::Simple qw/getstore/; # for clone database
+	use File::Temp qw/tempfile tempdir/; # for mimetype detection
+	use JSON::PP qw/encode_json decode_json/; # for stringify routine
 
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
@@ -51,12 +53,13 @@ package HashNet::StorageEngine;
 	use HashNet::StorageEngine::Peer;
 	use HashNet::StorageEngine::TransactionRecord;
 	use HashNet::Util::Logging;
-
+	use HashNet::Util::SNTP;
+	
 	use UUID::Generator::PurePerl;
 
 	my $ug = UUID::Generator::PurePerl->new();
 
-	our $VERSION = 0.0287;
+	our $VERSION = 0.0289;
 	
 	our $PEERS_CONFIG_FILE = ['/var/lib/hashnet/peers.cfg', '/etc/dengpeers.cfg','/root/peers.cfg','/opt/hashnet/datasrv/peers.cfg'];
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
@@ -66,8 +69,12 @@ package HashNet::StorageEngine;
 	{
 		my $class = shift;
 		my $self = $class->SUPER::new();
+		
+		HashNet::Util::SNTP->sync_time();
 
 		my %args = @_;
+
+		$self->{given_peers_list} = $args{peers_list} if scalar(@{$args{peers_list} || []});
 
 		$PEERS_CONFIG_FILE = $args{config} if $args{config};
 
@@ -165,7 +172,12 @@ package HashNet::StorageEngine;
 			my $last_tx_recd = $peer->last_tx_recd || 0;
 			my $cur_tx_id    = $peer->cur_tx_id    || 0;
 			my $delta = $cur_tx_id - $last_tx_recd;
+# 			if($peer->{url} eq 'http://192.168.0.7:8031/db')
+# 			{
+# 				$delta = 501;
+# 			}
 			#print Dumper $last_tx_recd, $cur_tx_id, $delta;
+			trace "StorageEngine: Clone check for ", ($peer->{url}||'?'), " (", ($peer->{node_info}->{name}||'?'), "): cur_tx_id: $cur_tx_id, last_tx_recd: $last_tx_recd, delta: $delta\n";
 			if($delta > 500)
 			{
 				trace "StorageEngine: More than 500 tx behind $peer->{url} ($peer->{node_info}->{name}), cloning database\n";
@@ -214,11 +226,14 @@ package HashNet::StorageEngine;
 		if($db_ver < 0.0285)
 		{
 			my $hash = $self->list;
-			info "StorageEngine: Loading and re-storing all keys so they get converted to 'network byte order' on disk (see Storable module) ...\n";
-			$self->begin_batch_update;
-			$self->put($_, $hash->{$_}) foreach keys %$hash;
-			$self->end_batch_update;
-			info "StorageEngine: Restore done\n";
+			#if(scalar(keys %$hash))
+			{
+				info "StorageEngine: Loading and re-storing all keys so they get converted to 'network byte order' on disk (see Storable module) ...\n";
+				$self->begin_batch_update;
+				$self->put($_, $hash->{$_}) foreach keys %$hash;
+				$self->end_batch_update;
+				info "StorageEngine: Restore done\n";
+			}
 		}
 
 		if($db_ver != $VERSION)
@@ -282,6 +297,8 @@ package HashNet::StorageEngine;
 	{
 		my $self = shift;
 		my $file = shift || $PEERS_CONFIG_FILE;
+
+		return @{ $self->{given_peers_list} || [] } if $self->{given_peers_list};
 		
 		my @list;
 		return @list if !-f $file;
@@ -303,6 +320,8 @@ package HashNet::StorageEngine;
 		
 		my @list = @{ $self->{stored_peer_list} || [] };
 		return if !@list;
+
+		$self->{given_peers_list} = \@list if $self->{given_peers_list};
 		
 		open(F, ">$file") || die "Cannot write $file: $!";
 		print F $_, "\n" foreach @list;
@@ -460,8 +479,7 @@ package HashNet::StorageEngine;
 	sub _put_local_batch
 	{
 		my $self = shift;
-		my @batch = @{ shift || {} };
-		my $timestamp = shift || undef;
+		my @batch  = @{ shift || {} };
 		if(!@batch)
 		{
 			logmsg "INFO", "StorageEngine: _put_local_batch(): No entries in batch list, nothing updated.\n";
@@ -470,53 +488,54 @@ package HashNet::StorageEngine;
 
 		foreach my $item (@batch)
 		{
-			$item->{edit_num} =
-				$self->_put_local($item->{key}, $item->{val}, $timestamp, $item->{edit_num});
+			my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num});
+			$item->{timestamp} = $data_ref->{timestamp};
+			$item->{edit_num}  = $data_ref->{edit_num};
 		}
 	}
 
-	sub merge_transactions
-	{
-		my $self = shift;
-		my ($tx_start, $tx_end, $peer_uuid) = @_;
-		my %namespace;
-		my @merged_uuids;
-		my $db = $self->tx_db;
-		for my $txid ($tx_start .. $tx_end-1)
-		{
-			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
-			next if $peer_uuid && $tr->has_been_here($peer_uuid);
-			
-			if($tr->type eq 'TYPE_WRITE_BATCH')
-			{
-				my @batch = @{ $tr->data || [] };
-				foreach my $item (@batch)
-				{
-					$namespace{$item->{key}} = $item->{val};
-				}
-			}
-			else
-			{
-				$namespace{$tr->key} = $tr->data;
-			}
-			push @merged_uuids, $tr->uuid;
-		}
-
-		# We must indicate if the TR would contain no data because
-		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
-		return undef if !@merged_uuids;
-		
-		my @batch_list;
-		foreach my $key (keys %namespace)
-		{
-			push @batch_list, { key => $key, val => $namespace{$key} };
-		}
-
-		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
-		$tr->update_route_history();
-		$tr->{merged_uuid_list} = \@merged_uuids;
-		return $tr;
-	}
+# 	sub merge_transactions
+# 	{
+# 		my $self = shift;
+# 		my ($tx_start, $tx_end, $peer_uuid) = @_;
+# 		my %namespace;
+# 		my @merged_uuids;
+# 		my $db = $self->tx_db;
+# 		for my $txid ($tx_start .. $tx_end-1)
+# 		{
+# 			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
+# 			next if $peer_uuid && $tr->has_been_here($peer_uuid);
+# 			
+# 			if($tr->type eq 'TYPE_WRITE_BATCH')
+# 			{
+# 				my @batch = @{ $tr->data || [] };
+# 				foreach my $item (@batch)
+# 				{
+# 					$namespace{$item->{key}} = $item->{val};
+# 				}
+# 			}
+# 			else
+# 			{
+# 				$namespace{$tr->key} = $tr->data;
+# 			}
+# 			push @merged_uuids, $tr->uuid;
+# 		}
+# 
+# 		# We must indicate if the TR would contain no data because
+# 		# we don't want to send an 'empty' transaction - which could just ping-pong across the peer network
+# 		return undef if !@merged_uuids;
+# 		
+# 		my @batch_list;
+# 		foreach my $key (keys %namespace)
+# 		{
+# 			push @batch_list, { key => $key, val => $namespace{$key} };
+# 		}
+# 
+# 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', '_BATCH', \@batch_list, 'TYPE_WRITE_BATCH');
+# 		$tr->update_route_history();
+# 		$tr->{merged_uuid_list} = \@merged_uuids;
+# 		return $tr;
+# 	}
 	
 	sub generate_batch
 	{
@@ -585,8 +604,8 @@ package HashNet::StorageEngine;
 
 		#logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
 
-		my $edit_num = $self->_put_local($key, $val);
-		$self->_put_peers($key, $val, $edit_num);
+		my $data_ref = $self->_put_local($key, $val);
+		$self->_put_peers($key, $val, $data_ref->{timestamp}, $data_ref->{edit_num});
 	}
 		
 	sub _put_peers
@@ -594,11 +613,13 @@ package HashNet::StorageEngine;
 		my $self = shift;
 		my $key = shift;
 		my $val = shift;
-		my $edit_num = shift || undef;
+		my $timestamp = shift || undef;
+		my $edit_num = shift  || undef;
 		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
 		
-		$tr->{edit_num} = $edit_num;
+		$tr->{edit_num}  = $edit_num;
+		$tr->{timestamp} = $timestamp;
 		# Moved this call to _push_tr
 		#$tr->update_route_history;
 		
@@ -653,9 +674,11 @@ package HashNet::StorageEngine;
 			$tr->update_route_history($tr->{rel_id});
 
 			# Let the DB worry about serialization (instead of using to_json)
-			$db->push($tr->to_hash);
+			my $hash = $tr->to_hash;
+			$db->push($hash);
 
 			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
+			#debug "StorageEngine: _push_tr(): tr dump: ",Dumper($hash);
 		};
 		if($@)
 		{
@@ -762,6 +785,53 @@ package HashNet::StorageEngine;
 # 			}
 		}
 	}
+	
+	sub discover_mimetype
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		
+		# Write the data to a tempfile
+		my ($fh, $filename) = tempfile();
+		print $fh $value;
+		close($fh);
+
+		# Use 'file' to deduct the mimetype of the data contained therein
+		#$mimetype = `file -b --mime-type $filename`;
+		#$mimetype =~ s/[\r\n]//g;
+		
+		# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
+		# because older versions of `file' don't recognize --mime-type
+		my $mimetype = `file -b -i $filename`;
+		$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
+		
+		# Remove the temp file so we dont leave data laying around
+		unlink($filename);
+		
+		return $mimetype;
+	}
+	
+	sub printable_value
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		return undef if !defined $value;
+		
+		if(ref($value))
+		{
+			return encode_json(HashNet::StorageEngine::TransactionRecord::_clean_ref($value));
+		}
+		elsif($value =~ /[^[:print:]]/)
+		{
+			# contains unprintable characters
+			my $mimetype = discover_mimetype($value);
+			return "($mimetype, ".length($value)." bytes)";
+		}
+		else
+		{
+			return "'$value'";
+		}
+	}
 
 	sub _put_local
 	{
@@ -774,7 +844,9 @@ package HashNet::StorageEngine;
 		return if ! defined $key;
 		 
 		#trace "StorageEngine: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
-		trace "StorageEngine: _put_local(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "StorageEngine: _put_local(): '", elide_string($key), "' => ", 
+			(defined $val ? elide_string(printable_value($val)) : '(undef)'), 
+			"\n";
 		
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
@@ -792,34 +864,52 @@ package HashNet::StorageEngine;
 		{
 			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
 			
-			$edit_num = $key_data->{edit_num};
-			
-# 			if(defined $check_timestamp)
-# 			{
-# 				my $key_ts = $key_data->{timestamp};
-# 				if($check_timestamp < $key_ts)
-# 				{
-# 					logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $check_timestamp < stored ts $key_ts)\n";
-# 					return undef;
-# 				}
-# 			}
-			
-			if(defined $check_edit_num &&
-			   $check_edit_num < $edit_num)
+			$edit_num  = $key_data->{edit_num};
+			my $key_ts = $key_data->{timestamp};
+				
+			if(defined $check_timestamp &&
+				   $check_timestamp < $key_ts)
 			{
-				logmsg "ERROR", "StorageEngine: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+				logmsg "ERROR", "StorageEngine: _put_local(): Timestamp for '$key' is OLDER than timestamp in database, NOT storing (incoming time ", (date($check_timestamp))[1], " < stored ts ", (date($key_ts))[1], ")\n";
 				return undef;
 			}
+			
+# 			if(defined $check_edit_num &&
+# 			           $check_edit_num < $edit_num)
+# 			{
+# 				logmsg "ERROR", "StorageEngine: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+# 				return undef;
+# 			}
 		}
 
 		$edit_num ++;
+
+		my $mimetype = 'text/plain';
+		#if(defined $val && $val =~ /([^\t\n\x20-x7e])/)
+		if(defined $val && $val =~ /[^[:print:]]/)
+		{
+			#trace "StorageEngine: _put_local(): Trigger char: '$1', ", ord($1), "\n";
+			
+			my $mimetype = discover_mimetype($val);
+
+			# Just informational
+			trace "StorageEngine: _put_local(): Found mime '$mimetype' for '", elide_string($key), "'\n";
+		}
 		
-		nstore({ data => $val, timestamp => $check_timestamp || time(), edit_num => $edit_num }, $key_file);
+		my $data_ref =
+		{
+			data		=> $val,
+			timestamp	=> $check_timestamp || time(),
+			edit_num	=> $edit_num,
+			mimetype	=> $mimetype,
+		};
+		nstore($data_ref, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
 
-		return $edit_num;
+		return $data_ref if defined wantarray;
+		undef  $data_ref; # explicitly prevent memory leaks
 	}
 
 	sub sanatize_key
@@ -883,11 +973,22 @@ package HashNet::StorageEngine;
 
 		my $key_data = {};
 		my $val = undef;
-		if(-f $key_file)
+		if(-f $key_file && (stat($key_file))[7] > 0)
 		{
 			#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
-			$key_data = retrieve($key_file) || {}; #->{data};
-			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+			undef $@;
+			eval {
+				$key_data = retrieve($key_file) || {}; #->{data};
+			};
+			if($@)
+			{
+				logmsg "WARN", "StorageEngine: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+				#system("cat $key_file");
+			}
+			else
+			{
+				return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+			}
 		}
 
 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;

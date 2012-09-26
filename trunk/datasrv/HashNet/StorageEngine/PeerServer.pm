@@ -263,6 +263,7 @@ package HashNet::StorageEngine::PeerServer;
 	#use HTML::Template; # for use in the visulization
 	use LWP::MediaTypes qw(guess_media_type); # for serving files
 	use Net::Ping; # for pinging hosts in resp_reg_peer
+	use MIME::Base64::Perl; # for encoding/decoding binary data in the htmlify routine 
 	
 	our $PING_TIMEOUT =  1.75;
 	
@@ -1098,6 +1099,23 @@ package HashNet::StorageEngine::PeerServer;
 			}
 
 			my @keys = sort { $a cmp $b } keys %{$list || {}};
+			
+			sub htmlify
+			{
+				my $value = shift;
+				return '<i>(undef)</i>' if !defined $value;
+				return HashNet::StorageEngine->printable_value($value) if $value !~ /[^[:print:]]/;
+				
+				my $mimetype = HashNet::StorageEngine->discover_mimetype($value);
+				if($mimetype =~ /^image/)
+				{
+					my $base64 = encode_base64($value); 
+					$base64 =~ s/\n//g;
+					return "<img src='data:$mimetype;base64,$base64'>";
+				}
+				
+				return "<i>Binary Data</i>, <b>$mimetype</b>, ".length($value)." bytes";
+			}
 
 			my $last_base = '';
 			my @rows = map {
@@ -1109,7 +1127,7 @@ package HashNet::StorageEngine::PeerServer;
 				my $out = ""
 				. "<tr".($b ne $last_base ? " class=divider-top":"").">"
 				. "<td>". stylize_key($_, $path)     ."</td>"
-				. "<td>". $value ."</td>"
+				. "<td>". htmlify($value) ."</td>"
 				. "<td nowrap>". date($ts) ."</td>"
 				#. "<td>". $en ."</td>"
 				. "</tr>";
