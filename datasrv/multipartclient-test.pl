@@ -10,7 +10,7 @@ my $remote = IO::Socket::INET->new(
 		)
 || die "can't connect to 8051 PORT on localhost";
 
-print $remote "GET /db/ver HTTP/1.0\n\n";
+print $remote "GET /db/tr_stream?node_uuid=5602d6b4-046b-11e2-81a8-a1ac7fe9ec21 HTTP/1.0\n\n";
 
 my $boundary = undef;
 my $got_boundary = 0;

@@ -821,17 +821,17 @@ package HashNet::StorageEngine::PeerServer;
 			# is set so we know where to store the software
 			
 			# NOTE DisabledForTesting
-			set_timeout         1.0, sub
-			{
-				logmsg "INFO", "PeerServer: Registering with peers\n";
-				my @peers = @{ $engine->peers };
-				foreach my $peer (@peers)
-				{
-					# Try to register as a peer (locks state file automatically)
-					$self->reg_peer($peer);
-				}
-				logmsg "INFO", "PeerServer: Registration complete\n\n";
-			};
+# 			set_timeout         1.0, sub
+# 			{
+# 				logmsg "INFO", "PeerServer: Registering with peers\n";
+# 				my @peers = @{ $engine->peers };
+# 				foreach my $peer (@peers)
+# 				{
+# 					# Try to register as a peer (locks state file automatically)
+# 					$self->reg_peer($peer);
+# 				}
+# 				logmsg "INFO", "PeerServer: Registration complete\n\n";
+# 			};
 
 			set_repeat_timeout  1.0, sub
 			{
@@ -844,7 +844,7 @@ package HashNet::StorageEngine::PeerServer;
 
 					$self->push_needed($peer)
 						if !$peer->poll_only &&
-						   !$peer->host_down &&
+						   #!$peer->host_down &&
 						   !$self->is_this_peer($peer->url);
 				}
 
@@ -852,48 +852,50 @@ package HashNet::StorageEngine::PeerServer;
 			};
 			
 			# NOTE DisabledForTesting
-			set_repeat_timeout  15.0, sub
-			{
-				#logmsg "TRACE", "PeerServer: Pulling from poll-only peers\n";
-				
-				my @peers = @{ $engine->peers };
-				foreach my $peer (@peers)
-				{
-					$peer->load_changes();
-					
-					$peer->poll()
-						if  $peer->poll_only &&
-						   #!$peer->host_down &&
-						   !$self->is_this_peer($peer->url);
-				}
-				
-				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
-			};
+# 			set_repeat_timeout  15.0, sub
+# 			{
+# 				#logmsg "TRACE", "PeerServer: Pulling from poll-only peers\n";
+# 				
+# 				my @peers = @{ $engine->peers };
+# 				foreach my $peer (@peers)
+# 				{
+# 					$peer->load_changes();
+# 					
+# 					$peer->poll()
+# 						if  $peer->poll_only &&
+# 						   #!$peer->host_down &&
+# 						   !$self->is_this_peer($peer->url);
+# 				}
+# 				
+# 				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
+# 			};
 			
 			# NOTE DisabledForTesting
-			my $check_sub = set_repeat_timeout 60.0, sub
+			#my $check_sub = set_repeat_timeout 60.0, sub
+			my $check_sub = set_repeat_timeout 1.0, sub
+			#my $check_sub = sub
 			{
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
-				
+
 				my @peers = @{ $engine->peers };
 				#@peers = (); # TODO JUST FOR DEBUGGING
-				
+
 				$self->engine->begin_batch_update();
- 				
+
 				foreach my $peer (@peers)
 				{
 					$peer->load_changes();
-					
+
 					#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Locked, checking ...\n";
-					
+
 					# Make sure the peer is online, check latency, etc
-					
+
 					# NOTE DisabledForTesting
 					$peer->update_distance_metric();
-					
+
 					# Polling moved above
 					#$peer->poll();
-					
+
 					# NOTE DisabledForTesting
 					$peer->put_peer_stats(); #$engine);
 
@@ -909,7 +911,7 @@ package HashNet::StorageEngine::PeerServer;
 					my $inf  = $self->{node_info};
 					my $uuid = $inf->{uuid};
 					my $key_path = '/global/nodes/'. $uuid;
-	
+
 					if(-f $self->{node_info_changed_flag_file})
 					{
 						unlink $self->{node_info_changed_flag_file};
@@ -922,19 +924,19 @@ package HashNet::StorageEngine::PeerServer;
 							$self->engine->put($put_key, $val);
 						}
 					}
-	
+
 					my $db = $engine->tx_db;
 					my $cur_tx_id = $db->length() -1;
-	
+
 					$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
 						if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
 				}
-	
+
 				$self->engine->end_batch_update();
 
 				logmsg "INFO", "PeerServer: Peer check complete\n\n";
 			};
-			
+
 			$check_sub->();
 			
 			logmsg "TRACE", "PeerServer: Starting timer event loop...\n";
@@ -1186,6 +1188,7 @@ package HashNet::StorageEngine::PeerServer;
 		
 		# Register our handlers - each is prefixed with '/db/'
 		my %dispatch = (
+			'tr_stream'=> \&resp_tr_stream,
 			'tr_push'  => \&resp_tr_push,
 			'tr_poll'  => \&resp_tr_poll,
 			'get'      => \&resp_get,
@@ -1816,10 +1819,149 @@ of software available.
 		http_respond($res, 'text/plain', encode_json( \@uuid_list ) ); #"Received $tr: " . $tr->key .  " => " . ($tr->data || ''));
 	}
 
+	sub resp_tr_stream
+	{
+		my $self = $ActivePeerServer;
+		my ($req, $res) = @_;
+
+		my $node_uuid = http_param($req, 'node_uuid') || '';
+
+		my $peer = undef;
+		my @peers = @{ $self->engine->peers };
+		if($node_uuid)
+		{
+			foreach my $tmp (@peers)
+			{
+				if(($tmp->node_uuid||'') eq $node_uuid)
+				{
+					$peer = $tmp;
+					last;
+				}
+			}
+		}
+
+		$peer->update_begin;
+		my $host_was_down = 0;
+		if($peer->{host_down})
+		{
+			$peer->{host_down} = 0;
+			$host_was_down = 1;
+		}
+		$peer->update_end;
+		$peer->put_peer_stats if $host_was_down;
+		
+		my $conn = $self->{current_conn};
+		#print $conn "HTTP/1.1 200 OK\nContent-Type: text/html\r\n\r\n\r\n<h1>Hello, World!</h1>";
+		my $BOUNDARY = "boundary".UUID::Generator::PurePerl->new->generate_v1->as_string();
+		print $conn "HTTP/1.1 200 OK\n";
+		print $conn "Content-type: multipart/x-mixed-replace; boundary=$BOUNDARY\n\n--$BOUNDARY\n";
+
+		while($conn->connected)
+		{
+			$peer->load_changes();
+
+			my ($listref, $end_tx_id) = $self->push_needed($peer, 1); # 1 = just get listref, don't call $peer->push()
+			
+			if(!defined $listref)
+			{
+				trace "PeerServer: resp_tr_stream(): Nothing to push\n";
+				# Normally we wouldn't print anything to $conn, but for sake of debugging, we do anyway...
+				print $conn "\nContent-Type: application/json\n\n{\"message\":\"Just debugging - listref was undef - which mean's you're up to date!\"}\n--$BOUNDARY\n";
+			}
+			else
+			{
+				trace "PeerServer: resp_tr_stream(): Pushing up to $end_tx_id\n";
+				if(ref $listref eq 'HASH')
+				{
+					$listref = [%{$listref || {}}];
+				}
+				elsif(ref $listref eq 'HashNet::StorageEngine::TransactionRecord')
+				{
+					$listref = [$listref->to_hash];
+				}
+
+				my $data =
+				{
+					batch     => HashNet::StorageEngine::TransactionRecord::_clean_ref($listref),
+					cur_tx_id => $end_tx_id,
+					node_uuid => $self->node_info->{uuid},
+				};
+
+				my $json = encode_json($data);
+
+				print $conn "\nContent-Type: application/json\n\n$json\n--$BOUNDARY\n";
+			}
+
+			sleep 1;
+		}
+
+		trace "PeerServer: resp_tr_stream(): Client disconnect, marking host down\n";
+
+		$peer->update_begin;
+		$peer->{host_down} = 1;
+		$peer->update_end;
+
+		$peer->put_peer_stats;
+#
+# 		print $conn "Content-type: text/plain\n"
+# 			."\n"
+# 			."After a few seconds this will go away and the logo will appear...\n"
+# 			."--endofsection\n\n";
+#
+# 		sleep 1;
+#
+# 		print $conn "Content-type: text/plain\n"
+# 			."\n"
+# 			."New line!\n"
+# 			."--endofsection\n";
+
+#
+# print $conn q{HTTP/1.1 200 OK
+# Date: Sun, 23 Apr 2006 19:19:11 GMT
+# Content-Type: multipart/x-mixed-replace;boundary="goofup101"
+#
+# --goofup101
+# Content-type: text/plain
+#
+# <div>
+# <div class='message'>You said: Knock knock</div>
+# </div>
+#
+# --goofup101
+# };
+#
+# sleep 1;
+#
+# print $conn q{
+# Content-type: text/plain
+#
+# <div>
+# <div class='message'>You said: Who's there?</div>
+# </div>
+#
+# --goofup101--
+# };
+
+# 		print $conn "Content-Type: image/png\n"
+# 			."\n";
+#
+# 		open(FILE,"<www/images/hashnet-logo.png");
+# 		print $conn $_ while $_ = <FILE>;
+# 		close(FILE);
+#
+# 		print $conn "\n"
+# 			."--endofsection\n";
+
+		close($conn);
+		return 1;
+
+	}
+
 	sub push_needed
 	{
 		my $self = shift;
 		my $peer = shift;
+		my $get_listref = shift || 0;
 
 		my $node_uuid = $peer->node_uuid;
 		
@@ -1865,6 +2007,8 @@ of software available.
 			$peer->update_begin;
 			$peer->{last_tx_sent} = $cur_tx_id;
 			$peer->update_end;
+
+			return wantarray ? (undef,-1) : undef if $get_listref;
 		}
 		else
 		{
@@ -1874,6 +2018,18 @@ of software available.
 
 			#logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
 			logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: +++ Peer needs transctions tx $first_tx_needed - $cur_tx_id ($length tx)...\n";
+
+			if($get_listref)
+			{
+				$peer->update_begin;
+				$peer->{last_tx_sent} = $cur_tx_id;
+				$peer->update_end;
+
+				#logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: Peer successfully received all tx, updating last sent # to $cur_tx_id\n";
+				logmsg 'DEBUG', "PeerServer: push_needed(): $peer->{url}: Successfully got tx out\n";
+
+				return wantarray ? ($listref, $cur_tx_id) : $listref;
+			}
 			
 			if($peer->push($listref, $cur_tx_id))
 			{
@@ -2112,62 +2268,62 @@ of software available.
 		#print Dumper \@_;
 		logmsg "TRACE", "PeerServer: resp_ver(): Version query from ", $ENV{REMOTE_ADDR}, " on connection reference ", $self->{current_conn}, "\n";
 		
-		my $conn = $self->{current_conn};
-		#print $conn "HTTP/1.1 200 OK\nContent-Type: text/html\r\n\r\n\r\n<h1>Hello, World!</h1>";
-# 		print $conn "HTTP/1.1 200 OK\n";
-# 		print $conn "Content-type: multipart/x-mixed-replace; boundary=endofsection\n\n";
+# 		my $conn = $self->{current_conn};
+# 		#print $conn "HTTP/1.1 200 OK\nContent-Type: text/html\r\n\r\n\r\n<h1>Hello, World!</h1>";
+# # 		print $conn "HTTP/1.1 200 OK\n";
+# # 		print $conn "Content-type: multipart/x-mixed-replace; boundary=endofsection\n\n";
+# # 		
+# # 		print $conn "Content-type: text/plain\n"
+# # 			."\n"
+# # 			."After a few seconds this will go away and the logo will appear...\n"
+# # 			."--endofsection\n\n";
+# # 			
+# # 		sleep 1;
+# # 		
+# # 		print $conn "Content-type: text/plain\n"
+# # 			."\n"
+# # 			."New line!\n"
+# # 			."--endofsection\n";
+# 
+# # 
+# # print $conn q{HTTP/1.1 200 OK
+# # Date: Sun, 23 Apr 2006 19:19:11 GMT
+# # Content-Type: multipart/x-mixed-replace;boundary="goofup101"
+# # 
+# # --goofup101
+# # Content-type: text/plain
+# # 
+# # <div>
+# # <div class='message'>You said: Knock knock</div>
+# # </div>
+# # 
+# # --goofup101
+# # };
+# # 
+# # sleep 1;
+# # 
+# # print $conn q{
+# # Content-type: text/plain
+# # 
+# # <div>
+# # <div class='message'>You said: Who's there?</div>
+# # </div>
+# # 
+# # --goofup101--
+# # };
 # 		
-# 		print $conn "Content-type: text/plain\n"
-# 			."\n"
-# 			."After a few seconds this will go away and the logo will appear...\n"
-# 			."--endofsection\n\n";
-# 			
-# 		sleep 1;
-# 		
-# 		print $conn "Content-type: text/plain\n"
-# 			."\n"
-# 			."New line!\n"
-# 			."--endofsection\n";
-
+# # 		print $conn "Content-Type: image/png\n"
+# # 			."\n";
+# # 			
+# # 		open(FILE,"<www/images/hashnet-logo.png");
+# # 		print $conn $_ while $_ = <FILE>;
+# # 		close(FILE);
+# # 		
+# # 		print $conn "\n"
+# # 			."--endofsection\n";
 # 
-# print $conn q{HTTP/1.1 200 OK
-# Date: Sun, 23 Apr 2006 19:19:11 GMT
-# Content-Type: multipart/x-mixed-replace;boundary="goofup101"
-# 
-# --goofup101
-# Content-type: text/plain
-# 
-# <div>
-# <div class='message'>You said: Knock knock</div>
-# </div>
-# 
-# --goofup101
-# };
-# 
-# sleep 1;
-# 
-# print $conn q{
-# Content-type: text/plain
-# 
-# <div>
-# <div class='message'>You said: Who's there?</div>
-# </div>
-# 
-# --goofup101--
-# };
-		
-# 		print $conn "Content-Type: image/png\n"
-# 			."\n";
-# 			
-# 		open(FILE,"<www/images/hashnet-logo.png");
-# 		print $conn $_ while $_ = <FILE>;
-# 		close(FILE);
-# 		
-# 		print $conn "\n"
-# 			."--endofsection\n";
-
-		close($conn);
-		return 1;
+# 		close($conn);
+# 		return 1;
 	
 		
 		my $ver = $HashNet::StorageEngine::VERSION;
