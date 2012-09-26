@@ -783,18 +783,19 @@ package HashNet::StorageEngine::Peer;
 		$url =~ s/\/$//g;
 		$url .= '/tr_push';
 
-		if($self->host_down)
-		{
-			trace "Peer: push($url): Host down, not pushing\n";
-			return 0;
-		}
+# 		if($self->host_down)
+# 		{
+# 			trace "Peer: push($url): Host down, not pushing\n";
+# 			return 0;
+# 		}
 
+		#print_stack_trace();
 		my $post_url = $url;
 		my $data =
 		{
 			batch     => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch),
 			cur_tx_id => $end_tx_id,
-			node_uuid => $self->node_uuid,
+			node_uuid => HashNet::StorageEngine::PeerServer->node_info->{uuid}, #$self->node_uuid,
 		};
 		
 		#debug "Peer: push($url): Data dump: ", Dumper($data);

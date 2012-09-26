@@ -70,6 +70,8 @@ package HashNet::StorageEngine;
 
 		my %args = @_;
 
+		$self->{given_peers_list} = $args{peers_list} if scalar(@{$args{peers_list} || []});
+
 		$PEERS_CONFIG_FILE = $args{config} if $args{config};
 
 		if(ref($PEERS_CONFIG_FILE) eq 'ARRAY')
@@ -220,11 +222,14 @@ package HashNet::StorageEngine;
 		if($db_ver < 0.0285)
 		{
 			my $hash = $self->list;
-			info "StorageEngine: Loading and re-storing all keys so they get converted to 'network byte order' on disk (see Storable module) ...\n";
-			$self->begin_batch_update;
-			$self->put($_, $hash->{$_}) foreach keys %$hash;
-			$self->end_batch_update;
-			info "StorageEngine: Restore done\n";
+			#if(scalar(keys %$hash))
+			{
+				info "StorageEngine: Loading and re-storing all keys so they get converted to 'network byte order' on disk (see Storable module) ...\n";
+				$self->begin_batch_update;
+				$self->put($_, $hash->{$_}) foreach keys %$hash;
+				$self->end_batch_update;
+				info "StorageEngine: Restore done\n";
+			}
 		}
 
 		if($db_ver != $VERSION)
@@ -288,6 +293,8 @@ package HashNet::StorageEngine;
 	{
 		my $self = shift;
 		my $file = shift || $PEERS_CONFIG_FILE;
+
+		return @{ $self->{given_peers_list} || [] } if $self->{given_peers_list};
 		
 		my @list;
 		return @list if !-f $file;
@@ -309,6 +316,8 @@ package HashNet::StorageEngine;
 		
 		my @list = @{ $self->{stored_peer_list} || [] };
 		return if !@list;
+
+		$self->{given_peers_list} = \@list if $self->{given_peers_list};
 		
 		open(F, ">$file") || die "Cannot write $file: $!";
 		print F $_, "\n" foreach @list;
@@ -922,11 +931,22 @@ package HashNet::StorageEngine;
 
 		my $key_data = {};
 		my $val = undef;
-		if(-f $key_file)
+		if(-f $key_file && (stat($key_file))[7] > 0)
 		{
 			#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
-			$key_data = retrieve($key_file) || {}; #->{data};
-			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+			undef $@;
+			eval {
+				$key_data = retrieve($key_file) || {}; #->{data};
+			};
+			if($@)
+			{
+				logmsg "WARN", "StorageEngine: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+				#system("cat $key_file");
+			}
+			else
+			{
+				return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+			}
 		}
 
 		my $peer_server = HashNet::StorageEngine::PeerServer->active_server;
