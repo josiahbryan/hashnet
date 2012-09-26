@@ -7,7 +7,7 @@ package HashNet::Util::Logging;
 	our @ISA = qw(Exporter);
 	
 	# Exporting by default
-	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace);
+	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 	
@@ -86,5 +86,72 @@ package HashNet::Util::Logging;
 		return $st;
 		
 	}
+	
+	################
+	# Following methods not really related to logging - just general utility methods
+
+	sub date #{ my $d = `date`; chomp $d; $d=~s/[\r\n]//g; $d; };
+	{
+		if(@_ == 1) { @_ = (epoch=>shift) }
+		my %args = @_;
+		my $x = $args{epoch}||time;
+		my $ty = ((localtime($x))[5] + 1900);
+		my $tm =  (localtime($x))[4] + 1;
+		my $td = ((localtime($x))[3]);
+		my ($sec,$min,$hour) = localtime($x);
+		my $date = "$ty-".rpad($tm).'-'.rpad($td);
+		my $time = rpad($hour).':'.rpad($min).':'.rpad($sec);
+		
+		if(int($x) != $x)
+		{
+			my $fractional_part = $x - int($x);
+			#my $ms = 1000 * $fractional_part;
+			my $frac = sprintf('%.04f', $fractional_part);
+			$time .= substr($frac,1);
+		}
+		
+		#shift() ? $time : "$date $time";
+		if($args{small})
+		{
+			my $a = 'a';
+			if($hour>12)
+			{
+				$hour -= 12;
+				$a = 'p';
+				
+				$hour = 12 if $hour == 0;
+			}
+			return int($tm).'/'.int($td).' '.int($hour).':'.rpad($min).$a;
+		}
+		else
+		{
+			return $args{array} || wantarray ? ($date,$time) : "$date $time";
+		}
+	}
+	
+	
+	# Since learning more perl, I found I probably
+	# could do '$_[0].=$_[1]x$_[2]' but I havn't gotten
+	# around to changing (and testing) this code.
+	sub pad
+	{
+		local $_ = ifdefined(shift,'');
+		my $len = shift || 8;
+		my $chr = shift || ' ';
+		$_.=$chr while length()<$len;
+		$_;
+	}
+	
+	sub rpad
+	{
+		local $_ = ifdefined(shift , '');
+		my $len = shift || 2;
+		my $chr = shift || '0';
+		$_=$chr.$_ while length()<$len;
+		$_;
+	}
+	
+	sub ifdefined { foreach(@_) { return $_ if defined } }
+	sub ifdef { ifdefined(@_) }
 };
 1

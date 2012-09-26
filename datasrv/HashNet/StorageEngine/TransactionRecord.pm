@@ -35,10 +35,7 @@ package HashNet::StorageEngine::TransactionRecord;
 		my $data = shift || undef;
 		my $type = shift || TYPE_WRITE;
 
-		$self->{is_valid} =
-			$mode eq MODE_KV  ? ($key && $data ? 1:0):
-			$mode eq MODE_SQL ? ($key ? 1:0)
-			: 0;
+		$self->{is_valid} = defined $key ? 1:0;
 
 		$self->{mode} = $mode;
 		$self->{type} = $type;
@@ -160,16 +157,16 @@ package HashNet::StorageEngine::TransactionRecord;
 			push @hist, { uuid => $tmp->{uuid}, ts => $tmp->{ts} };
 		}
 		my $hash = {
-			mode	=> $self->{mode},
-			key	=> $self->{key},
+			mode	   => $self->{mode},
+			key	   => $self->{key},
 			# _clean_ref() creates a pure hash-/array-ref structure
 			# from any blessed hash/arrayrefs such as from DBM::Deep
 			# - necessary because JSON doesn't like blessed refs
-			data	=> _clean_ref($self->{data}),
-			type	=> $self->{type},
-			uuid	=> $self->{uuid},
-			timestamp => $self->{timestamp},
-			rel_id  => $self->{rel_id},
+			data	   => _clean_ref($self->{data}),
+			type	   => $self->{type},
+			uuid	   => $self->{uuid},
+			timestamp  => $self->{timestamp},
+			rel_id     => $self->{rel_id},
 			route_hist => \@hist,
 			# Only created by HashNet::StorageEngine->merge_transactions(), and used by PeerServer when receiving a merged tx
 			merged_uuid_list => $self->{merged_uuid_list},

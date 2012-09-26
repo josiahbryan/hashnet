@@ -6,7 +6,7 @@
 #  4
 
 echo Erasing test data and re-creating test parameters...
-for i in `seq 1 3 4`; do(rm -rf /tmp/test/$i; mkdir -p /tmp/test/$i);done;
+for i in `seq 1 4`; do(rm -rf /tmp/test/$i; mkdir -p /tmp/test/$i);done;
 
 # Setup test1
 echo http://localhost:8052/db >  /tmp/test/1/peers.cfg
