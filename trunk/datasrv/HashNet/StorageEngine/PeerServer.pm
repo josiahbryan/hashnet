@@ -821,17 +821,17 @@ package HashNet::StorageEngine::PeerServer;
 			# is set so we know where to store the software
 			
 			# NOTE DisabledForTesting
-# 			set_timeout         1.0, sub
-# 			{
-# 				logmsg "INFO", "PeerServer: Registering with peers\n";
-# 				my @peers = @{ $engine->peers };
-# 				foreach my $peer (@peers)
-# 				{
-# 					# Try to register as a peer (locks state file automatically)
-# 					$self->reg_peer($peer);
-# 				}
-# 				logmsg "INFO", "PeerServer: Registration complete\n\n";
-# 			};
+			set_timeout         1.0, sub
+			{
+				logmsg "INFO", "PeerServer: Registering with peers\n";
+				my @peers = @{ $engine->peers };
+				foreach my $peer (@peers)
+				{
+					# Try to register as a peer (locks state file automatically)
+					$self->reg_peer($peer);
+				}
+				logmsg "INFO", "PeerServer: Registration complete\n\n";
+			};
 
 			set_repeat_timeout  1.0, sub
 			{
@@ -844,7 +844,7 @@ package HashNet::StorageEngine::PeerServer;
 
 					$self->push_needed($peer)
 						if !$peer->poll_only &&
-						   #!$peer->host_down &&
+						   !$peer->host_down &&
 						   !$self->is_this_peer($peer->url);
 				}
 
@@ -852,27 +852,27 @@ package HashNet::StorageEngine::PeerServer;
 			};
 			
 			# NOTE DisabledForTesting
-# 			set_repeat_timeout  15.0, sub
-# 			{
-# 				#logmsg "TRACE", "PeerServer: Pulling from poll-only peers\n";
-# 				
-# 				my @peers = @{ $engine->peers };
-# 				foreach my $peer (@peers)
-# 				{
-# 					$peer->load_changes();
-# 					
-# 					$peer->poll()
-# 						if  $peer->poll_only &&
-# 						   #!$peer->host_down &&
-# 						   !$self->is_this_peer($peer->url);
-# 				}
-# 				
-# 				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
-# 			};
+			set_repeat_timeout  15.0, sub
+			{
+				#logmsg "TRACE", "PeerServer: Pulling from poll-only peers\n";
+				
+				my @peers = @{ $engine->peers };
+				foreach my $peer (@peers)
+				{
+					$peer->load_changes();
+					
+					$peer->poll()
+						if ($peer->poll_only ||
+						    $peer->host_down ) &&
+						   !$self->is_this_peer($peer->url);
+				}
+				
+				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
+			};
 			
 			# NOTE DisabledForTesting
-			#my $check_sub = set_repeat_timeout 60.0, sub
-			my $check_sub = set_repeat_timeout 1.0, sub
+			my $check_sub = set_repeat_timeout 60.0, sub
+			#my $check_sub = set_repeat_timeout 1.0, sub
 			#my $check_sub = sub
 			{
 				logmsg "INFO", "PeerServer: Checking status of peers\n";
@@ -1110,8 +1110,8 @@ package HashNet::StorageEngine::PeerServer;
 				. "<tr".($b ne $last_base ? " class=divider-top":"").">"
 				. "<td>". stylize_key($_, $path)     ."</td>"
 				. "<td>". $value ."</td>"
-				#. "<td>". $ts ."</td>"
-				. "<td>". $en ."</td>"
+				. "<td nowrap>". date($ts) ."</td>"
+				#. "<td>". $en ."</td>"
 				. "</tr>";
 				$last_base = $b;
 				$out;
@@ -1126,7 +1126,7 @@ package HashNet::StorageEngine::PeerServer;
 				. "<body><h1><a href='/'><img src='/hashnet-logo.png' border=0 align='absmiddle'></a> Query - HashNet StorageEngine Server</h1>"
 				. "<form action='/db/search'>Search: <input name=path value='$path'> <input type=submit value='Search'></form>"
 				. "<h3>" . ($path eq '/' ? "All Results" : "Results for '$path'") . "</h3>"
-				. "<table border=1><thead><th>Key</th><th>Value</th><th>Edit#</th></thead>"
+				. "<table border=1><thead><th>Key</th><th>Value</th><th>Time</th></thead>"
 				. "<tbody>"
 				. join("\n", @rows)
 				. "</tbody></table>"
@@ -1801,7 +1801,7 @@ of software available.
 						# We dont use eng->put() here because it constructs a new tr
 						if($tr->type eq 'TYPE_WRITE_BATCH')
 						{
-							$eng->_put_local_batch($tr->data, $tr->timestamp);
+							$eng->_put_local_batch($tr->data);
 						}
 						else
 						{
@@ -2551,7 +2551,8 @@ of software available.
 		logmsg "DEBUG", "PeerServer: resp_reg_peer(): Register options: $peer_url, final_url: $final_url\n";
 		#print "Content-Type: text/plain\r\n\r\n", $final_url, "\n";
 
-		if($final_url && $peer_uuid)
+		#if($final_url && $peer_uuid)
+		if($peer_uuid)
 		{
 			my $peer = undef;
 			my @peers = @{ $self->engine->peers };

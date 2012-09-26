@@ -646,7 +646,7 @@ package HashNet::StorageEngine::Peer;
 		#my $timed_out  = exec_timeout 60.0 * 10, sub { $json = get($url); };
 		
 		# 10 min was too generous....
-		my $timed_out  = exec_timeout 60.0, sub { $json = get($url); };
+		my $timed_out  = exec_timeout 10.0, sub { $json = get($url); };
 		
 
 		if($timed_out)
@@ -747,7 +747,7 @@ package HashNet::StorageEngine::Peer;
 						# We dont use eng->put() here because it constructs a new tr
 						if($tr->type eq 'TYPE_WRITE_BATCH')
 						{
-							$eng->_put_local_batch($tr->data, $tr->timestamp);
+							$eng->_put_local_batch($tr->data);
 						}
 						else
 						{

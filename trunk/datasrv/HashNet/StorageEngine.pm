@@ -52,7 +52,8 @@ package HashNet::StorageEngine;
 	use HashNet::StorageEngine::Peer;
 	use HashNet::StorageEngine::TransactionRecord;
 	use HashNet::Util::Logging;
-
+	use HashNet::Util::SNTP;
+	
 	use UUID::Generator::PurePerl;
 
 	my $ug = UUID::Generator::PurePerl->new();
@@ -67,6 +68,8 @@ package HashNet::StorageEngine;
 	{
 		my $class = shift;
 		my $self = $class->SUPER::new();
+		
+		HashNet::Util::SNTP->sync_time();
 
 		my %args = @_;
 
@@ -475,8 +478,7 @@ package HashNet::StorageEngine;
 	sub _put_local_batch
 	{
 		my $self = shift;
-		my @batch = @{ shift || {} };
-		my $timestamp = shift || undef;
+		my @batch  = @{ shift || {} };
 		if(!@batch)
 		{
 			logmsg "INFO", "StorageEngine: _put_local_batch(): No entries in batch list, nothing updated.\n";
@@ -485,8 +487,9 @@ package HashNet::StorageEngine;
 
 		foreach my $item (@batch)
 		{
-			$item->{edit_num} =
-				$self->_put_local($item->{key}, $item->{val}, $timestamp, $item->{edit_num});
+			my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num});
+			$item->{timestamp} = $data_ref->{timestamp};
+			$item->{edit_num}  = $data_ref->{edit_num};
 		}
 	}
 
@@ -600,8 +603,8 @@ package HashNet::StorageEngine;
 
 		#logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
 
-		my $edit_num = $self->_put_local($key, $val);
-		$self->_put_peers($key, $val, $edit_num);
+		my $data_ref = $self->_put_local($key, $val);
+		$self->_put_peers($key, $val, $data_ref->{timestamp}, $data_ref->{edit_num});
 	}
 		
 	sub _put_peers
@@ -609,11 +612,13 @@ package HashNet::StorageEngine;
 		my $self = shift;
 		my $key = shift;
 		my $val = shift;
-		my $edit_num = shift || undef;
+		my $timestamp = shift || undef;
+		my $edit_num = shift  || undef;
 		
 		my $tr = HashNet::StorageEngine::TransactionRecord->new('MODE_KV', $key, $val, 'TYPE_WRITE');
 		
-		$tr->{edit_num} = $edit_num;
+		$tr->{edit_num}  = $edit_num;
+		$tr->{timestamp} = $timestamp;
 		# Moved this call to _push_tr
 		#$tr->update_route_history;
 		
@@ -807,24 +812,22 @@ package HashNet::StorageEngine;
 		{
 			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
 			
-			$edit_num = $key_data->{edit_num};
-			
-# 			if(defined $check_timestamp)
-# 			{
-# 				my $key_ts = $key_data->{timestamp};
-# 				if($check_timestamp < $key_ts)
-# 				{
-# 					logmsg "ERROR", "StorageEngine: _put_local(): Incoming value for '$key' is OLDER than the value already stored, NOT storing (incoming ts $check_timestamp < stored ts $key_ts)\n";
-# 					return undef;
-# 				}
-# 			}
-			
-			if(defined $check_edit_num &&
-			   $check_edit_num < $edit_num)
+			$edit_num  = $key_data->{edit_num};
+			my $key_ts = $key_data->{timestamp};
+				
+			if(defined $check_timestamp &&
+				   $check_timestamp < $key_ts)
 			{
-				logmsg "ERROR", "StorageEngine: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+				logmsg "ERROR", "StorageEngine: _put_local(): Timestamp for '$key' is OLDER than timestamp in database, NOT storing (incoming time ", (date($check_timestamp))[1], " < stored ts ", (date($key_ts))[1], ")\n";
 				return undef;
 			}
+			
+# 			if(defined $check_edit_num &&
+# 			           $check_edit_num < $edit_num)
+# 			{
+# 				logmsg "ERROR", "StorageEngine: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+# 				return undef;
+# 			}
 		}
 
 		$edit_num ++;
@@ -856,18 +859,20 @@ package HashNet::StorageEngine;
 			trace "StorageEngine: _put_local(): Found mime '$mimetype' for '", elide_string($key), "'\n";
 		}
 		
-		nstore({
-				data		=> $val,
-				timestamp	=> $check_timestamp || time(),
-				edit_num	=> $edit_num,
-				mimetype	=> $mimetype,
-			},
-			$key_file);
+		my $data_ref =
+		{
+			data		=> $val,
+			timestamp	=> $check_timestamp || time(),
+			edit_num	=> $edit_num,
+			mimetype	=> $mimetype,
+		};
+		nstore($data_ref, $key_file);
 
 		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
 		#	unless $key =~ /^\/global\/nodes\//;
 
-		return $edit_num;
+		return $data_ref if defined wantarray;
+		undef  $data_ref; # explicitly prevent memory leaks
 	}
 
 	sub sanatize_key
