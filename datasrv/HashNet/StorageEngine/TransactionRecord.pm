@@ -19,6 +19,9 @@ package HashNet::StorageEngine::TransactionRecord;
 	
 	my $ug = UUID::Generator::PurePerl->new();
 	
+	# Disable Base64 encoding for now because we're going to try freeze/thaw and POST instead of JSON encoding transactions
+	our $ENABLE_BASE64_ENCODING = 0;
+	
 #public:
 	sub TYPE_WRITE_BATCH() { 'TYPE_WRITE_BATCH' }
 	sub TYPE_WRITE() { 'TYPE_WRITE' }
@@ -113,6 +116,11 @@ package HashNet::StorageEngine::TransactionRecord;
 	sub has_been_here
 	{
 		my $self = shift;
+		if($self eq __PACKAGE__)
+		{
+			$self = shift;
+		}
+		
 		my $uuid = shift || host_uuid();
 		my @hist = @{$self->{route_hist} || []};
 		foreach my $hist (@hist)
@@ -160,10 +168,15 @@ package HashNet::StorageEngine::TransactionRecord;
 		my $hash = {
 			mode	   => $self->{mode},
 			key	   => $self->{key},
+			
 			# _clean_ref() creates a pure hash-/array-ref structure
 			# from any blessed hash/arrayrefs such as from DBM::Deep
 			# - necessary because JSON doesn't like blessed refs
-			data	   => _clean_ref($self->{data}),
+			#data	   => _clean_ref($self->{data}),
+			
+			# Removed use of _clean_ref because we're going to try freeze/thaw instead of encode_json
+			data	   => $self->{data},
+			
 			type	   => $self->{type},
 			uuid	   => $self->{uuid},
 			timestamp  => $self->{timestamp},
@@ -187,6 +200,19 @@ package HashNet::StorageEngine::TransactionRecord;
 		# of hashes (e.g. we don't use to_json for that storage) - however, we do this here since the transaction
 		# doesn't know if the return from to_hash() is going to json or just being stored - so we are proactive here at a slight cost.
 		 
+		# Disabling for now - working on a better way of handling binary data
+		if($ENABLE_BASE64_ENCODING)
+		{
+			$self->base64_encode($hash);
+		}
+		
+		return $hash;
+	}
+	
+	sub base64_encode
+	{
+		my $class = shift;
+		my $hash  = shift;
 		if(!ref($hash->{data}) && defined($hash->{data}) &&
 			#$hash->{data} =~ /[^\t\n\x20-x7e]/)
 			$hash->{data} =~ /[^[:print:]]/)
@@ -268,24 +294,27 @@ package HashNet::StorageEngine::TransactionRecord;
 		#trace "TransactionRecord: from_hash(): Dumper of hash: ",Dumper($hash);
 		
 		# See discussion in to_hash() on why base64 instead of relying on direct storage
-		if($hash->{data_base64})
-		{
-			$hash->{data} = decode_base64($hash->{data});
-			delete $hash->{data_base64};
-		}
-		# Check for base64 encoded data in the batch list
-		elsif($hash->{type} eq TYPE_WRITE_BATCH)
-		{
-			my @batch = @{ $hash->{data} || {} };
-			foreach my $item (@batch)
+# 		if($ENABLE_BASE64_ENCODING)
+# 		{
+			if($hash->{data_base64})
 			{
-				if($item->{val_base64})
+				$hash->{data} = decode_base64($hash->{data});
+				delete $hash->{data_base64};
+			}
+			# Check for base64 encoded data in the batch list
+			elsif($hash->{type} eq TYPE_WRITE_BATCH)
+			{
+				my @batch = @{ $hash->{data} || {} };
+				foreach my $item (@batch)
 				{
-					$item->{val} = decode_base64($item->{val});
-					delete $item->{val_base64};
+					if($item->{val_base64})
+					{
+						$item->{val} = decode_base64($item->{val});
+						delete $item->{val_base64};
+					}
 				}
 			}
-		}
+#		}
 		
 		my $obj = $class->new(
 			$hash->{mode},
@@ -303,3 +332,5 @@ package HashNet::StorageEngine::TransactionRecord;
 		return $obj;
 	}
 };
+
+1;

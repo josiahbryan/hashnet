@@ -398,6 +398,8 @@ use Time::HiRes qw(time);
 		# if this program is executed with system privileges under unix,
 		# the unix clock may now be set to the nearest second
 		correct_localclock($off);
+		
+		return $off;
 	}
 };
 1;

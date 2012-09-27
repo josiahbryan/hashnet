@@ -244,7 +244,7 @@ package HashNet::StorageEngine::PeerServer;
 	use HashNet::StorageEngine;
 	use HashNet::Util::Logging;
 	
-	use Storable qw/lock_nstore lock_retrieve/;
+	use Storable qw/lock_nstore lock_retrieve freeze thaw/;
 	use LWP::Simple qw/getstore/;
 	use Data::Dumper;
 	use URI::Escape;
@@ -869,6 +869,12 @@ package HashNet::StorageEngine::PeerServer;
 				}
 				
 				#logmsg "TRACE", "PeerServer: Pulling complete\n\n";
+			};
+			
+			# Every 15 minutes, update time via SNTP
+			set_repeat_timeout 60.0 * 15.0, sub
+			{
+				$engine->update_time_offset();
 			};
 			
 			# NOTE DisabledForTesting
@@ -1775,6 +1781,14 @@ of software available.
 			$peer->update_end;
 		}
 
+		if($data->{format} eq 'bytes')
+		{
+			trace "PeerServer: resp_tr_push(): Received binary transaction push, thawing request content ...\n";
+			#print Dumper $req->content;
+			$data->{batch} = thaw($req->content);
+			#trace "PeerServer: resp_tr_push(): Received binary transaction push, thawing request content ...\n";
+		}
+		
 		my @batch = @{$data->{batch} || []};
 
 		my @uuid_list;
@@ -1790,7 +1804,7 @@ of software available.
 
 			foreach my $hash (@batch)
 			{
-				my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($hash);
+				my $tr = ref($hash) eq 'HashNet::StorageEngine::TransactionRecord' ? $hash : HashNet::StorageEngine::TransactionRecord->from_hash($hash);
 
 				$self->tr_flag_db->lock_exclusive;
 
@@ -2127,6 +2141,12 @@ of software available.
 		# (or the receiving node) before processing/adding to the DB 
 		
 		my $listref = $self->engine->generate_batch($first_tx_needed, $cur_tx_id, $node_uuid);
+		
+		# Do base64 encoding on any binary data for compat with JSON
+		foreach my $tr_hash (@$listref)
+		{
+			HashNet::StorageEngine::TransactionRecord->base64_encode($tr_hash);
+		}
 
 		my $peer = undef;
 		my @peers = @{ $self->engine->peers };
@@ -2192,7 +2212,7 @@ of software available.
 			 die 'Error: No Key Given';
 		}
 
-		my $value = undef;
+		my %key_data;
 		
 		my $req_uuid = http_param($req, 'uuid');
 		if(defined $req_uuid)
@@ -2204,7 +2224,11 @@ of software available.
 			{
 				#NetMon::Util::unlock_file($self->{tr_cache_file});
 				$self->tr_flag_db->unlock;
+				
 				logmsg "TRACE", "PeerServer: resp_get(): Already seen get() request ", $req_uuid, " - not processing\n";
+				
+				$res->code(204);
+				return http_respond($res, 'text/plain', "Duplicate get() request");
 			}
 			else
 			{
@@ -2214,20 +2238,32 @@ of software available.
 				#NetMon::Util::unlock_file($self->{tr_cache_file});
 				$self->tr_flag_db->unlock;
 
-				$value = $self->engine->get($key, $req_uuid);
+				%key_data = $self->engine->get($key, $req_uuid);
 			}
 		}
 		else
 		{
-			$value = $self->engine->get($key);
+			%key_data = $self->engine->get($key);
 		}
 
-		$value ||= ''; # avoid warnings
+		#$value ||= ''; # avoid warnings
 		
-		
-		logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
+		#logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
 		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
-		http_respond($res, 'application/octet-stream', $value);
+		#http_respond($res, 'application/octet-stream', $value);
+		
+		#logmsg "DEBUG", "PeerServer: resp_get(): URI: ", $req->uri, "\n";
+		
+		if(!(keys %key_data))
+		{
+			logmsg "WARN", "PeerServer: resp_get(): Key not found: $key\n";
+			$res->code(404);
+			return http_respond($res, 'text/plain', "Key not found: $key");
+		}
+		
+		$res->header('X-HashNet-Timestamp'	=> $key_data{timestamp});
+		$res->header('X-HashNet-Editnum'	=> $key_data{edit_num});
+		http_respond($res, $key_data{mimetype},    $key_data{data});
 	}
 	
 	sub resp_put
@@ -2256,12 +2292,20 @@ of software available.
 		}
 		else
 		{
-			my $key = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
+			my $key   = http_param($req, 'key'); # || '/'. join('/', @{$cgi->{path_parts} || []});
 			my $value = http_param($req, 'data');
-			$value = http_param($req, 'value') if !defined $value;
-			$value = uri_unescape($value);
-
-			logmsg "TRACE", "PeerServer: resp_put($key): $value\n";
+			$value    = http_param($req, 'value') if !defined $value;
+			$value    = uri_unescape($value);
+			
+			logmsg "TRACE", "PeerServer: resp_put(): key: $key\n";
+			
+			if(!defined $value)
+			{
+				$value = $req->content;
+				logmsg "WARN", "PeerServer: No value in URI and no content in body\n";
+			}
+			
+			#logmsg "DEBUG", "PeerServer: resp_put(): URI: ", $req->uri, "\n";
 
 			if(!$key)
 			{

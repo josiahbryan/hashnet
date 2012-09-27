@@ -34,7 +34,6 @@ package HashNet::StorageEngine::Peer;
 	use DBM::Deep; # for our tr_flag datbase
 	# Explicitly include here for the sake of buildpacked.pl
 	use DBM::Deep::Engine::File;
-
 	
 	# This is included ONLY so buildpacked.pl picks it up for use by JSON on some older linux boxen
 	use JSON::backportPP;
@@ -774,6 +773,9 @@ package HashNet::StorageEngine::Peer;
 		elsif(ref $tr_batch eq 'HashNet::StorageEngine::TransactionRecord')
 		{
 			$tr_batch = [$tr_batch->to_hash];
+			
+			# We're pushing via 'freeze', so we don't need to go to_hash
+			#$tr_batch = [$tr_batch]; #->to_hash];
 		}
 
 		my @uuids_expected;
@@ -793,17 +795,28 @@ package HashNet::StorageEngine::Peer;
 		my $post_url = $url;
 		my $data =
 		{
-			batch     => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch),
+			format    => 'bytes',
+			#batch     => HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch),
 			cur_tx_id => $end_tx_id,
 			node_uuid => HashNet::StorageEngine::PeerServer->node_info->{uuid}, #$self->node_uuid,
 		};
 		
 		#debug "Peer: push($url): Data dump: ", Dumper($data);
-		 
+		#debug "Peer: push($url): tr_batch dump: ", Dumper($tr_batch);
+		
+		my $json = encode_json($data);
 		my $payload =
 		{
-			data => encode_json($data),
+			data	=> $json,
+			
+			# This will post in the content body of the HTTP POST request
+			#Content	=> freeze(HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch)),
 		};
+		
+		my $Content = freeze(HashNet::StorageEngine::TransactionRecord::_clean_ref($tr_batch)),
+		$post_url .= '?data='.uri_escape($json);
+		
+		#debug "Peer: push(): \$post_url: $post_url\n";
 
 
 		# Testing 10k put()'s in a loop gave an average time of 20ms per put() call to a
@@ -830,7 +843,8 @@ package HashNet::StorageEngine::Peer;
 		#my $timed_out = exec_timeout $timeout, sub{ $result = get($final_url) };
 		my $timed_out = exec_timeout $timeout, sub
 		{
-			my $response = $ua->post($post_url, $payload);
+			#my $response = $ua->post($post_url, $payload);
+			my $response = $ua->post($post_url, Content => $Content);
 
 			if ($response->is_success)
 			{
