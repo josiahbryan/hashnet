@@ -70,7 +70,7 @@ package HashNet::StorageEngine;
 		my $class = shift;
 		my $self = $class->SUPER::new();
 		
-		HashNet::Util::SNTP->sync_time();
+		$self->update_time_offset();
 
 		my %args = @_;
 
@@ -243,6 +243,14 @@ package HashNet::StorageEngine;
 				
 		return $self;
 	};
+	
+	sub update_time_offset
+	{
+		my $self = shift;
+		$self->{time_offset} = HashNet::Util::SNTP->sync_time();
+	}
+	
+	sub time_offset { shift->{time_offset} }
 
 	sub clone_database
 	{
@@ -546,10 +554,14 @@ package HashNet::StorageEngine;
 		my $db = $self->tx_db;
 		for my $txid ($tx_start .. $tx_end)
 		{
-			my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
-			next if $peer_uuid && $tr->has_been_here($peer_uuid);
+			#my $tr = HashNet::StorageEngine::TransactionRecord->from_hash($db->[$txid]);
+			#next if $peer_uuid && $tr->has_been_here($peer_uuid);
+			#push @batch, $tr->to_hash;
 			
-			push @batch, $tr->to_hash;
+			my $tr_hash = $db->[$txid];
+			
+			next if $peer_uuid && HashNet::StorageEngine::TransactionRecord->has_been_here($tr_hash, $peer_uuid);
+			push @batch, $tr_hash;
 		}
 
 		# We must indicate if the TR would contain no data because
@@ -606,6 +618,8 @@ package HashNet::StorageEngine;
 
 		my $data_ref = $self->_put_local($key, $val);
 		$self->_put_peers($key, $val, $data_ref->{timestamp}, $data_ref->{edit_num});
+		
+		return $key;
 	}
 		
 	sub _put_peers
@@ -676,6 +690,8 @@ package HashNet::StorageEngine;
 			# Let the DB worry about serialization (instead of using to_json)
 			my $hash = $tr->to_hash;
 			$db->push($hash);
+			
+			#$db->push($tr);
 
 			debug "StorageEngine: _push_tr(): $tr->{uuid}: relid: $tr->{rel_id}\n";
 			#debug "StorageEngine: _push_tr(): tr dump: ",Dumper($hash);
@@ -890,7 +906,7 @@ package HashNet::StorageEngine;
 		{
 			#trace "StorageEngine: _put_local(): Trigger char: '$1', ", ord($1), "\n";
 			
-			my $mimetype = discover_mimetype($val);
+			$mimetype = discover_mimetype($val);
 
 			# Just informational
 			trace "StorageEngine: _put_local(): Found mime '$mimetype' for '", elide_string($key), "'\n";
@@ -924,6 +940,28 @@ package HashNet::StorageEngine;
 		$key =~ s/\.\.\///g;
 		return $key;
 	}
+	
+	sub _retrieve
+	{
+		my $self = shift;
+		my $key_file = shift;
+		
+		my $key_data;
+		#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
+		undef $@;
+		eval {
+			$key_data = retrieve($key_file) || {}; #->{data};
+		};
+		if($@)
+		{
+			#system("cat $key_file");
+			return undef;
+		}
+		else
+		{
+			return $key_data;
+		}
+	}
 
 	sub get
 	{
@@ -947,7 +985,7 @@ package HashNet::StorageEngine;
 		if($self->{get_seen}->{$req_uuid})
 		{
 			logmsg "TRACE", "StorageEngine: get(): Already seen uuid $req_uuid\n";
-			return undef;
+			return wantarray ? () : undef;
 		}
 		$self->{get_seen}->{$req_uuid} = 1;
 
@@ -956,7 +994,7 @@ package HashNet::StorageEngine;
 		if(!$key && $@)
 		{
 			warn "[ERROR] StorageEngine: get(): $@";
-			return undef;
+			return wantarray ? () : undef;
 		}
 
 		$key = '/'.$key if $key !~ /^\//;
@@ -975,19 +1013,14 @@ package HashNet::StorageEngine;
 		my $val = undef;
 		if(-f $key_file && (stat($key_file))[7] > 0)
 		{
-			#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
-			undef $@;
-			eval {
-				$key_data = retrieve($key_file) || {}; #->{data};
-			};
-			if($@)
+			$key_data = $self->_retrieve($key_file);
+			if(defined $key_data)
 			{
-				logmsg "WARN", "StorageEngine: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
-				#system("cat $key_file");
+				return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
 			}
 			else
 			{
-				return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+				logmsg "WARN", "StorageEngine: _retrieve(): Error reading '$key' from disk: $@ - will try to get from peers\n";
 			}
 		}
 
@@ -1001,7 +1034,7 @@ package HashNet::StorageEngine;
 			$checked_peers_count ++;
 
 			if(defined $peer_server &&
-				$peer_server->is_this_peer($p->url))
+				   $peer_server->is_this_peer($p->url))
 			{
 				logmsg "TRACE", "StorageEngine: get(): Not checking ", $p->url, " for $key - it's our local peer and local server is active.\n";
 				next;
@@ -1022,12 +1055,21 @@ package HashNet::StorageEngine;
 		{
 			logmsg "TRACE", "StorageEngine: get(): No peers available to check for missing key: $key\n";
 			$@ = "No peers to check for missing key '$key'";
-			return undef;
+			return wantarray ? () : undef;
 		}
 
 		#delete $self->{get_seen}->{$req_uuid};
 
-		return wantarray ? ( data => $val, timestamp => time() ) : $val;
+		#return wantarray ? ( data => $val, timestamp => time() ) : $val;
+		
+		# Retrieve the key data directly instead of just using the $val so we can return the $key_data if requested
+		$key_data = $self->_retrieve($key_file);
+		if(defined $key_data)
+		{
+			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+		}
+		
+		return wantarray ? () : undef;
 	}
 
 	sub list

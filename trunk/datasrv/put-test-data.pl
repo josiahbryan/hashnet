@@ -26,8 +26,9 @@ use Time::HiRes qw/time sleep/;
 # }
 
 
-my $file = "./www/images/hashnet-logo.png";
+#my $file = "./www/images/hashnet-logo.png";
 #my $file = "/home/josiah/Pictures/2012-09-04\\ Historical\\ UC/dsc_6764.jpg";
+my $file = "test-img.jpg";
 my $data = `cat $file`;
 
 #my $data = get("http://10.1.3.3/jpg/image.jpg");
