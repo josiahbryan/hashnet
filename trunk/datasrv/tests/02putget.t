@@ -13,14 +13,65 @@ use LWP::Simple qw/get/;
 use Time::HiRes qw/sleep time/;
 use UUID::Generator::PurePerl;
 use URI::Escape;
+use File::Path qw/mkpath/;
 
 my $ug = UUID::Generator::PurePerl->new();
 
 my $idx = 1;
+my $db_root = "/tmp/test/${idx}/db";
+
+if(!-d $db_root)
+{
+	mkpath($db_root);
+}
+
 my $con = HashNet::StorageEngine->new(
 	peers_list => ["http://127.0.0.1:805${idx}/db"],
-	db_root	   => "/tmp/test/${idx}/db",
+	db_root	   => $db_root,
 );
+
+my $server_pid = -1;
+if($con->peers->[0]->host_down)
+{
+	#die "Peer 0 down";
+	#perl ./dengpeersrv.pl -p 8051 -c /tmp/test/1/peers.cfg -n /tmp/test/1/node.cfg -d /tmp/test/1/db
+	if(my $pid = fork)
+	{
+		$server_pid = $pid;
+	}
+	else
+	{
+		print STDERR "Creating PeerServer's StorageEngine...\n";
+		my $engine = HashNet::StorageEngine->new(
+			peer_list => [],
+			db_root	=> $db_root,
+		);
+
+		# if(-f $bin_file)
+		# {
+		# 	info "$app_name: Using bin_file to '$bin_file'\n";
+		# }
+
+		print STDERR "Creating PeerServer...\n";
+		my $srv = HashNet::StorageEngine::PeerServer->new(
+			engine   => $engine,
+			port     => "805${idx}",
+		);
+
+		$srv->run;
+
+		exit;
+	};
+
+	print STDERR "Waiting 5 sec for peer server to startup...\n";
+	sleep(5);
+	
+	print STDERR "Assuming server running, continuing with test\n";
+	my $peer = $con->peers->[0];
+	$peer->update_begin;
+	$peer->{host_down} = 0;
+	$peer->update_end;
+}
 
 my $key = '/test';
 # Ensure non-zero because "Duplicate pull deny" uses "!" to test
@@ -41,7 +92,7 @@ is($con->get($key), $data, "Get $key");
 	SKIP: {
 		#ok(!$peer->host_down, "$peer->{url} online");
 		
-		my $num_tests = 2;
+		my $num_tests = 6;
 		skip "because $peer->{url} is offline", $num_tests unless ! $peer->host_down;
 		
 		my $req_uuid = $ug->generate_v1->as_string();
@@ -133,3 +184,9 @@ is($con->get($key), $data, "Get $key");
 
 
 done_testing();
+
+if($server_pid > 0)
+{
+	kill 15, $server_pid;
+}
+

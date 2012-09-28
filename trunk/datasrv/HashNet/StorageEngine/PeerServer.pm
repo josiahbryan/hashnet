@@ -1641,7 +1641,15 @@ package HashNet::StorageEngine::PeerServer;
  		my $self = shift;
 		
 # 		kill 9, $self->{server_pid} if $self->{server_pid};
+
+		if($self->{timer_loop_pid})
+		{
+			logmsg "INFO", "PeerServer: DESTROY(): Killing timer loop $self->{timer_loop_pid}\n";
+			kill 15, $self->{timer_loop_pid};
+		}
  	}
+
+ 	$SIG{TERM} = sub { logmsg "INFO", "PeerServer: Caught SIGTERM, exiting\n"; exit(); };
 	
 # 	my %dispatch = (
 # 		'tr_push'  => \&resp_tr_push,
