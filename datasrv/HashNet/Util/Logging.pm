@@ -23,6 +23,7 @@ package HashNet::Util::Logging;
 		#NetMon::Util::unlock_file($stdout_lock);
 	}
 	
+	# Hash to translate level 'strings' to integers for comparssion with $LEVEL
 	my %INT_LEVELS =
 	(
 		ERROR	=> 1,

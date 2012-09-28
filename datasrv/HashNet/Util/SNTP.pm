@@ -337,8 +337,13 @@ use Time::HiRes qw(time);
 		my $off = shift;
 		$off = sprintf("%.f", $off);
 		#print "\nSet local system clock: ($off seconds) ";
-		info "SNTP: Set local system clock: ($off seconds) ";
-		system("date --set=\'$off seconds\'");
+		
+		# Moved the date call from system() to `` (backticks) so it sends it's output 
+		# thru info(), so that the otuput from date is automatically supressed if
+		# needed by the Logging level
+		info "SNTP: Set local system clock: ($off seconds) ", 
+			`date --set=\'$off seconds\'`;
+		
 	} # end sub correct_localclock
 	
 	# main *********************************************************************

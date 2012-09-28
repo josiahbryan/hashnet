@@ -154,7 +154,7 @@ package HashNet::StorageEngine::Peer;
 				}
 			};
 			
-			warn "[WARN]  Peer: Error loading state from '$file': $@" if $@;
+			logmsg "DEBUG", "Peer: Error loading state from '$file': $@" if $@;
 		}
 
 		$self->{version}	 = $state->{version};
@@ -380,7 +380,7 @@ package HashNet::StorageEngine::Peer;
 		my $other_uuid = $self->node_uuid;
 		if(!$other_uuid)
 		{ 
-			logmsg 'WARN', "Peer: No node_info received from remote peer $self->{url}, unable to data in engine.\n"
+			logmsg 'WARN', "Peer: No node_info received from remote peer $self->{url}, unable to store data in engine.\n"
 				unless $self->{host_down} && $self->{warned_about_node_uuid} ++;
 				# Don't over-warn about down hosts
 			return;
@@ -543,7 +543,7 @@ package HashNet::StorageEngine::Peer;
 		
 		if(!$pinger->ping($host, $PING_TIMEOUT))
 		{
-			logmsg "WARN", "Peer: calc_distance_metric($url): Host not responding to pings, marking as bad.\n";
+			logmsg "INFO", "Peer: calc_distance_metric($url): Host not responding to pings, marking as bad.\n";
 			$self->{host_down} = 1;
 			return undef;
 		}

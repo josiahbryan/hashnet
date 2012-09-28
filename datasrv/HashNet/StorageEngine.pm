@@ -74,7 +74,10 @@ package HashNet::StorageEngine;
 
 		my %args = @_;
 
-		$self->{given_peers_list} = $args{peers_list} if scalar(@{$args{peers_list} || []});
+		my @tmp_list = @{$args{peers_list} || $args{peer_list} || []};
+		#print STDERR Dumper \%args, \@tmp_list;
+		
+		$self->{given_peers_list} = \@tmp_list if @tmp_list;
 
 		$PEERS_CONFIG_FILE = $args{config} if $args{config};
 
@@ -136,6 +139,8 @@ package HashNet::StorageEngine;
 		@peers = $self->load_peers();
 
 		#print STDERR "[DEBUG] StorageEngine: new: mark2\n";
+		
+		#print STDERR Dumper($self->{given_peers_list}, \@peers);
 		
 		@peers = HashNet::StorageEngine::PeerDiscovery->discover_peers() 
 			if ! @peers;
@@ -329,7 +334,7 @@ package HashNet::StorageEngine;
 		my @list = @{ $self->{stored_peer_list} || [] };
 		return if !@list;
 
-		$self->{given_peers_list} = \@list if $self->{given_peers_list};
+		return $self->{given_peers_list} = \@list if $self->{given_peers_list};
 		
 		open(F, ">$file") || die "Cannot write $file: $!";
 		print F $_, "\n" foreach @list;
@@ -462,10 +467,12 @@ package HashNet::StorageEngine;
 	sub end_batch_update
 	{
 		my $self = shift;
-
+		$self->{_batch_update} = 0;
+		
 		my @batch = @{$self->{_batch_list} || []};
 		if(!@batch)
 		{
+			undef $self->{_batch_list};
 			#logmsg "INFO", "StorageEngine: end_batch_update(): No entries in batch list, nothing updated.\n";
 			return;
 		}
@@ -481,7 +488,6 @@ package HashNet::StorageEngine;
 		$self->_push_tr($tr);
 		
 		undef $self->{_batch_list};
-		$self->{_batch_update} = 0;
 	}
 
 	sub _put_local_batch
@@ -599,7 +605,7 @@ package HashNet::StorageEngine;
 
 		if(!$key && $@)
 		{
-			warn "[ERROR] StorageEngine: put(): $@";
+			logmsg "ERROR", "StorageEngine: put(): $@";
 			return undef;
 		}
 
@@ -609,9 +615,9 @@ package HashNet::StorageEngine;
 
 		if($self->{_batch_update})
 		{
-			#logmsg "TRACE", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
+			#logmsg "WARN", "StorageEngine: put(): [BATCH] $key => ", ($val||''), "\n";
 			push @{$self->{_batch_list}}, {key=>$key, val=>$val};
-			return;
+			return $key;
 		}
 
 		#logmsg "TRACE", "StorageEngine: put(): $key => ", ($val||''), "\n";
@@ -921,7 +927,7 @@ package HashNet::StorageEngine;
 		};
 		nstore($data_ref, $key_file);
 
-		#trace "StorageEngine: _put_local(): key_file: $key_file\n"
+		trace "StorageEngine: _put_local(): key_file: $key_file\n";
 		#	unless $key =~ /^\/global\/nodes\//;
 
 		return $data_ref if defined wantarray;
@@ -947,7 +953,9 @@ package HashNet::StorageEngine;
 		my $key_file = shift;
 		
 		my $key_data;
-		#logmsg "TRACE", "StorageEngine: get(): Reading key_file $key_file\n";
+		
+		logmsg "TRACE", "StorageEngine: _retrieve(): Reading key_file $key_file\n";
+		
 		undef $@;
 		eval {
 			$key_data = retrieve($key_file) || {}; #->{data};
