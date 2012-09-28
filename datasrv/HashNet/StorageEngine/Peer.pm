@@ -87,6 +87,21 @@ package HashNet::StorageEngine::Peer;
 		my $url = shift;
 		my $known_as = shift;
 
+		my $uri = URI->new($url);
+		if($uri->can('host') && gethostbyname($uri->host))
+		{
+			my $server = $uri->host;
+			my $orig_url = $url;
+			my $new_server = sprintf("%d.%d.%d.%d",unpack("C4",gethostbyname($server)));
+			
+			if($new_server ne $server)
+			{
+				$uri->host($new_server);
+				$url = $uri . '';
+				logmsg 'TRACE', "Peer: new(): Changed host from '$server' to ".$uri->host.", new url: '$url', original url: '$orig_url'\n";
+			}
+		}
+		
 		$self->{url} = $url;
 		$self->{host_down} = 0;
 		$self->{known_as} = $known_as;
@@ -117,15 +132,20 @@ package HashNet::StorageEngine::Peer;
 	sub state_file
 	{
 		my $self = shift;
+		
+		my $url     = $self->{url};
+		my $url_md5 = md5_hex($url);
+		#logmsg "DEBUG", "Peer: state_file(): Using url '$url', md5: $url_md5\n";
 
 		# engine is undef when called in DESTROY, above
 		return $self->{_cached_state_file_name} if !$self->engine;
+		#return $self->{_cached_state_file_name} if $self->{_cached_state_file_name};
 		
 		my $root = $self->engine->db_root;
 		$root .= '/' if $root !~ /\/$/;
 		
 		# TODO is this name going to cause problems? Does it need to be more host-specific?
-		return $self->{_cached_state_file_name} = $root . '.peer-'.md5_hex($self->url).'.state';
+		return $self->{_cached_state_file_name} = $root . '.peer-'.$url_md5.'.state';
 	}
 
 	sub load_state
@@ -165,6 +185,8 @@ package HashNet::StorageEngine::Peer;
 		$self->{last_tx_recd}	 = $state->{last_tx_recd};
 		$self->{distance_metric} = $state->{distance_metric};
 		$self->{last_seen}	 = $state->{last_seen};
+		
+		#logmsg "DEBUG", "Peer: load_state(): $file: node_info: ".Dumper($state->{node_info});
 		
 		$state->{last_tx_sent} = -1 if ! defined $state->{last_tx_sent};
 		$state->{last_tx_recd} = -1 if ! defined $state->{last_tx_recd};
@@ -307,6 +329,8 @@ package HashNet::StorageEngine::Peer;
 		
 		#trace "Peer: Save peer state:  $self->{url} \t $state->{last_tx_recd} (-out) [-> $file]\n";
 		#print_stack_trace();
+		
+		#logmsg "DEBUG", "Peer: save_state(): $file: node_info: ".Dumper($state->{node_info});
 
 		nstore($state, $file);
 		#YAML::Tiny::DumpFile($file, $state);
@@ -581,9 +605,20 @@ package HashNet::StorageEngine::Peer;
 		
 		my $data = decode_json($json);
 		$self->{version}   = $data->{version};
-		$self->{node_info} = $data->{node_info};
 		$self->{cur_tx_id} = $data->{cur_tx_id};
 		#$self->{ver_string} = $data->{ver_string};
+		
+		# Debugging of empty node_info discoverd thru test/progate.t
+		my @keys = keys %{$data->{node_info} || {}};
+		if(!@keys)
+		{
+			logmsg "WARN", "Peer: calc_distance_metric(): No node_info received in data blob, Dumper of data: ", Dumper($data);
+		}
+		else
+		{
+			$self->{node_info} = $data->{node_info};
+		}
+		
 		
 		if($self->{host_down})
 		{

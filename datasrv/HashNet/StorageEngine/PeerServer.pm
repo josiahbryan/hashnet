@@ -775,7 +775,7 @@ package HashNet::StorageEngine::PeerServer;
 	{
 		my $class  = shift;
 		my $engine;
-		my $port = 8031;
+		my $port     = $DEFAULT_PORT;
 		my $bin_file = '';
 		
 		my %opts;
@@ -795,6 +795,11 @@ package HashNet::StorageEngine::PeerServer;
 		#my $self = $class->SUPER::new(peer_port());
 		my $self = bless {}, $class;
 		$ActivePeerServer = $self;
+		
+		if($port != $DEFAULT_PORT)
+		{
+			$HashNet::Util::Logging::CUSTOM_OUTPUT_PREFIX = "[:${port}] ";
+		}
 
 		
 		#my $httpd = AnyEvent::HTTPD->new(port => $port);
@@ -1211,6 +1216,24 @@ package HashNet::StorageEngine::PeerServer;
 			
 			#my $peer_tmp = $peers[0]; 
 			#logmsg "TRACE", "PeerServer: /db/peers:  $peer_tmp->{url} \t $peer_tmp->{distance_metric} <-\n";
+			if(http_param($req, 'format') eq 'json')
+			{
+				my @list = map {
+					{
+						url          => $_->{url},
+						name         => $_->{node_info}->{name},
+						node_uuid    => $_->{node_info}->{uuid},
+						host_down    => $_->{host_down} ? 1:0,
+						host_up      => $_->{host_down} ? 0:1,
+						latency      => $_->{distance_metric}, 
+						last_tx_sent => $_->{last_tx_sent},
+						last_seen    => $_->{last_seen},
+					}
+				} @peers;
+				
+				return http_respond($res, 'application/json', encode_json(\@list));
+				
+			}
 
 			# Only will load changes if changed in another thread
 			my @rows = map { "" 
@@ -1804,6 +1827,10 @@ of software available.
 				}
 			}
 		}
+		else
+		{
+			debug "PeerServer: resp_tr_push(): No node_uuid received in \$data, Dump of data: ".Dumper($data);
+		}
 
 		if($peer)
 		{
@@ -1817,13 +1844,19 @@ of software available.
 			if(defined $cur_tx_id)
 			{
 				$peer->{last_tx_recd} = $cur_tx_id;
-				info "PeerServer: resp_tr_push(): Updated cur_tx_id to $cur_tx_id\n";
+				trace "PeerServer: resp_tr_push(): Updated cur_tx_id to $cur_tx_id\n";
 			}
 			else
 			{
-				info "PeerServer: resp_tr_push(): No cur_tx_id received in data\n";
+				logmsg 'WARN', "PeerServer: resp_tr_push(): No cur_tx_id received in data\n";
 			}
 			$peer->update_end;
+		}
+		else
+		{
+			trace "PeerServer: resp_tr_push(): No \$peer object, cannot check host_down or set last_tx_recd.\n";
+			#debug "PeerServer: resp_tr_push(): No \$peer object, node_uuid: $node_uuid, Dump of engine peer list: ".Dumper(\@peers);
+			
 		}
 
 		if($data->{format} eq 'bytes')
@@ -2586,7 +2619,7 @@ of software available.
 			if(is_this_host($possible_url))
 			{
 				my $tmp = $possible_url;
-				$uri->host('localhost');
+				$uri->host('127.0.0.1');
 				$possible_url = $uri->as_string;
 				trace "PeerServer: resp_reg_peer(): Changed '$tmp' => '$possible_url' because its localhost\n";
 			}
@@ -2624,7 +2657,7 @@ of software available.
 		{
 			my $local_uri = URI->new(shift @possible);
 			my $port = $local_uri->port;
-			my $local_url = "http://localhost:${port}/db";
+			my $local_url = "http://127.0.0.1:${port}/db";
 			my $node_info = HashNet::StorageEngine::Peer->is_valid_peer($local_url);
 			if(!$node_info)
 			{
@@ -2685,9 +2718,22 @@ of software available.
 					$peer->{host_down} = 0;
 					$peer->update_end();
 				}
+				else
+				{
+					logmsg 'DEBUG', "PeerServer: resp_reg_peer(): Peer $peer->{url} was marked up, nothing changed\n";
+				}
+			}
+			else
+			{
+				logmsg 'DEBUG', "PeerServer: resp_reg_peer(): Cannot find peer for peer_uuid $peer_uuid\n";
 			}
 		}
+		else
+		{
+			logmsg 'DEBUG', "PeerServer: resp_reg_peer(): No peer_uuid given, cannot check host_down status\n";
+		}
 		
+# 		#logmsg 'DEBUG', "PeerServer: resp_reg_peer(): Returning final_url: $final_url\n";
 		http_respond($res, 'text/plain', $final_url);
 
 		$peer_url = $final_url; # for update checks below

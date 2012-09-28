@@ -42,7 +42,7 @@ if($con->peers->[0]->host_down)
 	}
 	else
 	{
-		print STDERR "Creating PeerServer's StorageEngine...\n";
+		logmsg 'INFO', "Creating PeerServer's StorageEngine...\n";
 		my $engine = HashNet::StorageEngine->new(
 			peer_list => [],
 			db_root	=> $db_root,
@@ -53,7 +53,7 @@ if($con->peers->[0]->host_down)
 		# 	info "$app_name: Using bin_file to '$bin_file'\n";
 		# }
 
-		print STDERR "Creating PeerServer...\n";
+		logmsg 'INFO', "Creating PeerServer...\n";
 		my $srv = HashNet::StorageEngine::PeerServer->new(
 			engine   => $engine,
 			port     => "805${idx}",
@@ -64,10 +64,10 @@ if($con->peers->[0]->host_down)
 		exit;
 	};
 
-	print STDERR "Waiting 5 sec for peer server to startup...\n";
-	sleep(5);
+	logmsg 'INFO', "Waiting 1.5 sec for peer server to startup...\n";
+	sleep(1.5);
 	
-	print STDERR "Assuming server running, continuing with test\n";
+	logmsg 'INFO', "Assuming server running, continuing with test\n";
 	my $peer = $con->peers->[0];
 	$peer->update_begin;
 	$peer->{host_down} = 0;
@@ -189,6 +189,6 @@ done_testing();
 
 if($server_pid > 0)
 {
+	logmsg 'INFO', "Killing $server_pid"; 
 	kill 15, $server_pid;
 }
-
