@@ -184,6 +184,8 @@ sub start {
         # TODO: limit number of children
         next if $self->{fork} and fork;
 
+        $peer_server->{in_fork} = 1;
+
         #$self->{current_conn} = $conn;
         #$self->_log(error => "Current connection '$conn'");
 
@@ -228,6 +230,30 @@ sub start {
 
     1;
 }
+
+
+sub _log {
+	my ($self, $log_key, $text) = @_;
+	
+	#print STDERR " =======> $log_key <==========\n";
+	
+	$log_key = $log_key eq 'access' ? 'INFO' :
+		   $log_key eq 'error'  ? 'ERROR' :
+		   'DEBUG';
+
+	$log_key = 'INFO' if $text =~ /^Server started/;
+	
+	HashNet::Util::Logging::logmsg($log_key, "PeerServerBase: $text\n");
+	
+	
+	
+	#$self->{"${log_key}_log"}->print( '[' . localtime() . "] [$$] ", $text, "\n" )
+		;# if $text =~ /^\//;
+		# if $text =~ /^\//;
+}
+
+
+
 
 };
 
@@ -595,12 +621,9 @@ package HashNet::StorageEngine::PeerServer;
 		$self->request_restart;
 	}
 	
-	sub request_restart
+	sub kill_children
 	{
 		my $self = shift;
-		
-		# attempt restart
-		logmsg "INFO", "PeerServer: request_restart(): Restarting server\n";
 		
 		my $peer_port = $self->peer_port();
 # 		print "#######################\n";
@@ -608,15 +631,6 @@ package HashNet::StorageEngine::PeerServer;
 # 		print "#######################\n";
 # 		print "$0\n";
 # 		print "#######################\n";
-
-		# Tell the buildpacked.pl-created wrapper NOT to remove the payload directory.
-		# I've seen it happen /sometimes/ when we kill the child, a race condition develops,
-		# where the rm -rf in the buildpacked.pl stub is still removing the folder while the
-		# new binary is decompressing the updated payload - resulting in a partial or 
-		# corrupted payload and causing the new binary not to start up correctly, if at all.
-		# So, we tell the stub to skip the 'rm -rf' after program exit and the new binary
-		# will just overwrite the payload in place.
-		$ENV{NO_CLEANUP} = 'true';
 		
 		foreach ( qx{ lsof -i :$peer_port | grep -P '(perl|$0)' } )
 		{
@@ -629,20 +643,38 @@ package HashNet::StorageEngine::PeerServer;
 			
 			if(@lines)
 			{
-				logmsg "INFO", "PeerServer: request_restart(): Killing child: $pid\n";
+				logmsg "INFO", "PeerServer: kill_children(): Killing child: $pid\n";
 				logmsg "INFO", "            $lines[0]\n";
 				
 				# Actually kill the process
-				kill 9, $pid;
+				kill 15, $pid;
 			}
 		}
 
 		if($self->{timer_loop_pid})
 		{
-			logmsg "INFO", "PeerServer: request_restart(): Killing timer loop $self->{timer_loop_pid}\n";
+			logmsg "INFO", "PeerServer: kill_children(): Killing timer loop $self->{timer_loop_pid}\n";
 			kill 15, $self->{timer_loop_pid};
 		}
-			
+	}
+	
+	sub request_restart
+	{
+		my $self = shift;
+		
+		# Tell the buildpacked.pl-created wrapper NOT to remove the payload directory.
+		# I've seen it happen /sometimes/ when we kill the child, a race condition develops,
+		# where the rm -rf in the buildpacked.pl stub is still removing the folder while the
+		# new binary is decompressing the updated payload - resulting in a partial or 
+		# corrupted payload and causing the new binary not to start up correctly, if at all.
+		# So, we tell the stub to skip the 'rm -rf' after program exit and the new binary
+		# will just overwrite the payload in place.
+		$ENV{NO_CLEANUP} = 'true';
+		
+		# attempt restart
+		logmsg "INFO", "PeerServer: request_restart(): Restarting server\n";
+		
+		$self->kill_children();
 
 		logmsg "INFO", "PeerServer: request_restart(): All children killed, killing self: $$\n";
 
@@ -672,6 +704,7 @@ package HashNet::StorageEngine::PeerServer;
 				my $app = $0;
 				$app =~ s/#.*$//g; # remove any comments from the app name
 				my $cmd = "$^X $app @Startup_ARGV &";
+				
 				logmsg "INFO", "PeerServer: request_restart(): In monitor fork $$, executing restart command: '$cmd'\n";
 				system($cmd);
 #			}
@@ -779,7 +812,7 @@ package HashNet::StorageEngine::PeerServer;
 		#my $httpd = HTTP::Server::Brick::ForkLimited->new( %server_args );
 		my $httpd = HTTP::Server::Brick::PeerServerBase->new( %server_args );
 		$httpd->{peer_server} = $self;
-		 
+		
 		$self->{httpd}  = $httpd;
 		$self->{engine} = $engine;
 		$self->{port}   = $port;
@@ -1642,10 +1675,14 @@ package HashNet::StorageEngine::PeerServer;
 		
 # 		kill 9, $self->{server_pid} if $self->{server_pid};
 
-		if($self->{timer_loop_pid})
+		if(!$self->{in_fork})
 		{
-			logmsg "INFO", "PeerServer: DESTROY(): Killing timer loop $self->{timer_loop_pid}\n";
-			kill 15, $self->{timer_loop_pid};
+			$self->kill_children();
+			
+# 		    $self->{timer_loop_pid})
+# 		{
+# 			logmsg "INFO", "PeerServer: DESTROY(): Killing timer loop $self->{timer_loop_pid}\n";
+# 			kill 15, $self->{timer_loop_pid};
 		}
  	}
 
@@ -2101,19 +2138,36 @@ of software available.
 		my $node_uuid    = http_param($req, 'node_uuid') || '';
 		my $last_tx_recd = http_param($req, 'last_tx');
 		$last_tx_recd = -1 if !defined $last_tx_recd;
+		
+		my $peer = undef;
+		my @peers = @{ $self->engine->peers };
+		if($node_uuid)
+		{
+			foreach my $tmp (@peers)
+			{
+				if(($tmp->node_uuid||'') eq $node_uuid)
+				{
+					$peer = $tmp;
+					last;
+				}
+			}
+		}
+		
+		#my $printable_peer_id = $peer ? $peer->{node_info}->{name} : $node_uuid;
+		my $printable_peer_id = $peer ? $peer->{url} : $node_uuid;
 
 		if(http_param($req, 'get_cur_tx_id'))
 		{
-			debug "PeerServer: resp_tr_poll(): $node_uuid: Just getting cur_tx_id\n";
+			debug "PeerServer: resp_tr_poll(): $printable_peer_id: Just getting cur_tx_id\n";
 			return http_respond($res, 'application/octet-stream', '{"cur_tx_id":'.$cur_tx_id.'}');
 		}
 
 		my $first_tx_needed = $last_tx_recd + 1;
-		logmsg 'TRACE', "PeerServer: resp_tr_poll(): $node_uuid: last_tx_recd: $last_tx_recd, cur_tx_id: $cur_tx_id\n";
+		logmsg 'TRACE', "PeerServer: resp_tr_poll(): $printable_peer_id: last_tx_recd: $last_tx_recd, cur_tx_id: $cur_tx_id\n";
 
 		if($cur_tx_id < 0)
 		{
-			debug "PeerServer: resp_tr_poll(): $node_uuid: No transactions in database, not transmitting anything\n";
+			debug "PeerServer: resp_tr_poll(): $printable_peer_id: No transactions in database, not transmitting anything\n";
 			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id });
 			return;
 		}
@@ -2121,7 +2175,7 @@ of software available.
 		my $length = $cur_tx_id - $first_tx_needed + 1;
 		if($length <= 0)
 		{
-			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			debug "PeerServer: resp_tr_poll(): $printable_peer_id: Peer is up to date with transactions (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id });
 		}
 
@@ -2129,10 +2183,10 @@ of software available.
 		{
 			$length = 500;
 			$cur_tx_id = $first_tx_needed + $length;
-			debug "PeerServer: resp_tr_poll(): $node_uuid: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
+			debug "PeerServer: resp_tr_poll(): $printable_peer_id: Length>500, limiting to 500 transactions, setting cur_tx_id to $cur_tx_id\n";
 		}
 
-		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
+		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $printable_peer_id: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id ($length tx), merging into single batch transaction ...\n";
 
 		#my $tr = $length == 1 ?
 		#	HashNet::StorageEngine::TransactionRecord->from_hash($db->[$first_tx_needed])    :
@@ -2156,20 +2210,6 @@ of software available.
 			HashNet::StorageEngine::TransactionRecord->base64_encode($tr_hash);
 		}
 
-		my $peer = undef;
-		my @peers = @{ $self->engine->peers };
-		if($node_uuid)
-		{
-			foreach my $tmp (@peers)
-			{
-				if(($tmp->node_uuid||'') eq $node_uuid)
-				{
-					$peer = $tmp;
-					last;
-				}
-			}
-		}
-
 		if($peer)
 		{
 			$peer->update_begin();
@@ -2177,7 +2217,7 @@ of software available.
 
 			if($peer->{host_down})
 			{
-				logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: Peer $peer->{url} was down, marking up\n";
+				logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $printable_peer_id: Peer $peer->{url} was down, marking up\n";
 				$peer->{host_down} = 0;
 			}
 			$peer->update_end();
@@ -2188,19 +2228,19 @@ of software available.
 		{
 			# If $tr is undef, then merge_transactions found that $node_uuid has seen all the transactions from $first... to $cur...,
 			# so we tell $node_uuid it's current
-			debug "PeerServer: resp_tr_poll(): $node_uuid: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
+			debug "PeerServer: resp_tr_poll(): $printable_peer_id: Peer has seen all transactions in the range requested (first_tx_needed: $first_tx_needed, current num: $cur_tx_id), nothing to send.\n";
 
 			return http_respond($res, 'application/octet-stream', encode_json { batch => undef, cur_tx_id => $cur_tx_id } );
 		}
 
 		#die "Created merged transaction: ".Dumper($tr);
-		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Sending tr: ".Dumper($tr);
+		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $printable_peer_id: +++ Sending tr: ".Dumper($tr);
 
-		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
+		logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $printable_peer_id: +++ Peer needs transctions from $first_tx_needed to $cur_tx_id, sending $listref ...\n";
 
 
 		my $data = { batch => HashNet::StorageEngine::TransactionRecord::_clean_ref($listref), cur_tx_id => $cur_tx_id };
-		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $node_uuid: Sending \$data: ", Dumper $data;
+		#logmsg 'DEBUG', "PeerServer: resp_tr_poll(): $printable_peer_id: Sending \$data: ", Dumper $data;
 		
 		#logmsg "TRACE", "PeerServer: resp_get($key): $value\n";
 		#print "Content-Type: text/plain\r\n\r\n", $value, "\n";
