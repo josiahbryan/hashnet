@@ -4,16 +4,17 @@ use lib '..';
 
 use Test::More;
 
-# Setup
-# Create peer server or use configured server
-# Setup engine and peer
-
 use HashNet::StorageEngine;
 use LWP::Simple qw/get/;
 use Time::HiRes qw/sleep time/;
 use UUID::Generator::PurePerl;
 use URI::Escape;
 use File::Path qw/mkpath/;
+
+# Make logging quiet so we can read test output more easily
+use HashNet::Util::Logging;
+$HashNet::Util::Logging::LEVEL = 0;
+
 
 my $ug = UUID::Generator::PurePerl->new();
 
@@ -97,28 +98,34 @@ is($con->get($key), $data, "Get $key");
 		
 		my $req_uuid = $ug->generate_v1->as_string();
 		
-		is($peer->pull($key, $req_uuid), $data, "Pull $key from $peer->{url}");
+		# Test simple pull of the value we put earlier
+		{
+			is($peer->pull($key, $req_uuid), $data, "Pull $key from $peer->{url}");
+		}
 		
-		ok(!$peer->pull($key, $req_uuid), "Duplicate pull deny");
+		# Make sure the server denies pulls with the same uuid
+		{
+			ok(!$peer->pull($key, $req_uuid), "Duplicate pull deny");
+		}
 		
 		# Test /db/put URL
 		{
 			my $url = $peer->{url} . '/put';
 			
-			$url .= '?key='.uri_escape($key);
+			$url .= '?key=' .uri_escape($key);
 			$url .= '&data='.uri_escape($data);
 			
-			like(get($url), qr/^OK/, "/db/put test");
+			like(get($url), qr/^OK/, "/db/put $key");
 		}
 		
 		# Test /db/put URL - alternate data key
 		{
 			my $url = $peer->{url} . '/put';
 			
-			$url .= '?key='.uri_escape($key);
+			$url .= '?key='  .uri_escape($key);
 			$url .= '&value='.uri_escape($data);
 			
-			like(get($url), qr/^OK/, "/db/put test alternate data key");
+			like(get($url), qr/^OK/, "/db/put $key with alternate data key");
 		}
 		
 		# Test /db/put URL via POST
@@ -133,55 +140,50 @@ is($con->get($key), $data, "Get $key");
 			
 			my $response = $ua->post($url, Content => $data );
 
-			ok($response->is_success, "HTTP POST ok");
+			ok($response->is_success, "/db/put POST HTTP response is_success");
 			
 			diag($response->status_line) if !$response->is_success;
 			
-			like($response->decoded_content, qr/^OK/, "/db/put POST test");
+			like($response->decoded_content, qr/^OK/, "/db/put POST rxd OK");
 		}
 		
 		# Setup binary data
+		my $img = "www/images/hashnet-logo.png";
+		#my $img = "test-img.jpg";
+		my $file = "../" . $img;
+		if(!-f $file)
 		{
-			#my $file = "./devel/viz/img/rectangle.png";
+			$file = $img;
+		}
 		
-			my $img = "www/images/hashnet-logo.png";
-			#my $img = "test-img.jpg";
-			my $file = "../" . $img;
-			if(!-f $file)
-			{
-				$file = $img;
-			}
-			
-			my $data = `cat $file`;
-			my $len = length($data);
-			
-			#print "len of data: $len\n";
-			#die "Cannot read file: $file" if $len <= 0;
-			if($len <= 0)
-			{
-				# Fill in a simple non-printable (well, outside :print: range) character
-				$data = chr(244);
-			}
-			
-			# Test binary data put/get
+		my $data = `cat $file`;
+		my $len = length($data);
+		
+		#print "len of data: $len\n";
+		#die "Cannot read file: $file" if $len <= 0;
+		if($len <= 0)
+		{
+			# Fill in a simple non-printable (well, outside :print: range) character
+			$data = chr(244);
+		}
+		
+		# Test binary data put/get
+		{
 			is($con->put($key, $data), $key, "Put binary data");
 			
-			# Test pull binary data
+			# This makes use of the server's tr_push and Peer's push() method,
+			# below, we test to make sure the server received the binary data
+			# properly by making sure we can retrieve it
+		}
+		
+		# Test pull binary data
+		{
 			is($peer->pull($key), $data, "Pull binary data for $key from $peer->{url}");
 		}
+		
 	};
 	
 }
-
-#my 
-
-
-# # Test binary
-# my $file = "test-img.jpg";
-# my $data = `cat $file`;
-# 
-# $con->put('/test', '1');
-
 
 done_testing();
 

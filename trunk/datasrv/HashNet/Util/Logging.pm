@@ -23,21 +23,48 @@ package HashNet::Util::Logging;
 		#NetMon::Util::unlock_file($stdout_lock);
 	}
 	
+	my %INT_LEVELS =
+	(
+		ERROR	=> 1,
+		WARN	=> 2, 
+		INFO	=> 3,
+		DEBUG	=> 4,
+		TRACE	=> 5,
+	);
+	
+	# The level at which to limit logging output.
+	# Anything greater than $LEVEL will not be output.
+	our $LEVEL     = 99;
+	
+	# Set to true to show where
 	our $SHOW_FROM = 0;
-	sub info  { lock_stdout; print sprintf('%.09f',time()), " [INFO]  [PID $$] \t", ($SHOW_FROM ? called_from(1). "\t ":""), join('', @_); unlock_stdout }
-	sub trace { lock_stdout; print sprintf('%.09f',time()), " [TRACE] [PID $$] \t", ($SHOW_FROM ? called_from(1). "\t ":""), join('', @_); unlock_stdout }
-	sub debug { lock_stdout; print sprintf('%.09f',time()), " [DEBUG] [PID $$] \t", ($SHOW_FROM ? called_from(1). "\t ":""), join('', @_); unlock_stdout }
-	sub error { lock_stdout; print sprintf('%.09f',time()), " [ERROR] [PID $$] \t", ($SHOW_FROM ? called_from(1). "\t ":""), join('', @_); unlock_stdout }
 	
 	sub logmsg
 	{
 		my $level = uc(shift);
-		$level eq 'INFO'  ? info(@_)  :
-		$level eq 'TRACE' ? trace(@_) :
-		$level eq 'DEBUG' ? debug(@_) :
-		$level eq 'ERROR' ? error(@_) :
-		                    debug(@_) ;
+		
+		my $int = $INT_LEVELS{$level};
+		return if $int && $int > $LEVEL;
+		
+		my $called_from = undef;
+		if($SHOW_FROM)
+		{
+			$called_from = called_from(1);
+			$called_from = called_from(2) if $called_from =~ /Logging.pm/;
+		}
+		
+		lock_stdout;
+		print sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "]  [PID $$] \t", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+		unlock_stdout;
 	}
+	
+	
+	sub trace { logmsg 'TRACE', @_ }
+	sub debug { logmsg 'DEBUG', @_ }
+	sub info  { logmsg 'INFO',  @_ }
+	sub warn  { logmsg 'WARN',  @_ }
+	sub error { logmsg 'ERROR', @_ }
+	
 	
 	sub called_from
 	{

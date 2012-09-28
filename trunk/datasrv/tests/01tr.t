@@ -3,9 +3,13 @@ use strict;
 use Test::More;
 use lib '..';
 
-BEGIN { print "$0 begin\n" }
+#BEGIN { print "$0 begin\n" }
 
 BEGIN { use_ok('HashNet::StorageEngine::TransactionRecord'); };
+
+# Make logging quiet so we can read test output more easily
+use HashNet::Util::Logging;
+$HashNet::Util::Logging::LEVEL = 0;
 
 use DBM::Deep;
 use Storable qw/freeze thaw/;
