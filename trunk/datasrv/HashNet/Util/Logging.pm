@@ -40,6 +40,9 @@ package HashNet::Util::Logging;
 	# Set to true to show where
 	our $SHOW_FROM = 0;
 	
+	# Use this to add custom prefix right before user text or called_from (if $SHOW_FROM set)
+	our $CUSTOM_OUTPUT_PREFIX = '';
+	
 	sub logmsg
 	{
 		my $level = uc(shift);
@@ -55,7 +58,7 @@ package HashNet::Util::Logging;
 		}
 		
 		lock_stdout;
-		print sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "]  [PID $$] \t", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+		print sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
 		unlock_stdout;
 	}
 	

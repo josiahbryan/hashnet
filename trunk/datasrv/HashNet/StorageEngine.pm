@@ -31,7 +31,7 @@ package HashNet::StorageEngine;
 	# 	- Replicants objects should wrap the network comms so they're transparent to StorageEngine
 	#		- Consider using Object::Event
 	
-	use base qw/Object::Event/;
+	#use base qw/Object::Event/;
 	use Storable qw/freeze thaw nstore retrieve/;
 	use File::Path qw/mkpath/;
 	use Data::Dumper;
@@ -68,7 +68,8 @@ package HashNet::StorageEngine;
 	sub new
 	{
 		my $class = shift;
-		my $self = $class->SUPER::new();
+		#my $self = $class->SUPER::new();
+		my $self = bless {}, $class;
 		
 		$self->update_time_offset();
 
@@ -927,7 +928,7 @@ package HashNet::StorageEngine;
 		};
 		nstore($data_ref, $key_file);
 
-		trace "StorageEngine: _put_local(): key_file: $key_file\n";
+		#trace "StorageEngine: _put_local(): key_file: $key_file\n";
 		#	unless $key =~ /^\/global\/nodes\//;
 
 		return $data_ref if defined wantarray;
@@ -954,7 +955,7 @@ package HashNet::StorageEngine;
 		
 		my $key_data;
 		
-		logmsg "TRACE", "StorageEngine: _retrieve(): Reading key_file $key_file\n";
+		#logmsg "TRACE", "StorageEngine: _retrieve(): Reading key_file $key_file\n";
 		
 		undef $@;
 		eval {
