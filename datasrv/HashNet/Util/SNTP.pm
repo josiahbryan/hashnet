@@ -341,8 +341,16 @@ use Time::HiRes qw(time);
 		# Moved the date call from system() to `` (backticks) so it sends it's output 
 		# thru info(), so that the otuput from date is automatically supressed if
 		# needed by the Logging level
-		info "SNTP: Set local system clock: ($off seconds) ", 
-			`date --set=\'$off seconds\'`;
+		my $username = getpwuid( $< );
+		if($username eq 'root')
+		{
+			info "SNTP: Set local system clock: ($off seconds) ",
+				`date --set=\'$off seconds\'`;
+		}
+		else
+		{
+			logmsg 'WARN', "SNTP: Unable to set local system clock, not running as root\n";
+		}
 		
 	} # end sub correct_localclock
 	
