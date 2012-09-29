@@ -1,0 +1,140 @@
+Areas/Routines to Test
+StorageEngine.pm:78:y @tmp_list = @{$args{peers_list} || $args{peer_list} || []};
+	:83:$PEERS_CONFIG_FILE = $args{config} if $args{config};
+	:100 - !$found
+	:113 - default root
+	:119 - abs txlog path/relative path
+	:146 - auto-discover peers
+	:153 - known-as in peers.cfg
+	:158 - peer not added
+	:174 - no peers found or loaded
+	:179 - my $cur_tx_id    = $peer->cur_tx_id    || 0; (both sides)
+	:188 - ** Clone Database functionality
+		NOTE to self:
+			- Review clone functionality - notify all peers that we cloned from X and know cur tx is Y for each peer
+	:259 - time offset
+		NOTE to self:
+			- Integrate time offset into codebase instead of setting system date
+	:263 - clone db functionality (see :188)
+	:291 - sub tx_db - test no tx db, and test re-connect after fork
+	:313 - sub load_peers   - test explicit file || check
+	:318 -  "       "       - test empty return if no file
+	:333 - sub save_peers   - test explicit file || check
+	:336 -  "       "       - test return if empty list
+	:340 -  "       "       - test cant write to file
+	:351 - sub add_peer     - test explicit known_as || undef
+	:353 -  "	"       - test given peer_uuid || undef
+		NOTE: decide if peer_uuid arg needed
+	:361 -  "	"	- test non bulk mode and no peer uuid rxd
+	:373 -  "	"	- test adding peer with already present uuid (must reject)
+	:389 -  "	"	- test adding peer already in stored_peer_list
+	:397 -	"	"	- test adding peer NOT already in stored_peer_list
+	:409 - sub peer 	- test that it works (both found and not found)
+	:422 - sub _sort_peers  - test sort with undefined distance metric on both a and b
+	:453 - sub begin_batch_update - test existing self->{_batch_update} (test it doesnt restart/clear batch)
+	:473 - sub end_batch_update   - test ending with empty _batch_list
+	:497 - sub _put_local_batch   - test put with undef list ref AND empty list ref
+	:470 - sub generate_batch     - test has_been_here call
+	:584 - sub elide_string - test explicit max_len AND undef
+	:607 - sub put		- test sanatize key ERROR return
+	:613 -	"	"	- test non-abs key
+	:637 - sub _put_peers	- test both def and undef args (next line too)
+	:660 - sub _push_tr	- test empty peers list
+	:706 - 	"	"	- test error in pushing tr
+	:735 - 	"	"	- test defined p and host_down
+	:742 - 	"	"	- test defined server and is this peer
+	:753 - 	"	"	- test skiup peer url
+		NOTE: decide if skip peer url still needed (since we use route_hist now)
+	:763 - 	"	"	- test defined node_uuid and has been here
+	:782 -	"	"	- test push failure
+	:814 - sub discover_mimetype	- test call methods (class, package ref, etc)
+	:839 - sub printable_value	- test call methods (class, package ref, etc)
+	:841 -	"	"		- test return undef if !defined val
+	:843 - 	"	"		- test ref value
+	:867 - sub _put_local	- test !defined key
+	:870 -	"	"	- test debug output of undef and def value
+	:888 -	"	"	- test retrieve() undef ret
+		NOTE: Does retrieve ever return undef?
+	:912 -	"	"	- test put undefined val (already test binary val/non printable in putget.t)
+	:922 -	"	"	- test with both check_timestamp and no check timestamp
+	:941 - sub sanatize_key	- check undef key
+	:952 - 	"	"	- check invalid key characters
+	:962 - sub _retrieve	- check undef from retrieve
+		NOTE: does retrieve ever return undef?
+	:994 - sub get		- check already seen uuid in get ...I thought I already tested this?
+	:1003 -	"	"	- test bad key from sanatize
+	:1009 -	"	"	- test non-abs key
+	:1023 -	"	"	- test empty file and non-existant file
+	:1026 - "	"	- test undef from retrieve
+	:1028 - "	"	- test return wantarray and not wantarray
+	:1045 - "	"	- test is this peer
+	:1078 -	"	"	- test return wantarray and not wantarray
+	:1087 - sub list	- test default and non-default args
+	:1097 -	"	"	- test "or" (|) search
+	:1124 -	"	"	- test bad key from sanatize
+	:1130 -	"	"	- test non-abs key (partial search)
+	:1152 - "	"	- test search loop
+	
+PeerServer.pm
+	:365 - test is this peer, esp wrt localhost
+	:399 - test is this host, esp wrt localhost
+	:435 - sub peer_port	- test undef {port}
+	:471 - sub reg_peer	- test default and nondefault port
+	:478 - sub reg_peer	- test build discovery_urls edge cases
+	..............
+	- test update software
+	- test restart
+	- test single $engine arg to new
+	- test default port
+	- test give port and bin_file to new
+	- in call to push_needed - test all cases
+	- in call to poll - test all cases
+	- test call to update time offset
+	- test detect node info changed file
+	- test engine put cur_tx_id
+	- test http_send_file
+	- test all user-facing http webpage routines
+	- test auto-download GeoIP datafile
+	- test invalid geoip
+	- test save config if changed
+	- test in request
+		NOTE: still even used?
+	- test tr_flag_db sub for both no db and pid change
+	- test has_seen_Tr
+		NOTE: still even used?
+	- test mark_tr_seen
+		NOTE: ""
+	- sub DESTROY
+		- update indent
+	- resp_tr_push  - test no node uuid and given ode uuid
+	-	"	- test host down, so mark up
+	- 	"	- test curtxid and no curtxid given
+	- 	"	- test old json format of tr
+	-	"	- test empty batch
+	- 	"	- test has been here
+	-	"	- test not defined key
+	- resp_tr_stream
+		NOTE: Need to write receiver code before we can test
+	- push_needed	- test over 500 behind
+	- resp_tr_poll	- just test polling then see what covereage still needed
+	- resp_get	- test no key given
+	- resp_put	- test batch put
+	-	"	- test no key given
+	- resp_ver	- test upgrade check
+	- resp_bin_file	- will be stested when we test upgrading
+	- resp_clone_db - will be tested when we test cloning in storage engine
+	- resp_reg_peer - test auto peer url, no ver, undef uuid
+	-	"	- test localhost and nonlocalhost reg
+	- 	"	- test false is_valid_peer retval
+	-	"	- test *same as this instance* detection
+	- 	"	- test host down, mark up
+	- search_list_to_tree - test
+	- build_nodeinfo_json - tested
+
+Peer.pm:
+	- test exec_timeout actually timesout (And propogates errs)
+	- test node_name sub
+	- test poll()
+	
+
+	
