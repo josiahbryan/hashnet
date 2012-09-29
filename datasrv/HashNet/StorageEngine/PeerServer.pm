@@ -1712,7 +1712,12 @@ package HashNet::StorageEngine::PeerServer;
 		}
  	}
 
- 	$SIG{TERM} = sub { logmsg "INFO", "PeerServer: Caught SIGTERM, exiting\n"; exit(); };
+	# Catch SIGTERM so that the DESTROY method (above) has a chance to kill the timer loop
+ 	$SIG{TERM} = sub
+	{
+		logmsg "INFO", "PeerServer: Caught SIGTERM, exiting\n";
+		exit();
+	};
 	
 # 	my %dispatch = (
 # 		'tr_push'  => \&resp_tr_push,
