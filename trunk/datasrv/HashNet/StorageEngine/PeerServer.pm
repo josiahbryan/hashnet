@@ -289,7 +289,8 @@ package HashNet::StorageEngine::PeerServer;
 	#use HTML::Template; # for use in the visulization
 	use LWP::MediaTypes qw(guess_media_type); # for serving files
 	use Net::Ping; # for pinging hosts in resp_reg_peer
-	use MIME::Base64::Perl; # for encoding/decoding binary data in the htmlify routine 
+	use MIME::Base64::Perl; # for encoding/decoding binary data in the htmlify routine
+	use File::Touch; # for touching testing_flag_file
 	
 	our $PING_TIMEOUT =  1.75;
 	
@@ -780,6 +781,7 @@ package HashNet::StorageEngine::PeerServer;
 		my $engine;
 		my $port     = $DEFAULT_PORT;
 		my $bin_file = '';
+		my $testing_flag_file = undef;
 		
 		my %opts;
 		if(@_ == 1)
@@ -793,6 +795,7 @@ package HashNet::StorageEngine::PeerServer;
 			$port   = $opts{port} || $port;
 			$bin_file = $opts{bin_file} || '';
 			$CONFIG_FILE = $opts{config} if $opts{config};
+			$testing_flag_file = $opts{testing_flag_file};
 		}
 		
 		#my $self = $class->SUPER::new(peer_port());
@@ -803,6 +806,8 @@ package HashNet::StorageEngine::PeerServer;
 		{
 			$HashNet::Util::Logging::CUSTOM_OUTPUT_PREFIX = "[:${port}] ";
 		}
+
+		$self->{testing_flag_file} = $testing_flag_file;
 
 		
 		#my $httpd = AnyEvent::HTTPD->new(port => $port);
@@ -863,7 +868,7 @@ package HashNet::StorageEngine::PeerServer;
 			# is set so we know where to store the software
 			
 			# NOTE DisabledForTesting
-			set_timeout         1.0, sub
+			set_timeout         0.5, sub
 			{
 				logmsg "INFO", "PeerServer: Registering with peers\n";
 				my @peers = @{ $engine->peers };
@@ -873,6 +878,13 @@ package HashNet::StorageEngine::PeerServer;
 					$self->reg_peer($peer);
 				}
 				logmsg "INFO", "PeerServer: Registration complete\n\n";
+
+				# tests/propogate.t (and perhaps others) need to wait till we've registered
+				# with peers to continue testing
+				if($self->{testing_flag_file})
+				{
+					touch($self->{testing_flag_file});
+				}
 			};
 
 			set_repeat_timeout  1.0, sub

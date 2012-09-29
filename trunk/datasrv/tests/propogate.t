@@ -2,7 +2,7 @@
 use strict;
 use lib '..';
 
-use Test::More;
+use Test::More tests => 7;
 
 use HashNet::StorageEngine;
 use HashNet::Util::Logging;
@@ -80,16 +80,20 @@ eval
 					port     => $peer_port,
 					# Set a node.cfg file so it can store a unique uuid for this server per $idx 
 					config   => $test_root.'/node.cfg',
+					testing_flag_file => $flag_file,
 				);
 		
 				logmsg 'INFO', "Test: Peer $idx: Starting server...\n";
-				touch($flag_file);
+
+				# Moved this touch() to PeerServer's registration routines
+				#touch($flag_file);
+				
 				$srv->run;
 		
 				exit;
 			};
 		
-			logmsg 'INFO', "Test: Peer $idx: Waiting a few sec for peer server $peer_port to startup...\n";
+			logmsg 'INFO', "Test: Peer $idx: Waiting a few sec for peer server $peer_port to finish startup and registration...\n";
 			my $start_time = time();
 			while(!-f $flag_file && (time - $start_time) < 20.)
 			{
@@ -113,8 +117,8 @@ eval
 	#logmsg 'INFO', Dumper $host1_peerstat);
 	#goto DONE_TESTING if ! is($host1_peerstat->[0]->{host_up}, 1, "Peer 1->2 up");
 	
-	goto DONE_TESTING if ! is(decode_json(get("http://localhost:65501/db/peers?format=json"))->[0]->{host_up}, 1, "Peer 1->2 up");
-	goto DONE_TESTING if ! is(decode_json(get("http://localhost:65502/db/peers?format=json"))->[0]->{host_up}, 1, "Peer 2->1 up");
+	goto DONE_TESTING if ! ok(decode_json(get("http://localhost:65501/db/peers?format=json"))->[0]->{host_up}, "Peer 1->2 up");
+	goto DONE_TESTING if ! ok(decode_json(get("http://localhost:65502/db/peers?format=json"))->[0]->{host_up}, "Peer 2->1 up");
 	
 	my $key = '/test';
 	# Ensure non-zero because "Duplicate pull deny" uses "!" to test
@@ -129,8 +133,6 @@ eval
 	# Test basic 'put'
 	my $put_result = $cons{1}->put($key, $data);
 	is($put_result, $key, "Put $key => $data");
-	
-	goto DONE_TESTING if $put_result ne $key;
 	
 	# Test basic 'get'
 	is($cons{1}->get($key), $data, "Get $key from peer 1 (local engine)");
@@ -147,7 +149,6 @@ eval
 	
 	# Test 2nd 'get'
 	is($peer2_data, $data, "Get $key from peer 2");
-	
 	
 	# Setup binary data
 	my $img = "www/images/hashnet-logo.png";
@@ -178,17 +179,11 @@ eval
 		# properly by making sure we can retrieve it
 	}
 	
-	
-	#logmsg 'INFO', "Testy: /peers from 01: ".get("http://localhost:65501/db/peers"), "\n";
-	#logmsg 'INFO', "Testy: /peers from 02: ".get("http://localhost:65502/db/peers"), "\n";
-	
-	
-	
 	# Give it at most 5 seconds to propogate the data
 	my $time_start = time;
 	$peer2_data = undef;
 	while(($peer2_data ne $data) && 
-	      (time - $time_start) < 3.0)
+	      (time - $time_start) < 5.0)
 	{
 		sleep .5;
 		$peer2_data = $cons{2}->get($key);
@@ -198,7 +193,10 @@ eval
 	# Test pull binary data
 	{
 		#is($peer->pull($key), $data, "Pull binary data for $key from $peer->{url}");
-		ok($peer2_data eq $data, "Get binary data from $key in peer 2"); #$peer->{url}");
+
+		# Use ok() rather than is() because if the test fails, we don't want to see a dump of
+		# binary data to the terminal when is() tries to tell us what it expected.
+		ok($peer2_data eq $data, "Get binary data from $key in peer 2");
 	}
 
 };
