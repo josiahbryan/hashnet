@@ -23,7 +23,7 @@ my $con = HashNet::StorageEngine->new(
 #my $val = $opts{v} || 1;
 my $val = '(auto)';
 
-my $count = 1000;
+my $count = 1; #000;
 my $start = time;
 for(0..$count-1)
 {

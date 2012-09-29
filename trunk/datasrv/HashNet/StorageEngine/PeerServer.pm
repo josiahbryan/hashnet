@@ -338,11 +338,14 @@ package HashNet::StorageEngine::PeerServer;
 		# if we have the same bridge ip on multiple machines (such as two machines that have
 		# xen dom0 or VirtualBox installed), resp_reg_ip would change the bridgeip to localhost
 		# since the same ip appears in both lists. (See resp_reg_ip())
-		foreach ( qx{ brctl show } )
+		unless(`which brctl 2>&1` =~ /no brctl/)
 		{
-			$interface = $1 if /^(\S+?)\s/;
-			next unless defined $interface && $interface ne 'bridge'; # first line is 'bridge name ...';
-			delete $ifs{$interface};
+			foreach ( qx{ brctl show } )
+			{
+				$interface = $1 if /^(\S+?)\s/;
+				next unless defined $interface && $interface ne 'bridge'; # first line is 'bridge name ...';
+				delete $ifs{$interface};
+			}
 		}
 		
 		@IP_LIST_CACHE = ();

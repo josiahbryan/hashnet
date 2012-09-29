@@ -33,6 +33,9 @@ eval
 	{
 		my $test_root = "/tmp/test/propogate.t-$$-$idx";
 		
+		my $flag_file = $test_root."/.run_flag";
+		unlink($flag_file);
+		
 		if(!-d $test_root)
 		{
 			mkpath($test_root);
@@ -79,13 +82,19 @@ eval
 				);
 		
 				logmsg 'INFO', "Test: Peer $idx: Starting server...\n";
+				touch($flag_file);
 				$srv->run;
 		
 				exit;
 			};
 		
 			logmsg 'INFO', "Test: Peer $idx: Waiting a few sec for peer server $peer_port to startup...\n";
-			sleep(1.5);
+			my $start_time = time();
+			while(!-f $flag_file && (time - $start_time) < 20.)
+			{
+				sleep(1.0);
+			}
+			unlink($flag_file);
 			
 			logmsg 'INFO', "Test: Peer $idx: Assuming server $peer_port running, continuing with test\n";
 			
