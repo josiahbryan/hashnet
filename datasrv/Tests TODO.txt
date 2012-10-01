@@ -1,11 +1,12 @@
 Areas/Routines to Test
-StorageEngine.pm:78:y @tmp_list = @{$args{peers_list} || $args{peer_list} || []};
-	:83:$PEERS_CONFIG_FILE = $args{config} if $args{config};
-	:100 - !$found
-	:113 - default root
-	:119 - abs txlog path/relative path
+StorageEngine.pm
+	#:78:my @tmp_list = @{$args{peers_list} || $args{peer_list} || []};
+	#:83:$PEERS_CONFIG_FILE = $args{config} if $args{config};
+	#:100 - !$found
+	#:113 - default root
+	#:119 - abs txlog path/relative path
 	:146 - auto-discover peers
-	:153 - known-as in peers.cfg
+	#:153 - known-as in peers.cfg
 	:158 - peer not added
 	:174 - no peers found or loaded
 	:179 - my $cur_tx_id    = $peer->cur_tx_id    || 0; (both sides)
