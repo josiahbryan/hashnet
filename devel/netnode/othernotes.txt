@@ -1,0 +1,37 @@
+
+	#	A hub is just an API to route messages
+	#	It can either 'host' a server on top of the hub, or not run the server
+	#	If not running the server, it will make all outgoing connections to other hubs it knows about.
+	#	If running a server, it will sit back and let other hubs and clients connect to it - not initiate outgoing connections.
+	#		TODO: Why? When should it actually initatie? Should it always try to initiate and just wait if not?
+	#	Then the 'client' API is an api that connects to the internal hub
+	#		The 'client program' never really touches the hub, just the ClientHandle
+	#		The client program uses the handle (handle = ClientHandle = 'client' api) to get messages, post messages, etc
+	#	Then the distributed storage engine would sit 'beside' the clienthandle on the org chart, using a clienthandle to get into the hub
+	#		The hub, in turn, would use the storageengine to maintain hub states across the network, etc
+	#	So chart might look like this:
+	#	
+	#		[Incoming SocketWorker's]
+	#		|1..|n
+	#		SocketServer  [Outgoing SocketWorker's]
+	#		     |        |1..|n
+	#		     MessageHub-----+
+	#		     |              |
+	#		     ClientHandle   |
+	#		     |              |
+	#		     StorageEngine<-+
+	
+	#	Two personalities:
+	#	- Server, Client
+	#	If {server} set to true, then server personality selected (obviously)
+	#	- In server personality:
+	#	- 	- we host a TCP/IP server
+	#	- 	- load config from a file {config} or $DEFAULT_CONFIG
+	#	- 	- use config to get/make our node_info
+	#	- 	- Use a data directory  (either from config or in {data_dir}) to hold store-and-forward messages
+	#	In client personality:
+	#	-	we dont load a config
+	#	-	we auto-generate node_info from $0
+	#	-	no store-and-forward, just receive messages for ourselves
+	#	-		- if we happen to get a message not for us, we can pass it on to another hub if available, or queue an error ... ?
+	
