@@ -52,6 +52,17 @@
 				my $stat = $?;
 				print "Reaped $k stat $stat\n";
 			}
+
+			$self->{child_pid} = $kid;
+		}
+	}
+
+	sub stop
+	{
+		my $self = shift;
+		if($self->{child_pid})
+		{
+			kill 15, $self->{child_pid};
 		}
 	}
 	
@@ -330,7 +341,18 @@
 	{
 		my $self = shift;
 		my $hash = shift;
-		my $msg  = to_json(HashNet::Util::CleanRef->clean_ref($hash))."\015\012";
+		my $json = "";
+		undef $@;
+		eval {
+			$json = to_json(clean_ref($hash))
+		};
+		if($@)
+		{
+			use Carp;
+			Carp::cluck "send_message: Error encoding json: $@";
+			return;
+		}
+		my $msg  = $json."\015\012";
 		my $sock = $self->{sock};
 		print $sock $msg;
 	}

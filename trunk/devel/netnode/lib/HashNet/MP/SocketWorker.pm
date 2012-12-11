@@ -54,6 +54,8 @@
 				no_fork => 1
 			);
 		}
+
+		clean_ref({});
 		
 		my %opts = @_;
 		
@@ -228,10 +230,12 @@
 		my $self = shift;
 		my $queue = shift;
 		
-		return $self->{queues}->{$queue} if defined $self->{queues}->{$queue};
+		return  $self->{queues}->{$queue}->{ref} if
+			$self->{queues}->{$queue} &&
+			$self->{queues}->{$queue}->{pid} == $$;
 		
 		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
-		$self->{queues}->{$queue} = $ref;
+		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
 		return $ref;
 	}
 	
@@ -248,14 +252,15 @@
 		my $uuid  = $self->peer->uuid;
 		my $queue = $self->outgoing_queue;
 		my @list  = $queue->by_field(nxthop => $uuid);
-		@list = sort { $a->time cmp $b->time } @list;
+		@list = sort { $a->{time} cmp $b->{time} } @list;
 
-		print STDERR __PACKAGE__.": pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n";
-		print STDERR Dumper(\@list) if @list;
+		#print STDERR __PACKAGE__.": pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n";
+		#print STDERR Dumper(\@list) if @list;
 		
-		my @return_list = map { clean_ref($_->{hash}) } @list;
+		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 		
 		$queue->del_batch(\@list);
+		print STDERR Dumper(\@return_list) if @return_list;
 		return @return_list;
 	}
 };
