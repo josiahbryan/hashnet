@@ -7,6 +7,8 @@
 	use Data::Dumper;
 	
 	use Time::HiRes qw/time/;
+
+	use Carp qw/carp croak/;
 	
 	use HashNet::MP::PeerList;
 	use HashNet::MP::LocalDB;
@@ -101,30 +103,59 @@
 		my $self = shift;
 		my $data = shift;
 
-		@_ = ( dest => $_[0] ) if @_ == 1;
+		@_ = %{ $_[0] || {} } if @_ == 1 && ref $_[0] eq 'HASH';
+
+		@_ =  ( to => $_[0] ) if @_ == 1;
+		
 		my %opts = @_;
 
-		if(!$opts{dest} && $self->peer)
+		if(!$opts{to} && $self->peer)
 		{
-			$opts{dest} = $self->peer->uuid;
+			$opts{to} = $self->peer->uuid;
 		}
 
-		if(!$opts{dest})
+		if(!$opts{to})
 		{
-			warn "create_envelope: No destination given (either dest=>X or 2nd arg), no envelope created";
+			Carp::cluck "create_envelope: No destination given (either no to=>X, no 2nd arg, or no self->peer), therefore no envelope created";
 			return undef;
 		}
+
+		if(!$opts{from})
+		{
+			$opts{from} = $self->node_info->{uuid};
+		}
+
+		$opts{hist} = [] if !$opts{hist};
+
+		push @{$opts{hist}},
+		[{
+			from => $opts{from}, #$self->node_info->{uuid},
+			to   => $opts{nxthop} || $opts{to},
+			time => time(),
+		}];
+		
 
 		my $env =
 		{
 			time	=> time(),
-			uuid	=> $UUID_GEN->generate_v1->as_string(),
-			orig	=> $opts{orig} || $self->node_info->{uuid},
-			dest	=> $opts{dest},
+			uuid	=> $opts{uuid} || $UUID_GEN->generate_v1->as_string(),
+			# From is the hub/client where this envelope originated
+			from    => $opts{from},
+			# To is the hub/client where this envelope is destined
+			to	=> $opts{to},
+			# Nxthop is the next hub/client this envelope is destined for
+			nxthop	=> $opts{nxthop} || $opts{to},
+			# If bcast is true, the next hub that gets this envelope
+			# will copy it and broadcast it to each of its hubs/clients
 			bcast	=> $opts{bcast} || 0,
+			# If false, the hub will not store it if the client/hub is currently offline - just drops the envelope
 			sfwd	=> defined $opts{sfwd} ? $opts{sfwd} : 1, # store n forward
+			# Type is only relevant for internal types to SocketWorker - MSG_USER are just put into the incoming queue for the hub to route
 			type	=> $opts{type} || MSG_USER,
+			# Data is the actual content of the message
 			data	=> $data,
+			# History of where this envelope/data has been
+			hist	=> $opts{hist},
 		};
 
 		return $env;
@@ -134,7 +165,7 @@
 	{
 		my $self = shift;
 		
-		$self->send_message(create_envelope($self->{node_info}, type => MSG_NODE_INFO));
+		$self->send_message($self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO));
 	}
 	
 	sub disconnect_handler
@@ -148,25 +179,24 @@
 	sub dispatch_message
 	{
 		my $self = shift;
-		my $hash = shift;
+		my $envelope = shift;
 		my $second_part = shift;
 		
-		#print STDERR "dispatch_message: hash: ".Dumper($hash)."\n";
+		#print STDERR "dispatch_message: envelope: ".Dumper($envelope)."\n";
 		
-		#$self->send_message({ received => $hash });
-		my $msg = $hash->{msg};
+		#$self->send_message({ received => $envelope });
+		my $msg_type = $envelope->{type};
 		
-		if($msg eq MSG_ACK)
+		if($msg_type eq MSG_ACK)
 		{
 			# Just ignore ACKs for now
 		}
-		elsif($msg eq MSG_NODE_INFO)
+		elsif($msg_type eq MSG_NODE_INFO)
 		{
-			my $node_info = $hash->{node_info};
+			my $node_info = $envelope->{data};
 			print STDERR "dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
+
 			$self->{remote_node_info} = $node_info;
-			
-			$self->send_message(create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 			
 			my $peer;
 			if($self->{peer})
@@ -181,14 +211,13 @@
 			}
 			
 			$peer->set_online(1);
+
+			$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 		}
 		else
 		{
-			#print STDERR "dispatch_msg: Unknown msg received: $msg\n";
-			#$self->send_message({ msg => MSG_UNKNOWN, text => "Unknown message type '$msg'" });
-			my $row = { time => time(), orig => $self->peer->uuid, dest => $hash->{dest}, msg => $msg, hash => $hash };
-			$self->incoming_queue->add_row($row);
-			print STDERR __PACKAGE__.": dispatch_msg: New incoming row added to queue: ".Dumper($row);
+			$self->incoming_queue->add_row($envelope);
+			print STDERR __PACKAGE__.": dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 		}
 	}
 	
@@ -218,7 +247,7 @@
 
 		my $uuid  = $self->peer->uuid;
 		my $queue = $self->outgoing_queue;
-		my @list  = $queue->by_field(dest => $uuid);
+		my @list  = $queue->by_field(nxthop => $uuid);
 		@list = sort { $a->time cmp $b->time } @list;
 
 		print STDERR __PACKAGE__.": pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n";
