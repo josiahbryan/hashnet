@@ -1,7 +1,15 @@
+use common::sense;
 
 {package HashNet::Util::CleanRef;
 
-	use common::sense;
+	# base class of this module
+	our @ISA = qw(Exporter);
+
+	# Exporting by default
+	our @EXPORT = qw(clean_ref);
+	# Exporting on demand basis.
+	our @EXPORT_OK = qw();
+
 	sub clean_ref
 	{
 		shift if $_[0] eq __PACKAGE__;
