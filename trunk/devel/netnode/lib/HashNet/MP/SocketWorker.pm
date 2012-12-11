@@ -18,6 +18,7 @@
 	sub MSG_NODE_INFO	{ 'MSG_NODE_INFO' }
 	sub MSG_INTERNAL_ERROR	{ 'MSG_INTERNAL_ERROR' }
 	sub MSG_ACK		{ 'MSG_ACK' }
+	sub MSG_USER		{ 'MSG_USER' }
 	sub MSG_UNKNOWN		{ 'MSG_UNKNOWN' }
 	
 	# Simple utility method to auto-generate the node_info structure based on $0
@@ -92,12 +93,48 @@
 		print STDERR "bad_message_handler: '$error' (bad_msg: $bad_msg)\n";
 		$self->send_message({ msg => MSG_INTERNAL_ERROR, error => $error, bad_msg => $bad_msg });
 	}
+
+	sub node_info { shift->{node_info} }
+
+	sub create_envelope
+	{
+		my $self = shift;
+		my $data = shift;
+
+		@_ = ( dest => $_[0] ) if @_ == 1;
+		my %opts = @_;
+
+		if(!$opts{dest} && $self->peer)
+		{
+			$opts{dest} = $self->peer->uuid;
+		}
+
+		if(!$opts{dest})
+		{
+			warn "create_envelope: No destination given (either dest=>X or 2nd arg), no envelope created";
+			return undef;
+		}
+
+		my $env =
+		{
+			time	=> time(),
+			uuid	=> $UUID_GEN->generate_v1->as_string(),
+			orig	=> $opts{orig} || $self->node_info->{uuid},
+			dest	=> $opts{dest},
+			bcast	=> $opts{bcast} || 0,
+			sfwd	=> defined $opts{sfwd} ? $opts{sfwd} : 1, # store n forward
+			type	=> $opts{type} || MSG_USER,
+			data	=> $data,
+		};
+
+		return $env;
+	}
 	
 	sub connect_handler
 	{
 		my $self = shift;
 		
-		$self->send_message({ msg => MSG_NODE_INFO, node_info => $self->{node_info} });
+		$self->send_message(create_envelope($self->{node_info}, type => MSG_NODE_INFO));
 	}
 	
 	sub disconnect_handler
@@ -129,7 +166,7 @@
 			print STDERR "dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
 			$self->{remote_node_info} = $node_info;
 			
-			$self->send_message({ msg => MSG_ACK, ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" });
+			$self->send_message(create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 			
 			my $peer;
 			if($self->{peer})
@@ -149,7 +186,7 @@
 		{
 			#print STDERR "dispatch_msg: Unknown msg received: $msg\n";
 			#$self->send_message({ msg => MSG_UNKNOWN, text => "Unknown message type '$msg'" });
-			my $row = { time => time(), peer => $self->peer->uuid, dest => $hash->{dest}, msg => $msg, hash => $hash };
+			my $row = { time => time(), orig => $self->peer->uuid, dest => $hash->{dest}, msg => $msg, hash => $hash };
 			$self->incoming_queue->add_row($row);
 			print STDERR __PACKAGE__.": dispatch_msg: New incoming row added to queue: ".Dumper($row);
 		}
@@ -177,18 +214,17 @@
 	sub pending_messages
 	{
 		my $self = shift;
-		my $queue = $self->outgoing_queue;
-		#my @list1 = $queue->by_field({ dest => $self->peer->uuid });
-		#my @list2 = $queue->by_field({ dest => '*' });
-		#my @list = (@list1, @list2);
 		return () if !$self->peer;
-		my $uuid = $self->peer->uuid;
-		my @list = $queue->by_field(dest => $uuid);
+
+		my $uuid  = $self->peer->uuid;
+		my $queue = $self->outgoing_queue;
+		my @list  = $queue->by_field(dest => $uuid);
 		@list = sort { $a->time cmp $b->time } @list;
+
 		print STDERR __PACKAGE__.": pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n";
 		print STDERR Dumper(\@list) if @list;
 		
-		my @return_list = map { HashNet::Util::CleanRef->clean_ref($_->{hash}) } @list;
+		my @return_list = map { clean_ref($_->{hash}) } @list;
 		
 		$queue->del_batch(\@list);
 		return @return_list;
