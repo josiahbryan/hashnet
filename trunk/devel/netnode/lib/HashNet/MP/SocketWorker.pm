@@ -1,18 +1,18 @@
-
+use common::sense;
 {package HashNet::MP::SocketWorker;
 
-	use common::sense;
 	use base qw/HashNet::Util::MessageSocketBase/;
 	use JSON qw/to_json from_json/;
 	use Data::Dumper;
 	
-	use Time::HiRes qw/time/;
+	use Time::HiRes qw/time sleep/;
 
 	use Carp qw/carp croak/;
 	
 	use HashNet::MP::PeerList;
 	use HashNet::MP::LocalDB;
-	
+
+	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	
 	use UUID::Generator::PurePerl; # for use in gen_node_info
@@ -22,7 +22,7 @@
 	sub MSG_ACK		{ 'MSG_ACK' }
 	sub MSG_USER		{ 'MSG_USER' }
 	sub MSG_UNKNOWN		{ 'MSG_UNKNOWN' }
-	
+
 	# Simple utility method to auto-generate the node_info structure based on $0
 	my $UUID_GEN = UUID::Generator::PurePerl->new(); 
 	sub gen_node_info
@@ -38,8 +38,9 @@
 		}
 		
 		#print STDERR "Debug: gen_node_info: node_info:".Dumper($node_info);
-		
-		return $node_info;
+
+		# Return a 'clean' hash so user can use this ref across forks
+		return clean_ref($node_info);
 	}
 	
 	sub new
@@ -55,8 +56,6 @@
 			);
 		}
 
-		clean_ref({});
-		
 		my %opts = @_;
 		
 		# If we DON'T set auto_start to 0,
@@ -77,17 +76,45 @@
 		$opts{node_info} = $class->gen_node_info if !$opts{node_info};
 		
 		my $self = $class->SUPER::new(%opts);
+
+		# Create a UUID for this *object instance* to use to sync state across forks via LocalDB
+		$self->{state_uuid} = $UUID_GEN->generate_v1->as_string();
 		
-		#
-		# Do any other setup with $self here
-		#
-		
+		# Set startup flag to 0, will be set to 0.5 when connected and 1 when rx'd node_info from other side
+		$self->state_handle->{started} = 0;
+
 		# Allow the caller to call start() if desired
 		$self->start unless defined $old_auto_start && !$old_auto_start;
 		 
 		return $self;
 	}
-	
+
+	sub state_handle
+	{
+		my $self = shift;
+
+ 		return $self->{state_handle}->{ref}
+ 		    if $self->{state_handle}->{pid} == $$;
+
+		my $dbh = HashNet::MP::LocalDB->handle;
+
+		my $sw = $dbh->{socketworker};
+		my $id = $self->{state_uuid};
+		$sw->{$id} = {} if !$sw->{$id};
+
+		my $ref = $sw->{$id};
+		$self->{state_handle} = { pid => $$, ref => $ref };
+		return $ref;
+	}
+
+	sub DESTROY
+	{
+		# Remove the state data from the database
+		my $self = shift;
+		my $dbh = HashNet::MP::LocalDB->handle;
+		delete $dbh->{socketworker}->{$self->{state_uuid}};
+	}
+
 	sub bad_message_handler
 	{
 		my $self    = shift;
@@ -130,11 +157,11 @@
 		$opts{hist} = [] if !$opts{hist};
 
 		push @{$opts{hist}},
-		[{
+		{
 			from => $opts{from}, #$self->node_info->{uuid},
 			to   => $opts{nxthop} || $opts{to},
 			time => time(),
-		}];
+		};
 		
 
 		my $env =
@@ -167,14 +194,17 @@
 	{
 		my $self = shift;
 		
+		trace "SocketWorker: Sending MSG_NODE_INFO\n";
 		$self->send_message($self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO));
+
+		$self->state_handle->{started} = 0.5;
 	}
 	
 	sub disconnect_handler
 	{
 		my $self = shift;
 		
-		#print STDERR "SocketWorker: disconnect_handler: peer: $self->{peer}\n";
+		#trace "SocketWorker: disconnect_handler: peer: $self->{peer}\n";
 		$self->{peer}->set_online(0) if $self->{peer};
 	}
 	
@@ -196,9 +226,9 @@
 		elsif($msg_type eq MSG_NODE_INFO)
 		{
 			my $node_info = $envelope->{data};
-			print STDERR "dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
+			info "SocketWorker: dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
 
-			$self->{remote_node_info} = $node_info;
+			$self->state_handle->{remote_node_info} = $node_info;
 			
 			my $peer;
 			if($self->{peer})
@@ -208,19 +238,55 @@
 			}
 			else
 			{
-				$peer = HashNet::MP::PeerList->get_peer_by_uuid($node_info);
+				$peer = HashNet::MP::PeerList->get_peer_by_uuid(clean_ref($node_info));
 				$self->{peer} = $peer;
 			}
 			
 			$peer->set_online(1);
 
 			$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
+
+			$self->state_handle->{started} = 1;
 		}
 		else
 		{
 			$self->incoming_queue->add_row($envelope);
-			print STDERR __PACKAGE__.": dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
+			info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 		}
+	}
+
+	sub wait_for_start
+	{
+		my $self = shift;
+		my $max   = shift || 4;
+		my $speed = shift || 0.01;
+		#trace "SocketWorker: wait_for_start: Enter\n";
+		my $time  = time;
+		sleep $speed while time - $time < $max and
+			     $self->state_handle->{started} != 1;
+
+		# Return 1 if started, or <1 if not yet completely started
+		my $res = $self->state_handle->{started};
+		#trace "SocketWorker: wait_for_start: Exit, res: $res\n";
+		return $res;
+	}
+
+	sub wait_for_send
+	{
+		my $self  = shift;
+		my $max   = shift || 4;
+		my $speed = shift || 0.01;
+		#trace "SocketWorker: wait_for_send: Enter\n";
+		my $uuid  = $self->state_handle->{remote_node_info}->{uuid};
+		my $queue = $self->outgoing_queue;
+		my $time  = time;
+		sleep $speed while time - $time < $max and
+		                   defined $queue->by_field(nxthop => $uuid);
+		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
+		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		#trace "SocketWorker: wait_for_send: Exit, res: $res\n";
+		trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
+		return $res;
 	}
 	
 	sub peer { shift->{peer} }
@@ -231,9 +297,9 @@
 		my $queue = shift;
 		
 		return  $self->{queues}->{$queue}->{ref} if
-			$self->{queues}->{$queue} &&
 			$self->{queues}->{$queue}->{pid} == $$;
 		
+		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
 		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
 		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
 		return $ref;
@@ -254,13 +320,14 @@
 		my @list  = $queue->by_field(nxthop => $uuid);
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
-		#print STDERR __PACKAGE__.": pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n";
-		#print STDERR Dumper(\@list) if @list;
+		trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+		print STDERR Dumper(\@list) if @list;
+		#print STDERR Dumper($self->peer);
 		
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 		
 		$queue->del_batch(\@list);
-		print STDERR Dumper(\@return_list) if @return_list;
+		#print STDERR Dumper(\@return_list) if @return_list;
 		return @return_list;
 	}
 };

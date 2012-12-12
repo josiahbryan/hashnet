@@ -342,9 +342,20 @@
 		my $self = shift;
 		my $hash = shift;
 		my $json = "";
+		my $clean_ref = undef;
 		undef $@;
 		eval {
-			$json = to_json(clean_ref($hash))
+			$clean_ref = clean_ref($hash);
+		};
+		if($@)
+		{
+			use Carp;
+			Carp::cluck "send_message: Error cleaning ref: $@, orig ref: ".Dumper($hash);
+			return;
+		}
+		undef $@;
+		eval {
+			$json = to_json($clean_ref)
 		};
 		if($@)
 		{

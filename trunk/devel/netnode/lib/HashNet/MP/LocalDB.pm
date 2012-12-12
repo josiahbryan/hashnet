@@ -4,6 +4,8 @@
 	use common::sense;
 	
 	use DBM::Deep;
+
+	use HashNet::Util::Logging;
 	
 	my $DEFAULT_FILE = '/var/lib/hashnet/local.db';
 	
@@ -14,7 +16,7 @@
 		my $class = shift;
 		my $file = shift || $DEFAULT_FILE;
 		
-		#print STDERR "LocalDB: handle: Getting handle for '$file'\n";
+		#trace  "LocalDB: handle: Getting handle for '$file'\n";
 		
 		$data->{$file} = { db_file => $file } if !$data->{$file};
 		my $db_ctx = $data->{$file};
@@ -27,6 +29,7 @@
 		  # in child procs. (Ref: http://stackoverflow.com/questions/11368807/dbmdeep-unexplained-errors)
 		  ($db_ctx->{_db_handle_pid}||0) != $$)
 		{
+			#trace  "LocalDB: handle($file): (re)opening file in pid $$\n";
 			$db_ctx->{db_handle} = DBM::Deep->new(#$db_ctx->{db_file});
  				file => $db_ctx->{db_file},
  				locking   => 1, # enabled by default, just here to remind me
@@ -46,6 +49,7 @@
 		my $handle = shift || $class->handle;
 		
 		return undef if !$ref;
+		#trace "LocalDB: indexed_handle: Creating handle for ref $ref\n";
 		
 		if(!ref $ref)
 		{

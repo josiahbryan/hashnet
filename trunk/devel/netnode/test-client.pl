@@ -30,11 +30,13 @@ print STDERR "Connect to $ENV{REMOTE_ADDR}\n";
 #my $worker = HashNet::MP::SocketWorker->new(sock => $handle, no_fork => 1);
 my $worker = HashNet::MP::SocketWorker->new(sock => $handle);
 
+$worker->wait_for_start;
+
 my $env = $worker->create_envelope("Hello, World", to => '3c8d9969-4b58-4814-960e-1189d4dc76f9');
 
 $worker->outgoing_queue->add_row($env);
 
-sleep 1; # wait for msgs to process
+$worker->wait_for_send;
 
 $worker->stop;
 
