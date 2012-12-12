@@ -9,6 +9,8 @@ use lib 'lib';
 	
 	use common::sense;
 	use HashNet::MP::SocketWorker;
+
+	use HashNet::Util::Logging;
 	
 	my $node_info = 
 	{
@@ -22,7 +24,7 @@ use lib 'lib';
 		my $self = shift;
 		
 		$ENV{REMOTE_ADDR} = $self->{server}->{peeraddr};
-		#print STDERR "Connect from $ENV{REMOTE_ADDR}\n";
+		#trace "$0: Connect from $ENV{REMOTE_ADDR}\n";
 		
 		#HashNet::MP::SocketWorker->new('-', 1); # '-' = stdin/out, 1 = no fork
 		
@@ -32,7 +34,7 @@ use lib 'lib';
 			no_fork		=> 1
 		);
 		
-		#print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
+		#trace "$0: Disconnect from $ENV{REMOTE_ADDR}\n";
 	
 		
 	# 	while (<STDIN>)
