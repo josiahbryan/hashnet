@@ -23,6 +23,12 @@ use common::sense;
 	sub MSG_USER		{ 'MSG_USER' }
 	sub MSG_UNKNOWN		{ 'MSG_UNKNOWN' }
 
+	# Can store our state_handle data in another db file if needed/wanted - just set this to the path of the file to use (autocreated)
+	our $STATE_HANDLE_DB = undef;
+
+	# Used to index the SocketWorkers for the running app
+	our $STARTUP_PID = $$;
+
 	# Simple utility method to auto-generate the node_info structure based on $0
 	my $UUID_GEN = UUID::Generator::PurePerl->new(); 
 	sub gen_node_info
@@ -34,6 +40,7 @@ use common::sense;
 		{
 			$node_info->{name} = $0;
 			$node_info->{uuid} = $UUID_GEN->generate_v1->as_string();
+			$node_info->{type} = 'client';
 			$dbh->{auto_clients}->{$0} = $node_info;
 		}
 		
@@ -74,12 +81,14 @@ use common::sense;
 		
 		# Auto-generate node_info as needed
 		$opts{node_info} = $class->gen_node_info if !$opts{node_info};
+
+		#die Dumper \%opts;
 		
 		my $self = $class->SUPER::new(%opts);
 
 		# Create a UUID for this *object instance* to use to sync state across forks via LocalDB
 		$self->{state_uuid} = $UUID_GEN->generate_v1->as_string();
-		
+
 		# Set startup flag to 0, will be set to 0.5 when connected and 1 when rx'd node_info from other side
 		$self->state_handle->{started} = 0;
 
@@ -93,26 +102,52 @@ use common::sense;
 	{
 		my $self = shift;
 
+		#trace "SocketWorker: state_handle: Access in $$\n";
+
  		return $self->{state_handle}->{ref}
  		    if $self->{state_handle}->{pid} == $$;
 
-		my $dbh = HashNet::MP::LocalDB->handle;
+		my $dbh = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
 
+		$dbh->{socketworker} = {} if !$dbh->{socketworker};
 		my $sw = $dbh->{socketworker};
 		my $id = $self->{state_uuid};
 		$sw->{$id} = {} if !$sw->{$id};
+
+		#trace "SocketWorker: state_handle: Recreate, id: $id, dump: ".Dumper($sw->{$id})."\n";
+
+
+# 		# Add our state_uuid to the index of states for this app
+# 		$sw->{idx}->{$STARTUP_PID}->{$id} = 1;
 
 		my $ref = $sw->{$id};
 		$self->{state_handle} = { pid => $$, ref => $ref };
 		return $ref;
 	}
 
+	# TODO not sure if we even need this right now
+# 	sub app_local_states
+# 	{
+# 		my $class = shift;
+# 		my $dbh = HashNet::MP::LocalDB->handle;
+# 		my @uuid_list = keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
+# 		return map { $dbh->{socketworker}->{$_} } @uuid_list;
+# 	}
+
 	sub DESTROY
 	{
-		# Remove the state data from the database
 		my $self = shift;
-		my $dbh = HashNet::MP::LocalDB->handle;
+		my $dbh = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
+
+		# Remove the state data from the database
 		delete $dbh->{socketworker}->{$self->{state_uuid}};
+		
+# 		# Remove the state uuid from the index list for this PID
+# 		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}->{$self->{state_uuid}};
+# 
+# 		# Using scalar keys per http://www.perlmonks.org/?node_id=173677
+# 		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}
+# 			if !scalar keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
 	}
 
 	sub bad_message_handler
@@ -145,6 +180,7 @@ use common::sense;
 
 		if(!$opts{to})
 		{
+			#print STDERR Dumper $self;
 			Carp::cluck "create_envelope: No destination given (either no to=>X, no 2nd arg, or no self->peer), therefore no envelope created";
 			return undef;
 		}
@@ -189,6 +225,22 @@ use common::sense;
 
 		return $env;
 	}
+
+	sub check_env_hist
+	{
+		my $env = shift;
+		my $to = shift;
+		return if !ref $env;
+
+		my @hist = @{$env->{hist} || []};
+		@hist = @hist[0..$#hist-1]; # last line of hist is the line for X->(this server), so ignore it
+		#warn Dumper \@hist;
+		foreach my $line (@hist)
+		{
+			return 1 if $line->{to} eq $to;
+		}
+		return 0;
+	}
 	
 	sub connect_handler
 	{
@@ -231,16 +283,24 @@ use common::sense;
 			$self->state_handle->{remote_node_info} = $node_info;
 			
 			my $peer;
+			if(!$self->{peer} &&
+			    $self->{peer_host})
+			{
+				$self->{peer} = HashNet::MP::PeerList->get_peer_by_host($self->{peer_host});
+			}
+			
 			if($self->{peer})
 			{
 				$peer = $self->peer;
-				$peer->merge_keys($node_info);
+				$peer->merge_keys(clean_ref($node_info));
 			}
 			else
 			{
 				$peer = HashNet::MP::PeerList->get_peer_by_uuid(clean_ref($node_info));
 				$self->{peer} = $peer;
 			}
+
+			#die Dumper $peer, $node_info;
 			
 			$peer->set_online(1);
 
@@ -250,8 +310,15 @@ use common::sense;
 		}
 		else
 		{
-			$self->incoming_queue->add_row($envelope);
-			info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
+			if(check_env_hist($envelope, $self->node_info->{uuid}))
+			{
+				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here: ".Dumper($envelope);
+			}
+			else
+			{
+				$self->incoming_queue->add_row($envelope);
+				info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
+			}
 		}
 	}
 
@@ -260,7 +327,7 @@ use common::sense;
 		my $self = shift;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
-		#trace "SocketWorker: wait_for_start: Enter\n";
+		#trace "SocketWorker: wait_for_start: Enter: ".$self->state_handle->{started}."\n";
 		my $time  = time;
 		sleep $speed while time - $time < $max and
 			     $self->state_handle->{started} != 1;
@@ -285,7 +352,7 @@ use common::sense;
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: wait_for_send: Exit, res: $res\n";
-		trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
+		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
 	}
 	

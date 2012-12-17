@@ -1,22 +1,24 @@
 {package HashNet::MP::MessageHub;
 	
 	use common::sense;
-	
+
 	use base qw/HashNet::MP::SocketTerminator/;
 	
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::PeerList;
+
+	use Data::Dumper;
 	
 	use File::Path qw/mkpath/;
 
-	our $DEFAULT_CONFIG_FILE = [qw#/etc/hashnet-hub.conf hashnet-hub.conf#]
+	our $DEFAULT_CONFIG_FILE = [qw#hashnet-hub.conf /etc/hashnet-hub.conf#];
 	our $DEFAULT_CONFIG =
 	{
 		port	 => 8031,
 		uuid	 => undef,
 		name	 => undef,
-		data_dir => '/var/lib/hashnet/hub',
+		data_dir => '/var/lib/hashnet',
 	};
 	
 	my $HUB_INST = undef;
@@ -61,8 +63,8 @@
 			}
 			if(!$config)
 			{
-				$DEFUALT_CONFIG->{name} = `hostname -s`;
-				$DEFUALT_CONFIG->{name} =~ s/[\r\n]//g;
+				$DEFAULT_CONFIG->{name} = `hostname -s`;
+				$DEFAULT_CONFIG->{name} =~ s/[\r\n]//g;
 	
 				$DEFAULT_CONFIG->{uuid} = `uuidgen`;
 				$DEFAULT_CONFIG->{uuid} =~ s/[\r\n]//g;
@@ -134,26 +136,32 @@
 		if(!$list || !@{$list || []})
 		{
 			my $seed_hub = $self->{config}->{seed_hubs};
-			
-			my @hubs;
-			if($seed_hub =~ /,/)
+			if($seed_hub)
 			{
-				@hubs = map { host => $_ } split /\s*,\s*/, $seed_hub;
+
+				my @hubs;
+				if($seed_hub =~ /,/)
+				{
+					@hubs = map { { 'host' => $_ }  } split /\s*,\s*/, $seed_hub;
+				}
+				else
+				{
+					@hubs = ({ host => $seed_hub });
+				}
+
+				$list =
+					$dbh->{remote_hubs} = \@hubs;
 			}
-			else
-			{
-				@hubs = ({ host => $seed_hub });
-			}
-			
-			$list = 
-				$dbh->{remote_hubs} = \@hubs;
 		}
 		
 		foreach my $data (@$list)
 		{
 			#my $sock = $self->_get_socket($data->{host});
 			my $peer = HashNet::MP::PeerList->get_peer_by_host($data->{host});
-			my $worker = $peer->open_connection();
+			if($peer)
+			{
+				my $worker = $peer->open_connection($self);
+			}
 
 		}
 	}
@@ -165,11 +173,13 @@
 		return {
 			name => $self->{config}->{name},
 			uuid => $self->{config}->{uuid},
+			type => 'hub',
 		}
 	}
 	
 	sub start_server
 	{
+		my $self = shift;
 		{package HashNet::MP::MessageHub::Server;
 		
 			use base qw(Net::Server::PreFork);
@@ -205,3 +215,4 @@
 	}
 	
 };
+1;

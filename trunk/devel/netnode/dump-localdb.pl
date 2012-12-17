@@ -3,4 +3,4 @@ use strict;
 use lib 'lib';
 use HashNet::MP::LocalDB;
 use Data::Dumper;
-print Dumper( HashNet::MP::LocalDB->handle );
+print Dumper( HashNet::MP::LocalDB->handle(@ARGV) );

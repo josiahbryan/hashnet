@@ -75,7 +75,6 @@
 
 	use common::sense;
 	
-	use lib '../../datasrv';
 	use HashNet::Util::Logging qw/print_stack_trace/;
 	
 	
@@ -250,6 +249,11 @@
 		foreach my $key (@keys)
 		{
 			my $val = $row->{$key};
+
+			# DBM::Deep errors on an undef hash key
+			next if ! defined $key;
+			next if ! defined $val;
+
 			$index->{$key}->{$val} = {} if !$index->{$key}->{$val};
 			$index->{$key}->{$val}->{$id} = 1;
 		}
@@ -294,6 +298,10 @@
 			my $id = $row->{id};
 			
 			my $val = $row->{$key};
+
+			# DBM::Deep errors on an undef hash key
+			next if ! defined $key;
+			next if ! defined $val;
 			
 			# Use a hash for key/val instead of just direct scalar value storage
 			# because more than one 'id' could have the same value for that key
