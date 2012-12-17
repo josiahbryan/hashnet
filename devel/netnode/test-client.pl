@@ -6,7 +6,8 @@ use strict;
 use common::sense;
 use HashNet::MP::SocketWorker;
 use HashNet::MP::LocalDB;
-	
+use HashNet::MP::ClientHandle;
+
 use IO::Socket;
 
 my ($host, $port) = @ARGV;
@@ -14,30 +15,58 @@ my ($host, $port) = @ARGV;
 $host = 'localhost' if !$host;
 $port = 8031 if !$port;
 
-# create a tcp connection to the specified host and port
-my $handle = IO::Socket::INET->new(Proto     => "tcp",
-				   PeerAddr  => $host,
-				   PeerPort  => $port)
-	|| die "can't connect to port $port on $host: $!";
+if(1)
+{
+	my $ch = HashNet::MP::ClientHandle->new($host, $port);
+
+
+	$ENV{REMOTE_ADDR} = $host;
+	print STDERR "Connected to $ENV{REMOTE_ADDR}\n";
+
+	$ch->send("Hello, World");
 	
-$handle->autoflush(1);       # so output gets there right away
-
-#print STDERR "[Connected to $host:$port]\n";
+#	my $worker = $ch->sw;
 	
-$ENV{REMOTE_ADDR} = $host;
-print STDERR "Connect to $ENV{REMOTE_ADDR}\n";
+#	$worker->wait_for_start;
 
-#my $worker = HashNet::MP::SocketWorker->new(sock => $handle, no_fork => 1);
-my $worker = HashNet::MP::SocketWorker->new(sock => $handle);
+#	my $env = $worker->create_envelope("Hello, World", to => '58b4bd86-463a-4383-899c-c7163f2609b7'); #3c8d9969-4b58-4814-960e-1189d4dc76f9');
+# 
+# 	$worker->outgoing_queue->add_row($env);
+# 
+# 	$worker->wait_for_send;
 
-$worker->wait_for_start;
+#	$worker->stop;
 
-my $env = $worker->create_envelope("Hello, World", to => '3c8d9969-4b58-4814-960e-1189d4dc76f9');
 
-$worker->outgoing_queue->add_row($env);
+	print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
+}
+else
+{
+	# create a tcp connection to the specified host and port
+	my $handle = IO::Socket::INET->new(Proto     => "tcp",
+					PeerAddr  => $host,
+					PeerPort  => $port)
+		|| die "can't connect to port $port on $host: $!";
 
-$worker->wait_for_send;
+	$handle->autoflush(1);       # so output gets there right away
 
-$worker->stop;
+	#print STDERR "[Connected to $host:$port]\n";
 
-print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
+	$ENV{REMOTE_ADDR} = $host;
+	print STDERR "Connect to $ENV{REMOTE_ADDR}\n";
+
+	#my $worker = HashNet::MP::SocketWorker->new(sock => $handle, no_fork => 1);
+	my $worker = HashNet::MP::SocketWorker->new(sock => $handle);
+
+	$worker->wait_for_start;
+
+	my $env = $worker->create_envelope("Hello, World", to => '58b4bd86-463a-4383-899c-c7163f2609b7'); #3c8d9969-4b58-4814-960e-1189d4dc76f9');
+
+	$worker->outgoing_queue->add_row($env);
+
+	$worker->wait_for_send;
+
+	$worker->stop;
+
+	print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
+}

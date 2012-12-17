@@ -82,15 +82,16 @@
 		if($sock)
 		{
 			return HashNet::MP::SocketWorker->new(
-				sock	=> $sock,
-				peer	=> $self,
-				term	=> $hub,
-				node_info => $hub->node_info,
+				sock		=> $sock,
+				peer_host	=> $self->{host},
+				term		=> $hub,
+				node_info	=> $hub ? $hub->node_info : undef,
 			); # forks off new worker
 		}
 		else
 		{
 			warn "Peer: open_connection: Cannot connect to '$self->{host}'\n";
+			return undef;
 		}
 	}
 };

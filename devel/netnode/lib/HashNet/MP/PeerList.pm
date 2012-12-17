@@ -7,6 +7,36 @@
 	use HashNet::MP::Peer;
 	
 	use Data::Dumper;
+
+	sub peers
+	{
+		my $class = shift;
+		my $ignore_self_uuid = shift || 0;
+		my $online_only = shift || 0;
+		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
+		my @list = @{ $db->list };
+		@list = grep { $_->{uuid} ne $ignore_self_uuid } @list if $ignore_self_uuid;
+		@list = grep { $_->{online} } @list if $online_only;
+		return map { HashNet::MP::Peer->from_hash($_) } @list;
+	}
+	
+	sub peers_by_type
+	{
+		my $class = shift;
+		my $type = shift || 'hub';
+		my $ignore_self_uuid = shift || 0;
+		my $online_only = shift || 0;
+		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
+		my @list = $db->by_field( type => $type );
+		@list = grep { $_->{uuid} ne $ignore_self_uuid } @list if $ignore_self_uuid;
+		@list = grep { $_->{online} } @list if $online_only;
+		return map { HashNet::MP::Peer->from_hash($_) } @list;
+	}
+
+	sub hubs    { shift->peers_by_type('hub',    @_) }
+	sub clients { shift->peers_by_type('client', @_) }
+	
+
 	
 	sub get_peer_by_uuid
 	{
