@@ -3,6 +3,8 @@
 	use common::sense;
 	
 	use HashNet::MP::PeerList;
+	use HashNet::Util::Logging;
+	use Data::Dumper;
 
 	sub new
 	{
@@ -22,6 +24,8 @@
 	sub wait_for_start { shift->sw->wait_for_start }
 	sub stop { shift->sw->stop }
 
+	sub uuid { shift->sw->node_info->{uuid} }
+
 	sub DESTROY
 	{
 		my $self = shift;
@@ -36,20 +40,39 @@
 	{
 		my $self  = shift;
 		my $data  = shift || undef;
-		my $opts  = shift || {};
-		my $flush = shift;
-		$flush = 1 if !defined $flush;
+		my %opts  = @_;
+
+		my $flush = 1;
+		if(defined $opts{flush})
+		{
+			# delete opts{flush} because we flush, not create_envelope
+			$flush = $opts{flush};
+			delete $opts{flush};
+		}
 		
-		if(!$opts->{to})
+		if(!$opts{to})
 		{
 			if(!$self->wait_for_start)
 			{
 				warn "send_message: wait_for_start() failed";
 			}
-			$opts->{to} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
+			$opts{to} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
 		}
 		
-		my $env = $self->sw->create_envelope($data, $opts);
+		if(!$opts{nxthop})
+		{
+			if(!$self->wait_for_start)
+			{
+				warn "send_message: wait_for_start() failed";
+			}
+			$opts{nxthop} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
+		}
+
+		#debug "ClientHandle: create_envelope \%opts: ".Dumper(\%opts);
+		
+		my $env = $self->sw->create_envelope($data, %opts);
+
+		#debug "ClientHandle: Created envelope: ".Dumper($env);
 		
 		if($env)
 		{

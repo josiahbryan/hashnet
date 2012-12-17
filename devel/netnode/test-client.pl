@@ -15,6 +15,8 @@ my ($host, $port) = @ARGV;
 $host = 'localhost' if !$host;
 $port = 8031 if !$port;
 
+$HashNet::MP::LocalDB::DBFILE = "$0.db";
+
 if(1)
 {
 	my $ch = HashNet::MP::ClientHandle->new($host, $port);
@@ -23,7 +25,8 @@ if(1)
 	$ENV{REMOTE_ADDR} = $host;
 	print STDERR "Connected to $ENV{REMOTE_ADDR}\n";
 
-	$ch->send("Hello, World");
+	#$ch->send("Test of ClientHandle");
+	$ch->send("Bouncy Bouncy", to => $ch->uuid);
 	
 #	my $worker = $ch->sw;
 	
