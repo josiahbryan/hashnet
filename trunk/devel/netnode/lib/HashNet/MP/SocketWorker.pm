@@ -175,7 +175,12 @@ use common::sense;
 
 		if(!$opts{to} && $self->peer)
 		{
-			$opts{to} = $self->peer->uuid;
+			$opts{to} = $self->peer_uuid;
+		}
+
+		if(!$opts{nxthop} && $self->peer)
+		{
+			$opts{nxthop} = $self->peer_uuid;
 		}
 
 		if(!$opts{to})
@@ -209,7 +214,7 @@ use common::sense;
 			# To is the hub/client where this envelope is destined
 			to	=> $opts{to},
 			# Nxthop is the next hub/client this envelope is destined for
-			nxthop	=> $opts{nxthop} || $opts{to},
+			nxthop	=> $opts{nxthop}, # || $opts{to},
 			# If bcast is true, the next hub that gets this envelope
 			# will copy it and broadcast it to each of its hubs/clients
 			bcast	=> $opts{bcast} || 0,
@@ -357,6 +362,7 @@ use common::sense;
 	}
 	
 	sub peer { shift->{peer} }
+	sub peer_uuid { shift->state_handle->{remote_node_info}->{uuid} }
 	
 	sub msg_queue
 	{

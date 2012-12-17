@@ -7,14 +7,14 @@
 
 	use HashNet::Util::Logging;
 	
-	my $DEFAULT_FILE = '/var/lib/hashnet/local.db';
+	our $DBFILE = '/var/lib/hashnet/local.db';
 	
 	my $data = {};
 	
 	sub handle
 	{
 		my $class = shift;
-		my $file = shift || $DEFAULT_FILE;
+		my $file = shift || $DBFILE;
 		
 		#trace  "LocalDB: handle: Getting handle for '$file'\n";
 		
