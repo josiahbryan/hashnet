@@ -7,6 +7,7 @@
 	use JSON qw/to_json from_json/;
 	
 	use HashNet::Util::CleanRef;
+	use HashNet::Util::Logging;
 	
 	use Time::HiRes qw/sleep alarm time/; # needed for exec_timeout
 	
@@ -39,18 +40,18 @@
 			die "Fork failed" unless defined($kid);
 			if ($kid == 0)
 			{
-				print "Child $$ running\n";
+				info "MessageSocketBase: Child $$ running\n";
 				$self->process_loop();
-				print "Child $$ complete, exiting\n";
+				info "MessageSocketBase: Child $$ complete, exiting\n";
 				exit 0;
 			}
-			
+
 			# Parent continues here.
 			while ((my $k = waitpid(-1, WNOHANG)) > 0)
 			{
 				# $k is kid pid, or -1 if no such, or 0 if some running none dead
 				my $stat = $?;
-				print "Reaped $k stat $stat\n";
+				debug "Reaped $k stat $stat\n";
 			}
 
 			$self->{child_pid} = $kid;

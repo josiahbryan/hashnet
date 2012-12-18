@@ -7,6 +7,12 @@
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::PeerList;
+	use HashNet::Util::Logging;
+	use HashNet::Util::CleanRef;
+
+	use POSIX;
+
+	use Time::HiRes qw/alarm sleep/;
 
 	use Data::Dumper;
 	
@@ -43,6 +49,7 @@
 		
 		$self->read_config();
 		$self->connect_remote_hubs();
+		$self->start_router() if $opts{auto_start};
 		$self->start_server() if $opts{auto_start};
 	}
 	
@@ -169,8 +176,9 @@
 	sub node_info
 	{
 		my $self = shift;
-		
-		return {
+
+		return $self->{node_info} if $self->{node_info};
+		return $self->{node_info} = {
 			name => $self->{config}->{name},
 			uuid => $self->{config}->{uuid},
 			type => 'hub',
@@ -213,6 +221,168 @@
 		$obj->{term}      = $self;
 		$obj->run();
 	}
+
+	sub start_router
+	{
+		my $self = shift;
+		my $no_fork = shift || 0;
+		if($no_fork)
+		{
+			$self->router_process_loop();
+		}
+		else
+		{
+			# Fork processing thread
+			my $kid = fork();
+			die "Fork failed" unless defined($kid);
+			if ($kid == 0)
+			{
+				info "Router PID $$ running\n";
+				$self->router_process_loop();
+				info "Router PID $$ complete, exiting\n";
+				exit 0;
+			}
+
+			# Parent continues here.
+			while ((my $k = waitpid(-1, WNOHANG)) > 0)
+			{
+				# $k is kid pid, or -1 if no such, or 0 if some running none dead
+				my $stat = $?;
+				debug "Reaped $k stat $stat\n";
+			}
+
+			$self->{router_pid} = $kid;
+		}
+	}
 	
+	sub stop_router
+	{
+		my $self = shift;
+		if($self->{router_pid})
+		{
+			kill 15, $self->{router_pid};
+		}
+	}
+
+	sub msg_queue
+	{
+		my $self = shift;
+		my $queue = shift;
+
+		return  $self->{queues}->{$queue}->{ref} if
+			$self->{queues}->{$queue}->{pid} == $$;
+
+		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
+		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
+		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
+		return $ref;
+	}
+
+	sub incoming_queue { shift->msg_queue('incoming') }
+	sub outgoing_queue { shift->msg_queue('outgoing') }
+
+	use Data::Dumper;
+	sub pending_messages
+	{
+		my $self = shift;
+		#return () if !$self->peer;
+
+		my $uuid  = $self->node_info->{uuid};
+		my $queue = $self->incoming_queue;
+		my @list  = $queue->by_field(nxthop => $uuid);
+		@list = sort { $a->{time} cmp $b->{time} } @list;
+
+		#trace "MessageHub: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+		#print STDERR Dumper(\@list) if @list;
+		#print STDERR Dumper($self->peer);
+
+		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
+
+		$queue->del_batch(\@list);
+		#print STDERR Dumper(\@return_list) if @return_list;
+		return @return_list;
+	}
+
+
+	sub router_process_loop
+	{
+		my $self = shift;
+
+		my $self_uuid  = $self->node_info->{uuid};
+		
+		while(1)
+		{
+			my @list = $self->pending_messages;
+			foreach my $msg (@list)
+			{
+				my @recip_list;
+
+				#my @app_local_states = HashNet::MP::SocketWorker->app_local_states;
+				#debug "MessageHub: app_local_states: ".Dumper(\@app_local_states);
+				
+				#my @remote_nodes = map { $_->{remote_node_info}->{uuid} } @app_local_states;
+				#debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
+
+				my @peers = HashNet::MP::PeerList->peers;
+				my @remote_nodes = map { $_->{uuid} } @peers;
+				debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
+				
+				if($msg->{bcast})
+				{
+					@recip_list = @remote_nodes;
+					# list all known hubs, peers, etc
+				}
+				else
+				{
+					my $to = $msg->{to};
+					# if $to is a connect hub/peer, send directly to $to
+					# Otherwise ...?
+					#	- Query connect hubs?
+					#	- Broadcast with a special flag to reply upon delivery...?
+					my @find = grep { $_ eq $to } @remote_nodes;
+					if(@find == 1)
+					{
+						@recip_list = $to;
+					}
+					else
+					{
+						# TODO:
+						# - Assume that when the final node gets the msg, it sends a non-sfwd reply back thru to the original sender
+						# - As that non-sfwd reply goes thru hubs, each hub stores what the LAST hop was for that msg so it knows
+						#   how best to get thru
+						# - Then when we get to this case again (non-directly-connect peer),
+						#   we grep our routing map for the hub from which we got a reply and try sending it there
+						#	- That word 'try' implies we followup to make sure the msg was delivered......
+						@recip_list = @remote_nodes;
+					}
+				}
+				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', @recip_list)."}\n";
+
+				foreach my $recip (@recip_list)
+				{
+					my @args =
+					(
+						$msg->{data},
+						uuid	=> $msg->{uuid},
+						hist	=> $msg->{hist},
+						curhop	=> $self_uuid,
+						nxthop	=> $recip,
+						from	=> $msg->{from},
+						to	=> $msg->{to},
+						bcast	=> $msg->{bcast},
+						sfwd	=> $msg->{sfwd},
+						type	=> $msg->{type},
+					);
+					my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
+					$self->outgoing_queue->add_row($new_env);
+					debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+				}
+					
+			}
+
+			sleep 0.2;
+		}
+		
+	}
 };
 1;
