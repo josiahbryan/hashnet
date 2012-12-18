@@ -372,6 +372,15 @@
 		return [ sort { $a->{$sort_key} <=> $b->{$sort_key} } @data ] if defined $sort_key;
 		return \@data;
 	}
+
+	sub all_by_field { shift->all_by_key(@_) }
+	sub all_by_key
+	{
+		my $self = shift;
+		# Force by_key to return an array
+		my @return = $self->by_key(@_);
+		return @return;
+	}
 	
 	sub by_field { shift->by_key(@_) }
 	sub by_key

@@ -78,6 +78,7 @@
 		
 		if($env)
 		{
+			info "ClientHandle: Sending '$env->{data}' to '$env->{to}'\n";
 			$self->sw->outgoing_queue->add_row($env);
 			
 			$self->sw->wait_for_send if $flush;
@@ -97,6 +98,7 @@
 	sub wait_for_receive
 	{
 		my $self  = shift;
+		my $count = shift || 1;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
 		#trace "ClientHandle: wait_for_receive: Enter\n";
@@ -104,11 +106,11 @@
 		my $queue = incoming_queue();
 		my $time  = time;
 		sleep $speed while time - $time < $max
-		                   and ! ( defined $queue->by_field(to => $uuid) );
+		               and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
-		my $res = defined $queue->by_field(to => $uuid) ? 1 : 0;
+		my $res = scalar $queue->all_by_key(to => $uuid);
 		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
-		#trace "ClientHandle: wait_for_receive: All messages sent.\n" if $res;
+		#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
 		return $res;
 	}
 
