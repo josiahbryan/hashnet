@@ -88,26 +88,26 @@
 		}
 	}
 	
-	sub incoming_messages
-	{
-		my $self = shift;
-		return () if !$self->peer;
-
-		my $uuid  = $self->uuid;
-		my $queue = incoming_queue();
-		my @list  = $queue->by_field(to => $uuid);
-		@list = sort { $a->{time} cmp $b->{time} } @list;
-
-		#trace "ClientHandle: incoming_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		#print STDERR Dumper(\@list) if @list;
-		#print STDERR Dumper($self->peer);
-
-		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
-
-		$queue->del_batch(\@list);
-		#print STDERR Dumper(\@return_list) if @return_list;
-		return @return_list;
-	}
+# 	sub incoming_messages
+# 	{
+# 		my $self = shift;
+# 		return () if !$self->peer;
+# 
+# 		my $uuid  = $self->uuid;
+# 		my $queue = incoming_queue();
+# 		my @list  = $queue->by_field(to => $uuid);
+# 		@list = sort { $a->{time} cmp $b->{time} } @list;
+# 
+# 		#trace "ClientHandle: incoming_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+# 		#print STDERR Dumper(\@list) if @list;
+# 		#print STDERR Dumper($self->peer);
+# 
+# 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
+# 
+# 		$queue->del_batch(\@list);
+# 		#print STDERR Dumper(\@return_list) if @return_list;
+# 		return @return_list;
+# 	}
 
 	sub wait_for_receive
 	{
@@ -133,7 +133,7 @@
 		my $wait_flag = shift;
 		$wait_flag = 1 if ! defined $wait_flag;
 		$self->wait_for_receive(@_) if $wait_flag;
-		return $self->incoming_messages;
+		return pending_messages(incoming, to => $self->uuid); #$self->incoming_messages;
 	}
 };
 1;

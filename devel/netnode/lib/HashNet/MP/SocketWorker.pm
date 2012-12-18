@@ -392,22 +392,24 @@ use common::sense;
 	sub pending_messages
 	{
 		my $self = shift;
-		return () if !$self->peer;
+ 		return () if !$self->peer;
 
-		my $uuid  = $self->peer->uuid;
-		my $queue = outgoing_queue();
-		my @list  = $queue->by_field(nxthop => $uuid);
-		@list = sort { $a->{time} cmp $b->{time} } @list;
-
-		#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		#print STDERR Dumper(\@list) if @list;
-		#print STDERR Dumper($self->peer);
-		
-		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
-		
-		$queue->del_batch(\@list);
-		#print STDERR Dumper(\@return_list) if @return_list;
-		return @return_list;
+ 		my $uuid  = $self->peer->uuid;
+		return HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid);
+# 
+# 		my $queue = outgoing_queue();
+# 		my @list  = $queue->by_field(nxthop => $uuid);
+# 		@list = sort { $a->{time} cmp $b->{time} } @list;
+# 
+# 		#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+# 		#print STDERR Dumper(\@list) if @list;
+# 		#print STDERR Dumper($self->peer);
+# 
+# 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
+# 
+# 		$queue->del_batch(\@list);
+# 		#print STDERR Dumper(\@return_list) if @return_list;
+# 		return @return_list;
 	}
 };
 
