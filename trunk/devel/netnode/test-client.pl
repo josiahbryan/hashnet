@@ -7,6 +7,7 @@ use common::sense;
 use HashNet::MP::SocketWorker;
 use HashNet::MP::LocalDB;
 use HashNet::MP::ClientHandle;
+use HashNet::Util::Logging;
 
 use IO::Socket;
 
@@ -23,10 +24,17 @@ if(1)
 
 
 	$ENV{REMOTE_ADDR} = $host;
-	print STDERR "Connected to $ENV{REMOTE_ADDR}\n";
+	info "Connected to $ENV{REMOTE_ADDR}\n";
 
 	#$ch->send("Test of ClientHandle");
-	$ch->send("Bouncy Bouncy", to => $ch->uuid);
+
+	#$ch->send("Bouncy Bouncy", to => $ch->uuid);
+
+	for my $x (1..4)
+	{
+		$ch->send("Slam # $x", to => $ch->uuid);
+	}
+	#sleep 2;
 	
 #	my $worker = $ch->sw;
 	
@@ -43,12 +51,22 @@ if(1)
 
 	#sleep 30;
 
+	$ch->wait_for_receive(4);
+
 	my @msgs = $ch->messages(); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
 	use Data::Dumper;
-	print STDERR "Received: ".Dumper(\@msgs);
+	#print STDERR "Received: ".Dumper(\@msgs) if @msgs;
+	if(@msgs)
+	{
+		info "$0: Received msg '$_->{data}'\n" foreach @msgs;
+	}
+	else
+	{
+		debug "$0: Did not receive any message\n";
+	}
 	
-	print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
+	info "Disconnect from $ENV{REMOTE_ADDR}\n";
 }
 else
 {
