@@ -10,6 +10,11 @@
 	our $DBFILE = '/var/lib/hashnet/local.db';
 	
 	my $data = {};
+
+	sub reset_cached_handles
+	{
+		$data = {};
+	}
 	
 	sub handle
 	{

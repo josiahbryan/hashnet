@@ -16,6 +16,10 @@
 
 		my $peer = HashNet::MP::PeerList->get_peer_by_host($port ? "$host:$port" : $host);
 		my $worker = $peer->open_connection();
+		if(!$worker)
+		{
+			die "Unable to connect to $host";
+		}
 
 		return bless {
 			sw   => $worker,
@@ -24,7 +28,8 @@
 	};
 
 	sub wait_for_start { shift->sw->wait_for_start }
-	sub stop { shift->sw->stop }
+	sub wait_for_send  { shift->sw->wait_for_send  }
+	sub stop           { shift->sw->stop }
 
 	sub uuid { shift->sw->node_info->{uuid} }
 
@@ -57,6 +62,7 @@
 			if(!$self->wait_for_start)
 			{
 				warn "send_message: wait_for_start() failed";
+				return 0;
 			}
 			$opts{to} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
 		}
@@ -66,6 +72,7 @@
 			if(!$self->wait_for_start)
 			{
 				warn "send_message: wait_for_start() failed";
+				return 0;
 			}
 			$opts{nxthop} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
 		}
@@ -87,6 +94,8 @@
 		{
 			warn "send_message: Error creating envelope";
 		}
+
+		return 1;
 	}
 	
  	sub incoming_messages

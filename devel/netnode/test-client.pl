@@ -16,7 +16,7 @@ my ($host, $port) = @ARGV;
 $host = 'localhost' if !$host;
 $port = 8031 if !$port;
 
-$HashNet::MP::LocalDB::DBFILE = "$0.db";
+$HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
 
 if(1)
 {
@@ -30,9 +30,14 @@ if(1)
 
 	#$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-	for my $x (1..4)
+	my $max_msgs = 10;
+	
+	for my $x (1..$max_msgs)
 	{
-		$ch->send("Slam # $x", to => $ch->uuid);
+		if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
+		{
+			die "Unable to send message";
+		}
 	}
 	#sleep 2;
 	
@@ -48,10 +53,11 @@ if(1)
 
 #	$worker->stop;
 
+	$ch->wait_for_send;
 
 	#sleep 30;
 
-	$ch->wait_for_receive(4);
+	$ch->wait_for_receive($max_msgs);
 
 	my @msgs = $ch->messages(); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
@@ -98,3 +104,6 @@ else
 
 	print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
 }
+
+unlink($HashNet::MP::LocalDB::DBFILE);
+

@@ -113,7 +113,9 @@
 		my $sock = $self->{sock};
 		
 		#my $counter = 0;
-		
+
+		Restart_Process_Loop:
+
 		undef $@;
 		eval
 		{
@@ -236,12 +238,23 @@
 	# 		}
 			
 		};
-		if($@)
+		my $die_please = 0;
+		if(my $err = $@)
 		{
-			print STDERR "\nError in process_loop(): $@";
+			print STDERR "\nError in process_loop(): $err";
+			$die_please = 1;
+
+# 			# Attempt to recover from some common errors
+# 			if($err =~ /Use of init.*DBM\/Deep\/Engine\/File/)
+# 			{
+# 				HashNet::MP::LocalDB->reset_cached_handles();
+# 				goto Restart_Process_Loop;
+# 			}
+			
 		}
 		
 		$self->disconnect_handler();
+		die "Quitting process due to error above" if $die_please;
 	}
 	
 	sub process_message
