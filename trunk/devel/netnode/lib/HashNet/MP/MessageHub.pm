@@ -265,28 +265,28 @@
 		}
 	}
 
-	use Data::Dumper;
-	sub pending_messages
-	{
-		my $self = shift;
-		#return () if !$self->peer;
-
-		my $uuid  = $self->node_info->{uuid};
-		my $queue = incoming_queue();
-		my @list  = $queue->by_field(nxthop => $uuid);
-		@list = sort { $a->{time} cmp $b->{time} } @list;
-
-		#trace "MessageHub: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		#print STDERR Dumper(\@list) if @list;
-		#print STDERR Dumper($self->peer);
-
-		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
-
-		$queue->del_batch(\@list);
-		#print STDERR Dumper(\@return_list) if @return_list;
-		return @return_list;
-	}
-
+# 	use Data::Dumper;
+# 	sub pending_messages
+# 	{
+# 		my $self = shift;
+# 		#return () if !$self->peer;
+# 
+# 		my $uuid  = $self->node_info->{uuid};
+# 		my $queue = incoming_queue();
+# 		my @list  = $queue->by_field(nxthop => $uuid);
+# 		@list = sort { $a->{time} cmp $b->{time} } @list;
+# 
+# 		#trace "MessageHub: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+# 		#print STDERR Dumper(\@list) if @list;
+# 		#print STDERR Dumper($self->peer);
+# 
+# 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
+# 
+# 		$queue->del_batch(\@list);
+# 		#print STDERR Dumper(\@return_list) if @return_list;
+# 		return @return_list;
+# 	}
+# 
 
 	sub router_process_loop
 	{
@@ -296,7 +296,9 @@
 		
 		while(1)
 		{
-			my @list = $self->pending_messages;
+			#my @list = $self->pending_messages;
+			my @list = pending_messages(incoming, nxthop => $self_uuid);
+			
 			foreach my $msg (@list)
 			{
 				my @recip_list;
