@@ -110,6 +110,7 @@ use common::sense;
 		my $dbh = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
 
 		$dbh->{socketworker} = {} if !$dbh->{socketworker};
+		
 		my $sw = $dbh->{socketworker};
 		my $id = $self->{state_uuid};
 		$sw->{$id} = {} if !$sw->{$id};
@@ -117,22 +118,35 @@ use common::sense;
 		#trace "SocketWorker: state_handle: Recreate, id: $id, dump: ".Dumper($sw->{$id})."\n";
 
 
-# 		# Add our state_uuid to the index of states for this app
-# 		$sw->{idx}->{$STARTUP_PID}->{$id} = 1;
+		# Add our state_uuid to the index of states for this app
+		$sw->{idx} = {} if !$sw->{idx};
+		$sw->{idx}->{$STARTUP_PID} = {} if !$sw->{idx}->{$STARTUP_PID};
+		$sw->{idx}->{$STARTUP_PID}->{$id} = 1;
 
 		my $ref = $sw->{$id};
 		$self->{state_handle} = { pid => $$, ref => $ref };
+
+		use Data::Dumper;
+		#debug "SocketWorker: CREATE state_uuid: $id\n";
+		#debug "SocketWorker: state_handle: ".Dumper($sw);
+		
 		return $ref;
 	}
 
 	# TODO not sure if we even need this right now
-# 	sub app_local_states
-# 	{
-# 		my $class = shift;
-# 		my $dbh = HashNet::MP::LocalDB->handle;
-# 		my @uuid_list = keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
-# 		return map { $dbh->{socketworker}->{$_} } @uuid_list;
-# 	}
+	sub app_local_states
+	{
+		my $class = shift;
+		my $dbh = HashNet::MP::LocalDB->handle;
+		my $sw = $dbh->{socketworker};
+		my $idx = $sw->{idx};
+		my $pid = $idx->{$STARTUP_PID};
+		#my @uuid_list = keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
+		my @uuid_list = keys %{ $pid || {} };
+		my @out = map { $dbh->{socketworker}->{$_} } @uuid_list;
+		#debug "SocketWorker: app_local_states: ".Dumper({sw=>$sw, idx=>$idx, pid=>$pid, startup_pid=>$STARTUP_PID, uuid_list=>\@uuid_list, out=>\@out});
+		return @out;
+	}
 
 	sub DESTROY
 	{
@@ -142,12 +156,14 @@ use common::sense;
 		# Remove the state data from the database
 		delete $dbh->{socketworker}->{$self->{state_uuid}};
 		
-# 		# Remove the state uuid from the index list for this PID
-# 		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}->{$self->{state_uuid}};
-# 
-# 		# Using scalar keys per http://www.perlmonks.org/?node_id=173677
-# 		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}
-# 			if !scalar keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
+		# Remove the state uuid from the index list for this PID
+		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}->{$self->{state_uuid}};
+
+		# Using scalar keys per http://www.perlmonks.org/?node_id=173677
+		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}
+			if !scalar keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
+
+		#debug "SocketWorker: DESTROY: Removing state_uuid $self->{state_uuid}\n";
 	}
 
 	sub bad_message_handler
@@ -195,11 +211,16 @@ use common::sense;
 			$opts{from} = $self->node_info->{uuid};
 		}
 
+		if(!$opts{curhop})
+		{
+			$opts{curhop} = $self->node_info->{uuid};
+		}
+
 		$opts{hist} = [] if !$opts{hist};
 
 		push @{$opts{hist}},
 		{
-			from => $opts{from}, #$self->node_info->{uuid},
+			from => $opts{curhop} || $opts{from}, #$self->node_info->{uuid},
 			to   => $opts{nxthop} || $opts{to},
 			time => time(),
 		};
@@ -322,7 +343,8 @@ use common::sense;
 			else
 			{
 				$self->incoming_queue->add_row($envelope);
-				info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
+				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
+				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}, Data: '$envelope->{data}'\n";
 			}
 		}
 	}
