@@ -11,7 +11,8 @@ use common::sense;
 	
 	use HashNet::MP::PeerList;
 	use HashNet::MP::LocalDB;
-
+	use HashNet::MP::MessageQueues;
+	
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	
@@ -342,7 +343,7 @@ use common::sense;
 			}
 			else
 			{
-				$self->incoming_queue->add_row($envelope);
+				incoming_queue()->add_row($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}, Data: '$envelope->{data}'\n";
 			}
@@ -372,7 +373,7 @@ use common::sense;
 		my $speed = shift || 0.01;
 		#trace "SocketWorker: wait_for_send: Enter\n";
 		my $uuid  = $self->state_handle->{remote_node_info}->{uuid};
-		my $queue = $self->outgoing_queue;
+		my $queue = outgoing_queue();
 		my $time  = time;
 		sleep $speed while time - $time < $max and
 		                   defined $queue->by_field(nxthop => $uuid);
@@ -386,23 +387,6 @@ use common::sense;
 	sub peer { shift->{peer} }
 	sub peer_uuid { shift->state_handle->{remote_node_info}->{uuid} }
 	
-	sub msg_queue
-	{
-		my $self = shift;
-		my $queue = shift;
-		
-		return  $self->{queues}->{$queue}->{ref} if
-			$self->{queues}->{$queue}->{pid} == $$;
-		
-		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
-		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
-		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
-		return $ref;
-	}
-	
-	sub incoming_queue { shift->msg_queue('incoming') }
-	sub outgoing_queue { shift->msg_queue('outgoing') }
-	
 	# Returns a list of pending messages to send using send_message() in process_loop
 	use Data::Dumper;
 	sub pending_messages
@@ -411,7 +395,7 @@ use common::sense;
 		return () if !$self->peer;
 
 		my $uuid  = $self->peer->uuid;
-		my $queue = $self->outgoing_queue;
+		my $queue = outgoing_queue();
 		my @list  = $queue->by_field(nxthop => $uuid);
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 

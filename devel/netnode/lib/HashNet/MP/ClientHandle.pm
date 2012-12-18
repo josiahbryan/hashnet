@@ -3,6 +3,7 @@
 	use common::sense;
 	
 	use HashNet::MP::PeerList;
+	use HashNet::MP::MessageQueues;
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	use Data::Dumper;
@@ -86,32 +87,14 @@
 			warn "send_message: Error creating envelope";
 		}
 	}
-
-	sub msg_queue
-	{
-		my $self = shift;
-		my $queue = shift;
-
-		return  $self->{queues}->{$queue}->{ref} if
-			$self->{queues}->{$queue}->{pid} == $$;
-
-		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
-		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
-		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
-		return $ref;
-	}
-
-	sub incoming_queue { shift->msg_queue('incoming') }
-	sub outgoing_queue { shift->msg_queue('outgoing') }
 	
-
 	sub incoming_messages
 	{
 		my $self = shift;
 		return () if !$self->peer;
 
 		my $uuid  = $self->uuid;
-		my $queue = $self->incoming_queue;
+		my $queue = incoming_queue();
 		my @list  = $queue->by_field(to => $uuid);
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
@@ -133,7 +116,7 @@
 		my $speed = shift || 0.01;
 		#trace "ClientHandle: wait_for_receive: Enter\n";
 		my $uuid  = $self->uuid;
-		my $queue = $self->incoming_queue;
+		my $queue = incoming_queue();
 		my $time  = time;
 		sleep $speed while time - $time < $max
 		                   and ! ( defined $queue->by_field(to => $uuid) );

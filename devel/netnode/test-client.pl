@@ -43,7 +43,7 @@ if(1)
 
 	#sleep 30;
 
-	my @msgs = $ch->messages(); # blocks until messages arrive, pass a false argument to not block
+	my @msgs = $ch->messages(); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
 	use Data::Dumper;
 	print STDERR "Received: ".Dumper(\@msgs);
