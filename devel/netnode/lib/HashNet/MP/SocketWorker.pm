@@ -415,8 +415,8 @@ use common::sense;
 		my @list  = $queue->by_field(nxthop => $uuid);
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
-		trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		print STDERR Dumper(\@list) if @list;
+		#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+		#print STDERR Dumper(\@list) if @list;
 		#print STDERR Dumper($self->peer);
 		
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;

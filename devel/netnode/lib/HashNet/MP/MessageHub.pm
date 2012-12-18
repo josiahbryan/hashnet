@@ -325,7 +325,7 @@
 
 				my @peers = HashNet::MP::PeerList->peers;
 				my @remote_nodes = map { $_->{uuid} } @peers;
-				debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
+				#debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
 				
 				if($msg->{bcast})
 				{
@@ -375,7 +375,7 @@
 					);
 					my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
 					$self->outgoing_queue->add_row($new_env);
-					debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+					#debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
 				}
 					
 			}
