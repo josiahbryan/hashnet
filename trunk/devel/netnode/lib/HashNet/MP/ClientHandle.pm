@@ -4,6 +4,7 @@
 	
 	use HashNet::MP::PeerList;
 	use HashNet::Util::Logging;
+	use HashNet::Util::CleanRef;
 	use Data::Dumper;
 
 	sub new
@@ -86,6 +87,70 @@
 		}
 	}
 
+	sub msg_queue
+	{
+		my $self = shift;
+		my $queue = shift;
 
+		return  $self->{queues}->{$queue}->{ref} if
+			$self->{queues}->{$queue}->{pid} == $$;
+
+		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
+		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
+		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
+		return $ref;
+	}
+
+	sub incoming_queue { shift->msg_queue('incoming') }
+	sub outgoing_queue { shift->msg_queue('outgoing') }
+	
+
+	sub incoming_messages
+	{
+		my $self = shift;
+		return () if !$self->peer;
+
+		my $uuid  = $self->uuid;
+		my $queue = $self->incoming_queue;
+		my @list  = $queue->by_field(to => $uuid);
+		@list = sort { $a->{time} cmp $b->{time} } @list;
+
+		#trace "ClientHandle: incoming_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+		#print STDERR Dumper(\@list) if @list;
+		#print STDERR Dumper($self->peer);
+
+		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
+
+		$queue->del_batch(\@list);
+		#print STDERR Dumper(\@return_list) if @return_list;
+		return @return_list;
+	}
+
+	sub wait_for_receive
+	{
+		my $self  = shift;
+		my $max   = shift || 4;
+		my $speed = shift || 0.01;
+		#trace "ClientHandle: wait_for_receive: Enter\n";
+		my $uuid  = $self->uuid;
+		my $queue = $self->incoming_queue;
+		my $time  = time;
+		sleep $speed while time - $time < $max
+		                   and ! ( defined $queue->by_field(to => $uuid) );
+		# Returns 1 if at least one msg received, 0 if incoming queue empty
+		my $res = defined $queue->by_field(to => $uuid) ? 1 : 0;
+		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
+		#trace "ClientHandle: wait_for_receive: All messages sent.\n" if $res;
+		return $res;
+	}
+
+	sub messages
+	{
+		my $self = shift;
+		my $wait_flag = shift;
+		$wait_flag = 1 if ! defined $wait_flag;
+		$self->wait_for_receive(@_) if $wait_flag;
+		return $self->incoming_messages;
+	}
 };
 1;

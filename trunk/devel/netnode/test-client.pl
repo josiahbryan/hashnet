@@ -41,6 +41,13 @@ if(1)
 #	$worker->stop;
 
 
+	#sleep 30;
+
+	my @msgs = $ch->messages(); # blocks until messages arrive, pass a false argument to not block
+
+	use Data::Dumper;
+	print STDERR "Received: ".Dumper(\@msgs);
+	
 	print STDERR "Disconnect from $ENV{REMOTE_ADDR}\n";
 }
 else
