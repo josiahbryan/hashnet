@@ -11,8 +11,16 @@
 	
 	my $data = {};
 
+	use Fcntl qw( :DEFAULT :flock :seek );
 	sub reset_cached_handles
 	{
+		foreach my $file (keys %$data)
+		{
+			my $ctx = $data->{$file};
+			my $fh = $ctx->{db_handle}->_storage();
+			trace "LocalDB: reset_cached_handles: Unlocking $file, fh $fh\n";
+			flock($fh, LOCK_UN);
+		}
 		$data = {};
 	}
 	
@@ -36,7 +44,7 @@
 		{
 			#trace  "LocalDB: handle($file): (re)opening file in pid $$\n";
 			$db_ctx->{db_handle} = DBM::Deep->new(#$db_ctx->{db_file});
- 				file => $db_ctx->{db_file},
+ 				file	  => $db_ctx->{db_file},
  				locking   => 1, # enabled by default, just here to remind me
  				autoflush => 1, # enabled by default, just here to remind me
 # 				#type => DBM::Deep->TYPE_ARRAY
@@ -438,7 +446,7 @@
 		#print_stack_trace() if !$val;
 		
 		# No values exist for this value for this key
-		return wantarray ? () : undef if !$self->index->{$key}->{$val};
+		return wantarray ? () : undef if ! defined $self->index->{$key}->{$val};
 		
 		# Grab the list of IDs that have this key/value
 		my @id_list = keys %{ $self->index->{$key}->{$val} };
