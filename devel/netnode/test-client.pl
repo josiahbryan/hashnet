@@ -16,11 +16,15 @@ my ($host, $port) = @ARGV;
 $host = 'localhost' if !$host;
 $port = 8031 if !$port;
 
+my $node_info;
+## NOTE We call gen_node_info BEFORE setting DBFILE so that it uses system-wide db to cache UUID/$0 association
+$node_info = HashNet::MP::SocketWorker->gen_node_info;
+
 $HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
 
 if(1)
 {
-	my $ch = HashNet::MP::ClientHandle->new($host, $port);
+	my $ch = HashNet::MP::ClientHandle->new($host, $port, $node_info);
 
 
 	$ENV{REMOTE_ADDR} = $host;
@@ -34,7 +38,8 @@ if(1)
 	
 	for my $x (1..$max_msgs)
 	{
-		if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
+		#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
+		if(!$ch->send("Hello # $x to PID $$", bcast => 1, flush => 0))
 		{
 			die "Unable to send message";
 		}

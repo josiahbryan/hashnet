@@ -237,6 +237,8 @@ use common::sense;
 			to	=> $opts{to},
 			# Nxthop is the next hub/client this envelope is destined for
 			nxthop	=> $opts{nxthop}, # || $opts{to},
+			# Curhop is this current client
+			curhop	=> $opts{curhop}, # || $opts{from},
 			# If bcast is true, the next hub that gets this envelope
 			# will copy it and broadcast it to each of its hubs/clients
 			bcast	=> $opts{bcast} || 0,
@@ -371,14 +373,15 @@ use common::sense;
 		my $self  = shift;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
-		#trace "SocketWorker: wait_for_send: Enter\n";
 		my $uuid  = $self->state_handle->{remote_node_info}->{uuid};
 		my $queue = outgoing_queue();
+		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		#trace "SocketWorker: wait_for_send: Enter, res: $res\n";		
 		my $time  = time;
 		sleep $speed while time - $time < $max and
 		                   defined $queue->by_field(nxthop => $uuid);
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
-		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		$res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: wait_for_send: Exit, res: $res\n";
 		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
