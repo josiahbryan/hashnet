@@ -14,6 +14,11 @@ use common::sense;
 	# Class Data
 	my $MsgQueueData = {};
 
+	sub reset_cached_handles
+	{
+		$MsgQueueData = {};
+	}
+	
 	sub msg_queue
 	{
 		my $self = $MsgQueueData;

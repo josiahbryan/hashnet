@@ -102,9 +102,32 @@
 	sub enqueue
 	{
 		my ($self, $env, $flush) = @_;
-		
-		$self->sw->outgoing_queue->add_row($env);
-		$self->sw->wait_for_send if $flush;
+
+		ReEnqueueMsg1:
+		eval
+		{
+			outgoing_queue()->add_row($env);
+		};
+		if($@)
+		{
+			HashNet::MP::LocalDB->reset_cached_handles;
+			HashNet::MP::MessageQueues->reset_cached_handles;
+			trace "Caught error '$@', retrying message at ReEnqueueMsg1\n";
+			goto ReEnqueueMsg1;
+		}
+
+		ReEnqueueMsg2:
+		eval
+		{
+			$self->sw->wait_for_send if $flush;
+		};
+		if($@)
+		{
+			HashNet::MP::LocalDB->reset_cached_handles;
+			HashNet::MP::MessageQueues->reset_cached_handles;
+			trace "Caught error '$@', retrying message at ReEnqueueMsg2\n";
+			goto ReEnqueueMsg2;
+		}
 	}
 
 	sub peer_uuid
@@ -157,14 +180,26 @@
 		my $speed = shift || 0.01;
 		#trace "ClientHandle: wait_for_receive: Enter\n";
 		my $uuid  = $self->uuid;
-		my $queue = incoming_queue();
-		my $time  = time;
-		sleep $speed while time - $time < $max
-		               and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
-		# Returns 1 if at least one msg received, 0 if incoming queue empty
-		my $res = scalar $queue->all_by_key(to => $uuid);
-		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
-		#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
+		my $res;
+		wait_for_receive_restart:
+		eval
+		{
+			my $queue = incoming_queue();
+			my $time  = time;
+			sleep $speed while time - $time < $max
+				and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
+			# Returns 1 if at least one msg received, 0 if incoming queue empty
+			$res = scalar $queue->all_by_key(to => $uuid);
+			#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
+			#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
+		};
+		if($@)
+		{
+			HashNet::MP::LocalDB->reset_cached_handles;
+			HashNet::MP::MessageQueues->reset_cached_handles;
+			trace "Caught error '$@', retrying at wait_for_receive_restart\n";
+			goto wait_for_receive_restart;
+		}
 		return $res;
 	}
 
