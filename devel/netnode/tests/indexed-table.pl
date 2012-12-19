@@ -9,32 +9,26 @@ use HashNet::MP::LocalDB;
 
 use Data::Dumper;
 
-my $handle = HashNet::MP::LocalDB->handle;
-delete $handle->{test}->{table1};
-
-my $handle2 = HashNet::MP::LocalDB->handle("/tmp/test$$.dat");
-
 is(HashNet::MP::LocalDB->indexed_handle(), undef, "indexed_handle ignores empty args");
 
-my $table = HashNet::MP::LocalDB->indexed_handle('/test/table1', $handle2);
-is($handle->{test}->{table1}, undef, "indexed_handle used the alternate handle");
-ok($handle2->{test}->{table1}, "indexed_handle used the alternate handle, check 2");
+my $handle = HashNet::MP::LocalDB->handle;
 
-undef $handle2;
-undef $table;
-unlink("/tmp/test$$.dat");
+# delete $handle->{test}->{table1};
+#
+#my $handle2 = HashNet::MP::LocalDB->handle("/tmp/test$$.dat");
+# my $table = HashNet::MP::LocalDB->indexed_handle('/test/table1', $handle2);
+# is($handle->{test}->{table1}, undef, "indexed_handle used the alternate handle");
+# ok($handle2->{test}->{table1}, "indexed_handle used the alternate handle, check 2");
+#
+# undef $handle2;
+# undef $table;
+# unlink("/tmp/test$$.dat");
 
 #$handle->{test}->{table1} ||= {};
 #my $table = HashNet::MP::LocalDB->indexed_handle($handle->{test}->{table1});
 my $table = HashNet::MP::LocalDB->indexed_handle('/test/table1');
 
-ok(defined $table->db->{cnt}, "auto-create table ref from string");
-delete $handle->{test}->{table1};
-
-$handle->{test}->{table1} ||= {};
-my $table = HashNet::MP::LocalDB->indexed_handle($handle->{test}->{table1});
-
-is($table->db->{cnt}, 0, "create indexed handle from explicit ref");
+ok(defined $table->shared_ref->data->{cnt}, "auto-create table ref from string");
 
 $table->clear;
 #print Dumper $handle;
@@ -57,7 +51,7 @@ is($table->index->{name}->{foobar}->{1}, 1, "rebuild index on set_index_keys()")
 my $dbm_ref = $table->add_row($row2);
 is($table->index->{name}->{framitz}->{2}, 1, "index on insert");
 
-ok(UNIVERSAL::isa($dbm_ref, 'DBM::Deep'), "add_row() returns a blessed DBM::Deep ref");
+#ok(UNIVERSAL::isa($dbm_ref, 'DBM::Deep'), "add_row() returns a blessed DBM::Deep ref");
 
 is($table->cur_id, 2, "id counter increments");
 
@@ -87,7 +81,7 @@ is($table->by_id(1), undef, "search by id for deleted row undef");
 is($table->by_key(name => 'framitz')->{id}, $row2->{id}, "del_row didn't clobber index for other name");
 
 $table->clear;
-is($table->db->{cnt}, 0, "clear() resets count");
+is($table->shared_ref->data->{cnt}, 0, "clear() resets count");
 
 is($table->by_id(2), undef, "search by id for row 2 undef - clear() deleted data");
 

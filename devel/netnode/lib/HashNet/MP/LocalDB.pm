@@ -5,8 +5,10 @@ use common::sense;
 	use DBM::Deep;
 
 	use HashNet::Util::Logging;
+
+	use HashNet::MP::SharedRef;
 	
-	our $DBFILE = '/var/lib/hashnet/local.db';
+	our $DBFILE = '/var/lib/hashnet/localdb';
 	
 	my $data = {};
 
@@ -25,23 +27,11 @@ use common::sense;
 		$data->{$file} = { db_file => $file } if !$data->{$file};
 		my $db_ctx = $data->{$file};
 		
-		if(!$db_ctx->{db_handle} ||
-		  # Re-create the DBM::Deep object when we change PIDs -
-		  # e.g. when someone forks a process that we are in.
-		  # I learned the hard way (via multiple unexplainable errors)
-		  # that DBM::Deep does NOT like existing before forks and used
-		  # in child procs. (Ref: http://stackoverflow.com/questions/11368807/dbmdeep-unexplained-errors)
-		  ($db_ctx->{_db_handle_pid}||0) != $$)
+		if(!$db_ctx->{db_handle})
 		{
 			#trace  "LocalDB: handle($file): (re)opening file in pid $$\n";
-			$db_ctx->{db_handle} = DBM::Deep->new(#$db_ctx->{db_file});
- 				file => $db_ctx->{db_file},
- 				locking   => 1, # enabled by default, just here to remind me
- 				autoflush => 1, # enabled by default, just here to remind me
-# 				#type => DBM::Deep->TYPE_ARRAY
- 			);
+			$db_ctx->{db_handle} = HashNet::MP::SharedRef->new($db_ctx->{db_file});
  			warn "Error opening $db_ctx->{db_file}: $@ $!" if ($@ || $!) && !$db_ctx->{db_handle};
-			$db_ctx->{_db_handle_pid} = $$;
 		}
 		return $db_ctx->{db_handle};
 	}
@@ -49,29 +39,24 @@ use common::sense;
 	sub indexed_handle
 	{
 		my $class = shift;
-		my $ref = shift;
+		my $path = shift;
 		my $handle = shift || $class->handle;
-		
-		return undef if !$ref;
-		#trace "LocalDB: indexed_handle: Creating handle for ref $ref\n";
-		
-		if(!ref $ref)
-		{
-			my @path = split /\//, $ref;
-			shift @path if !$path[0];
-			
-			my $path = shift @path;
-			$handle->{$path} = {} if ! $handle->{$path};
-			$ref = $handle->{$path};
-			
-			foreach $path (@path)
-			{
-				$ref->{$path} = {} if !$ref->{$path};
-				$ref = $ref->{$path};
-			}
-		}
-		
-		return HashNet::MP::LocalDB::IndexedTable->new($ref);
+
+		return undef if !$path;
+
+		use Carp;
+		croak "indexed_handle changed to only use path strings, not refs, as first arg" if ref $path;
+
+		#trace "LocalDB: indexed_handle: Creating handle for path $path\n";
+		$path =~ s/\//\./g;
+		$path =~ s/[^a-zA-Z0-9]/_/g;
+
+		my $file = $handle->file . $path;
+		my $path_handle = $class->handle($file);
+
+		#trace "LocalDB: indexed_handle: Path file: $file\n";
+
+		return HashNet::MP::LocalDB::IndexedTable->new($path_handle);
 	}
 };
 
@@ -85,48 +70,90 @@ use common::sense;
 		'+='	=> \&_add_row_op,
 		'-='	=> \&del_row;
 	
+# 	sub new
+# 	{
+# 		my $class = shift;
+# 		my $ref   = shift;
+# 		my $auto_index = shift;
+# 		$auto_index = 1 if !defined $auto_index;
+# 		
+# 		my $self  = bless
+# 		{
+# 			db => $ref,
+# 			auto_index => $auto_index,
+# 		}, $class;
+# 		
+# 		$ref->{data} ||= {};
+# 		$ref->{idx}  ||= {};
+# 		$ref->{cnt}  ||= 0;
+# 		$ref->{keys} ||= []; 
+# 		
+# 		return $self;
+# 	}
+
+
 	sub new
 	{
 		my $class = shift;
-		my $ref   = shift;
+
+		my $shared_ref = shift;
+		
 		my $auto_index = shift;
 		$auto_index = 1 if !defined $auto_index;
-		
+
 		my $self  = bless
 		{
-			db => $ref,
+			shared_ref => $shared_ref,
 			auto_index => $auto_index,
 		}, $class;
-		
-		$ref->{data} ||= {};
-		$ref->{idx}  ||= {};
-		$ref->{cnt}  ||= 0;
-		$ref->{keys} ||= []; 
-		
+
+		my $data = $shared_ref->{data};
+		$data->{data} ||= {};
+		$data->{idx}  ||= {};
+		$data->{cnt}  ||= 0;
+		$data->{keys} ||= [];
+
 		return $self;
 	}
-	
-	sub db      { shift->{db} }
-	sub data    { shift->db->{data} }
-	sub index   { shift->db->{idx} }
-	sub cur_id  { shift->db->{cnt} }
-	sub next_id { ++ shift->db->{cnt} }
+
+
+	sub shared_ref { shift->{shared_ref} }
+	sub data       { shift->shared_ref->data->{data} }
+	sub index      { shift->shared_ref->data->{idx} }
+	sub cur_id     { shift->shared_ref->data->{cnt} }
+	sub next_id    { ++ shift->shared_ref->data->{cnt} }
+	sub keys       { @{ shift->shared_ref->data->{keys} || [] } }
+
+	sub update_begin { shift->shared_ref->update_begin }
+	sub update_end   { shift->shared_ref->update_end }
 	
 	sub clear
 	{
 		my $self = shift;
-		$self->db->{data} = {};
-		$self->db->{idx}  = {};
-		$self->db->{cnt}  = 0;
+
+		$self->shared_ref->update_begin;
+
+		my $data = $self->shared_ref->{data};
+		$data->{data} = {};
+		$data->{idx}  = {};
+		$data->{cnt}  = 0;
+		$data->{keys} = [];
+
+		$self->shared_ref->{data} = $data;
+		$self->update_end;
 	}
 	
 	sub set_index_keys
 	{
 		my $self = shift;
 		my @keys = @_;
-		$self->db->{keys} = \@keys;
-		
+
+		$self->update_begin;
+
+		$self->shared_ref->data->{keys} = \@keys;
 		$self->_rebuild_index;
+
+		$self->update_end;
 	}
 
 	# This will add $key to the list of keys to index
@@ -135,12 +162,15 @@ use common::sense;
 	{
 		my $self = shift;
 
+		$self->update_begin;
+
+		my $shared_data = $self->shared_ref->data;
 		foreach my $key (@_)
 		{
 			# The given key never indexed
-			if(!$self->index->{$key})
+			if(!$shared_data->{index}->{$key})
 			{
-				my @keys  = @{ $self->db->{keys} };
+				my @keys  = @{ $shared_data->{keys} };
 				push @keys, $key;
 
 				# Use this combo of set {keys} and _reindex_single_key()
@@ -148,28 +178,49 @@ use common::sense;
 				# and not destroy the index of any keys already indexed
 				# (Instead of just calling set_index_keys() with @keys)
 
-				$self->db->{keys} = \@keys;
+				$shared_data->{keys} = \@keys;
 
 				$self->_reindex_single_key($key) if @_ < 3;
 			}
 		}
 
 		$self->_rebuild_index if @_ > 2;
+
+		$self->update_end;
 	}
 	
 	sub add_row
 	{
 		my $self = shift;
 		my $row = shift;
+
+		$self->update_begin;
 		
 		$row->{id} = $self->next_id;
 		
 		$self->data->{$row->{id}} = $row;
 		
 		$self->_index_row($row);
+
+		$self->update_end;
 		
-		# return the value from the hash so the user gets the blessed DBM::Deep ref
-		return $self->data->{$row->{id}};
+		return $row;
+	}
+
+	sub update_row
+	{
+		my $self = shift;
+		my $row = shift;
+
+		$self->update_begin;
+
+		$self->data->{$row->{id}} = $row;
+
+		$self->_index_row($row);
+
+		$self->update_end;
+
+		return $row;
 	}
 	
 	# '+=' expectes $self back, not $row
@@ -186,10 +237,14 @@ use common::sense;
 		my $row  = shift;
 		my $id   = $row->{id};
 		return undef if !$id;
+
+		$self->update_begin;
 		
 		$self->_deindex_row($row);
 		
 		delete $self->data->{$id};
+
+		$self->update_end;
 		
 		return $self;
 	}
@@ -201,10 +256,12 @@ use common::sense;
 		
 		my @rows = @{$rows || []};
 		return undef if !@rows;
+
+		$self->update_begin;
 		
 		my $data  = $self->data;
 		my $index = $self->index;
-		my @keys  = @{ $self->db->{keys} };
+		my @keys  = $self->keys;
 		
 # 		use Data::Dumper;
 # 		print STDERR Dumper $rows;
@@ -225,9 +282,10 @@ use common::sense;
 				$index->{$key}->{$val}->{$id} = 1;
 			}
 			
-			# return the value from the hash so the user gets the blessed DBM::Deep ref
-			push @out, $self->data->{$row->{id}};
+			push @out, $row;
 		}
+
+		$self->update_end;
 		
 		return \@out;
 	}
@@ -238,10 +296,12 @@ use common::sense;
 		my $rows = shift;
 		my @rows = @{$rows || []};
 		return if !@rows;
+
+		$self->update_begin;
 		
 		my $data  = $self->data;
 		my $index = $self->index;
-		my @keys  = @{ $self->db->{keys} };
+		my @keys  = $self->keys;
 		
 		foreach my $row (@rows)
 		{
@@ -262,6 +322,8 @@ use common::sense;
 			
 			delete $data->{$id};
 		}
+
+		$self->update_end;
 		
 		return $self;
 	}
@@ -271,10 +333,10 @@ use common::sense;
 		my $self = shift;
 		my $row = shift;
 		
-		my $id = $row->{id};
+		my $id    = $row->{id};
 		my $index = $self->index;
-		my @keys  = @{ $self->db->{keys} };
-		
+		my @keys  = $self->keys;
+
 		# See comments on this loop below in rebuild_index() for notes on how/why
 		foreach my $key (@keys)
 		{
@@ -294,9 +356,9 @@ use common::sense;
 		my $self = shift;
 		my $row = shift;
 		
-		my $id = $row->{id};
+		my $id    = $row->{id};
 		my $index = $self->index;
-		my @keys  = @{ $self->db->{keys} };
+		my @keys  = $self->keys;
 		
 		# See comments on this loop below in _rebuild_index() for notes on how/why
 		foreach my $key (@keys)
@@ -351,10 +413,10 @@ use common::sense;
 		my $self = shift;
 		
 		# get list of keys
-		my @keys  = @{ $self->db->{keys} };
+		my @keys  = $self->keys;
 		
 		# clear index
-		$self->db->{idx} = {};
+		$self->shared_ref->data->{idx} = {};
 		
 		# create hash for each key
 		my $index = $self->index;
