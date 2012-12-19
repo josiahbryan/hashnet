@@ -91,7 +91,9 @@ use common::sense;
 		$self->{state_uuid} = $UUID_GEN->generate_v1->as_string();
 
 		# Set startup flag to 0, will be set to 0.5 when connected and 1 when rx'd node_info from other side
+		$self->state_update(1);
 		$self->state_handle->{started} = 0;
+		$self->state_update(0);
 
 		# Allow the caller to call start() if desired
 		$self->start unless defined $old_auto_start && !$old_auto_start;
@@ -105,66 +107,45 @@ use common::sense;
 
 		#trace "SocketWorker: state_handle: Access in $$\n";
 
- 		return $self->{state_handle}->{ref}
- 		    if $self->{state_handle}->{pid} == $$;
+#  		return $self->{state_handle}->{ref}
+#  		    if $self->{state_handle}->{pid} == $$;
 
-		my $dbh = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
+		my $ref = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
 
-		$dbh->{socketworker} = {} if !$dbh->{socketworker};
+		$ref->update_begin;
 		
-		my $sw = $dbh->{socketworker};
+		my $d = $ref->data;
+		$d->{socketworker} = {} if !$d->{socketworker};
+		
 		my $id = $self->{state_uuid};
+		my $sw = $d->{socketworker};
 		$sw->{$id} = {} if !$sw->{$id};
 
-		#trace "SocketWorker: state_handle: Recreate, id: $id, dump: ".Dumper($sw->{$id})."\n";
+		$ref->{data} = $d;
+		$ref->update_end;
 
-
-		# Add our state_uuid to the index of states for this app
-		$sw->{idx} = {} if !$sw->{idx};
-		$sw->{idx}->{$STARTUP_PID} = {} if !$sw->{idx}->{$STARTUP_PID};
-		$sw->{idx}->{$STARTUP_PID}->{$id} = 1;
-
-		my $ref = $sw->{$id};
-		$self->{state_handle} = { pid => $$, ref => $ref };
-
-		use Data::Dumper;
-		#debug "SocketWorker: CREATE state_uuid: $id\n";
-		#debug "SocketWorker: state_handle: ".Dumper($sw);
-		
-		return $ref;
+		return $sw->{$id};
 	}
 
-	# TODO not sure if we even need this right now
-	sub app_local_states
+
+	sub state_update
 	{
-		my $class = shift;
-		my $dbh = HashNet::MP::LocalDB->handle;
-		my $sw = $dbh->{socketworker};
-		my $idx = $sw->{idx};
-		my $pid = $idx->{$STARTUP_PID};
-		#my @uuid_list = keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
-		my @uuid_list = keys %{ $pid || {} };
-		my @out = map { $dbh->{socketworker}->{$_} } @uuid_list;
-		#debug "SocketWorker: app_local_states: ".Dumper({sw=>$sw, idx=>$idx, pid=>$pid, startup_pid=>$STARTUP_PID, uuid_list=>\@uuid_list, out=>\@out});
-		return @out;
+		my $self = shift;
+		my $flag = shift;
+		my $ref = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
+		$ref->update_begin if  $flag;
+		$ref->update_end   if !$flag;
 	}
 
 	sub DESTROY
 	{
 		my $self = shift;
-		my $dbh = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
+		my $ref= HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
 
 		# Remove the state data from the database
-		delete $dbh->{socketworker}->{$self->{state_uuid}};
-		
-		# Remove the state uuid from the index list for this PID
-		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}->{$self->{state_uuid}};
-
-		# Using scalar keys per http://www.perlmonks.org/?node_id=173677
-		delete $dbh->{socketworker}->{idx}->{$STARTUP_PID}
-			if !scalar keys %{ $dbh->{socketworker}->{idx}->{$STARTUP_PID} };
-
-		#debug "SocketWorker: DESTROY: Removing state_uuid $self->{state_uuid}\n";
+		$ref->update_begin;
+		delete $ref->data->{socketworker}->{$self->{state_uuid}};
+		$ref->update_end;
 	}
 
 	sub bad_message_handler
@@ -278,8 +259,11 @@ use common::sense;
 		trace "SocketWorker: Sending MSG_NODE_INFO\n";
 		$self->send_message($self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO));
 
+		$self->state_update(1);
 		$self->state_handle->{started} = 0.5;
+		$self->state_update(1);
 	}
+
 	
 	sub disconnect_handler
 	{
@@ -309,7 +293,9 @@ use common::sense;
 			my $node_info = $envelope->{data};
 			info "SocketWorker: dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
 
+			$self->state_update(1);
 			$self->state_handle->{remote_node_info} = $node_info;
+			$self->state_update(0);
 			
 			my $peer;
 			if(!$self->{peer} &&
@@ -335,7 +321,9 @@ use common::sense;
 
 			$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 
+			$self->state_update(1);
 			$self->state_handle->{started} = 1;
+			$self->state_update(0);
 		}
 		else
 		{

@@ -133,7 +133,7 @@
 	sub _dbh
 	{
 		my $self = shift;
-		my $file = $self->{config}->{data_dir} . '/hub.db';
+		my $file = $self->{config}->{data_dir} . '/hubdb';
 		return HashNet::MP::LocalDB->handle($file);
 	}
 	
@@ -141,7 +141,7 @@
 	{
 		my $self = shift;
 		my $dbh = $self->_dbh;
-		my $list = $dbh->{remote_hubs};
+		my $list = $dbh->data->{remote_hubs};
 		
 		if(!$list || !@{$list || []})
 		{
@@ -159,8 +159,10 @@
 					@hubs = ({ host => $seed_hub });
 				}
 
+				$dbh->update_begin;
 				$list =
-					$dbh->{remote_hubs} = \@hubs;
+					$dbh->data->{remote_hubs} = \@hubs;
+				$dbh->update_end;
 			}
 		}
 		
