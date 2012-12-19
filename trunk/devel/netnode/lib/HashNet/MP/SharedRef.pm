@@ -24,6 +24,7 @@ use common::sense;
 		return $self;
 	};
 
+	# NOTE: This sub was causing Segmentation fault (Core dumped) at end of tests/indexed-table.pl when this sub was enabled
 # 	sub DESTROY
 # 	{
 # 		my $self = shift;

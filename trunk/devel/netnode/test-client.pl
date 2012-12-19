@@ -18,9 +18,15 @@ $port = 8031 if !$port;
 
 my $node_info;
 ## NOTE We call gen_node_info BEFORE setting DBFILE so that it uses system-wide db to cache UUID/$0 association
-$node_info = HashNet::MP::SocketWorker->gen_node_info;
+#$node_info = HashNet::MP::SocketWorker->gen_node_info;
+$node_info = {
+	uuid => 'b18934ff-ec2d-446c-84dd-ae96ab89d8ef',
+	name => $0,
+	type => 'client',
+};
 
-$HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
+#$HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
+$HashNet::MP::LocalDB::DBFILE = "testdb";
 
 if(1)
 {
@@ -34,7 +40,7 @@ if(1)
 
 	#$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-	my $max_msgs = 10;
+	my $max_msgs = 1;
 	
 	for my $x (1..$max_msgs)
 	{

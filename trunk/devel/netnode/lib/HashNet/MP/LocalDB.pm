@@ -119,7 +119,11 @@ use common::sense;
 
 	sub shared_ref { shift->{shared_ref} }
 	sub data       { shift->shared_ref->data->{data} }
-	sub index      { shift->shared_ref->data->{idx} }
+	sub index      {
+		my $data = shift->shared_ref->data;
+		$data->{idx} = {} if !$data->{idx};
+		return $data->{idx};
+	}
 	sub cur_id     { shift->shared_ref->data->{cnt} }
 	sub next_id    { ++ shift->shared_ref->data->{cnt} }
 	sub keys       { @{ shift->shared_ref->data->{keys} || [] } }
@@ -164,13 +168,16 @@ use common::sense;
 
 		$self->update_begin;
 
+		my @keys = $self->keys;
+		my %keys = map { $_=>1 } @keys;
+
 		my $shared_data = $self->shared_ref->data;
 		foreach my $key (@_)
 		{
 			# The given key never indexed
-			if(!$shared_data->{index}->{$key})
+			#if(!$shared_data->{index}->{$key})
+			if(!$keys{$key})
 			{
-				my @keys  = @{ $shared_data->{keys} };
 				push @keys, $key;
 
 				# Use this combo of set {keys} and _reindex_single_key()
@@ -497,6 +504,7 @@ use common::sense;
 		#print_stack_trace() if !$val;
 		
 		# No values exist for this value for this key
+		return wantarray ? () : undef if !$self->index->{$key};
 		return wantarray ? () : undef if !$self->index->{$key}->{$val};
 		
 		# Grab the list of IDs that have this key/value
