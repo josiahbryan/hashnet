@@ -24,12 +24,12 @@ use common::sense;
 		return $self;
 	};
 
-	sub DESTROY
-	{
-		my $self = shift;
-		$self->save_data;
-		$self->unlock_file;
-	}
+# 	sub DESTROY
+# 	{
+# 		my $self = shift;
+# 		$self->save_data;
+# 		$self->unlock_file;
+# 	}
 
 	sub file { shift->{file} }
 	
@@ -63,7 +63,7 @@ use common::sense;
 
 		my $data = {};
 #		debug "SharedRef: Loading data file '$file' in pid $$\n";
-		if(-f $file)
+		if(-f $file && (stat($file))[7] > 0)
 		{
 			local $@;
 			eval
@@ -72,15 +72,8 @@ use common::sense;
 
 				#system("cat $file");
 
-				if(-f $file && (stat($file))[7] > 0)
-				{
-					#$state = YAML::Tiny::LoadFile($file);
-					$data = retrieve($file);
-				}
-				else
-				{
-					die "File $file does not exist or is empty";
-				}
+				#$state = YAML::Tiny::LoadFile($file);
+				$data = retrieve($file);
 			};
 
 			logmsg "DEBUG", "SharedRef: Error loading data from '$file': $@" if $@;
