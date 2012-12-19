@@ -8,14 +8,17 @@
 	use HashNet::Util::CleanRef;
 	use Data::Dumper;
 
+	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
+
 	sub new
 	{
 		my $class = shift;
 		my $host  = shift;
 		my $port  = shift || undef;
+		my $node_info = shift || undef;
 
 		my $peer = HashNet::MP::PeerList->get_peer_by_host($port ? "$host:$port" : $host);
-		my $worker = $peer->open_connection();
+		my $worker = $peer->open_connection($node_info);
 		if(!$worker)
 		{
 			die "Unable to connect to $host";
@@ -64,7 +67,7 @@
 				warn "send_message: wait_for_start() failed";
 				return 0;
 			}
-			$opts{to} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
+			$opts{to} = $self->peer_uuid; #$self->peer->uuid;
 		}
 		
 		if(!$opts{nxthop})
@@ -74,7 +77,7 @@
 				warn "send_message: wait_for_start() failed";
 				return 0;
 			}
-			$opts{nxthop} = $self->sw->state_handle->{remote_node_info}->{uuid}; #$self->peer->uuid;
+			$opts{nxthop} = $self->peer_uuid; #$self->peer->uuid;
 		}
 
 		#debug "ClientHandle: create_envelope \%opts: ".Dumper(\%opts);
@@ -86,9 +89,7 @@
 		if($env)
 		{
 			info "ClientHandle: Sending '$env->{data}' to '$env->{to}'\n";
-			$self->sw->outgoing_queue->add_row($env);
-			
-			$self->sw->wait_for_send if $flush;
+			$self->enqueue($env, $flush);
 		}
 		else
 		{
@@ -97,11 +98,55 @@
 
 		return 1;
 	}
+
+	sub enqueue
+	{
+		my ($self, $env, $flush) = @_;
+		
+		$self->sw->outgoing_queue->add_row($env);
+		$self->sw->wait_for_send if $flush;
+	}
+
+	sub peer_uuid
+	{
+		shift->sw->state_handle->{remote_node_info}->{uuid};
+	}
 	
  	sub incoming_messages
 	{
 		my $self = shift;
-		return pending_messages(incoming, to => $self->uuid);
+		# Check 'to' and not 'nxthop' because msgs could reach us
+		# that are not broadcast and not to us - they just
+		# got sent to our socket because the hub didn't know where the client was
+		# connected - so we dont want the client to work with those messages
+		my @msgs = pending_messages(incoming, to => $self->uuid);
+
+		my $sw = $self->sw;
+
+		foreach my $msg (@msgs)
+		{
+			my @args =
+			(
+				{
+					msg_uuid    => $msg->{uuid},
+					msg_hist    => $msg->{hist},
+					client_uuid => $self->uuid,
+				},
+				type	=> MSG_CLIENT_RECEIPT,
+				nxthop	=> $self->peer_uuid,
+				curhop	=> $self->uuid,
+				to	=> '*',
+				bcast	=> 1,
+				sfwd	=> 0,
+			);
+			my $new_env = $sw->create_envelope(@args);
+			trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for $msg->{uuid}, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+			$self->enqueue($new_env);
+		}
+
+		$self->sw->wait_for_send if @msgs;
+		
+		return @msgs;
 	}
 
 	sub wait_for_receive

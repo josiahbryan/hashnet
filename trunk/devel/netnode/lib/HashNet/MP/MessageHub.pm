@@ -19,6 +19,8 @@
 	
 	use File::Path qw/mkpath/;
 
+	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
+
 	our $DEFAULT_CONFIG_FILE = [qw#hashnet-hub.conf /etc/hashnet-hub.conf#];
 	our $DEFAULT_CONFIG =
 	{
@@ -205,7 +207,6 @@
 				HashNet::MP::SocketWorker->new(
 					sock		=> $self->{server}->{client},
 					node_info	=> $self->{node_info},
-					term		=> $self->{term},
 					no_fork		=> 1,
 				);
 				
@@ -219,7 +220,6 @@
 		);
 		
 		$obj->{node_info} = $self->node_info,
-		$obj->{term}      = $self;
 		$obj->run();
 	}
 
@@ -270,30 +270,50 @@
 		my $self = shift;
 
 		my $self_uuid  = $self->node_info->{uuid};
+
+		#trace "MessageHub: Starting router_process_loop()\n";
 		
 		while(1)
 		{
 			#my @list = $self->pending_messages;
 			my @list = pending_messages(incoming, nxthop => $self_uuid);
+			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 			
 			foreach my $msg (@list)
 			{
+				if($msg->{type} eq MSG_CLIENT_RECEIPT)
+				{
+					# This is a receipt, saying the client picked up the message identified
+					# by $msg->{data}->{msg_uuid}.
+					# 
+					# This receipt is useful to us because we want to remove any messages
+					# stored for offline clients (offline to us) that received the message
+					# we have stored by connecting to another hub
+					# 
+					# That way, when they connect back to us, they dont get deluged with a
+					# backlog of messages that we have stored which they already received
+					# elsewhere.
+					#
+
+					my $queue = outgoing_queue();
+					my $rx_msg_uuid = $msg->{data}->{msg_uuid};
+					my $queued_msg = $queue->by_key(uuid => $rx_msg_uuid);
+					$queue->del_row($queued_msg) if $queued_msg;
+
+					trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+				}
+
 				my @recip_list;
 
-				#my @app_local_states = HashNet::MP::SocketWorker->app_local_states;
-				#debug "MessageHub: app_local_states: ".Dumper(\@app_local_states);
-				
-				#my @remote_nodes = map { $_->{remote_node_info}->{uuid} } @app_local_states;
+				my @peers = HashNet::MP::PeerList->peers;
 				#debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
 
-				my @peers = HashNet::MP::PeerList->peers;
-				my @remote_nodes = map { $_->{uuid} } @peers;
-				#debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
+				my $last_hop_uuid = $msg->{curhop};
 				
 				if($msg->{bcast})
 				{
-					@recip_list = @remote_nodes;
-					# list all known hubs, peers, etc
+					@recip_list = @peers;
+					# list all known hubs, clients, etc
 				}
 				else
 				{
@@ -302,10 +322,10 @@
 					# Otherwise ...?
 					#	- Query connect hubs?
 					#	- Broadcast with a special flag to reply upon delivery...?
-					my @find = grep { $_ eq $to } @remote_nodes;
+					my @find = grep { $_->uuid eq $to } @peers;
 					if(@find == 1)
 					{
-						@recip_list = $to;
+						@recip_list = shift @find;
 					}
 					else
 					{
@@ -316,22 +336,50 @@
 						# - Then when we get to this case again (non-directly-connect peer),
 						#   we grep our routing map for the hub from which we got a reply and try sending it there
 						#	- That word 'try' implies we followup to make sure the msg was delivered......
-						@recip_list = @remote_nodes;
+
+						# Message not to a peer directly connected (could be broadcast, or just to a client on another hub),
+						# so until we develop a routing table mechanism, we just broadcast to all connected peers
+						@recip_list = @peers;
+
+						# If not store-forward, then we only want to send to peers currently online
+						# since we dont want to store this message for any peers that are not currently
+						# connect to this hub
+						if(!$msg->{swfd})
+						{
+							@recip_list = grep { $_->{online} } @recip_list;
+						}
 					}
 				}
-				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', @recip_list)."}\n";
 
-				foreach my $recip (@recip_list)
+				if($msg->{type} eq MSG_CLIENT_RECEIPT)
+				{
+					# If it's a broadcast client receipt, we grep out the last hop
+					# so we dont just bounce it right back to the recipient
+					@recip_list = grep { $_->uuid ne $last_hop_uuid } @peers;
+				}
+
+				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n";
+
+				foreach my $peer (@recip_list)
 				{
 					my @args =
 					(
 						$msg->{data},
 						uuid	=> $msg->{uuid},
 						hist	=> $msg->{hist},
+
 						curhop	=> $self_uuid,
-						nxthop	=> $recip,
+						nxthop	=> $peer->uuid,
+
+						# Rewrwite the 'to' address if the msg is a broadcast msg AND the next hop is a 'client' because
+						# clients just check the 'to' field to pickup messages
+						# Clients do NOT check nxthop, just 'to' when picking up messages from the queue because
+						# msgs could reach the client that are not broadcast and not to the client - they just
+						# got sent to the client because the hub didn't know where the client was
+						# connected - so we dont want the client to work with those messages.
+						to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
 						from	=> $msg->{from},
-						to	=> $msg->{to},
+					 
 						bcast	=> $msg->{bcast},
 						sfwd	=> $msg->{sfwd},
 						type	=> $msg->{type},

@@ -76,7 +76,7 @@
 	sub open_connection
 	{
 		my $self = shift;
-		my $hub = shift;
+		my $node_info = shift || undef;
 		
 		my $sock = $self->_open_socket();
 		if($sock)
@@ -84,8 +84,7 @@
 			return HashNet::MP::SocketWorker->new(
 				sock		=> $sock,
 				peer_host	=> $self->{host},
-				term		=> $hub,
-				node_info	=> $hub ? $hub->node_info : undef,
+				node_info	=> $node_info,
 			); # forks off new worker
 		}
 		else

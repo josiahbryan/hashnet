@@ -131,6 +131,34 @@
 		
 		$self->_rebuild_index;
 	}
+
+	# This will add $key to the list of keys to index
+	# and rebuild the index
+	sub add_index_key
+	{
+		my $self = shift;
+
+		foreach my $key (@_)
+		{
+			# The given key never indexed
+			if(!$self->index->{$key})
+			{
+				my @keys  = @{ $self->db->{keys} };
+				push @keys, $key;
+
+				# Use this combo of set {keys} and _reindex_single_key()
+				# because it will only rescan the db for that $key,
+				# and not destroy the index of any keys already indexed
+				# (Instead of just calling set_index_keys() with @keys)
+
+				$self->db->{keys} = \@keys;
+
+				$self->_reindex_single_key($key) if @_ < 3;
+			}
+		}
+
+		$self->_rebuild_index if @_ > 2;
+	}
 	
 	sub add_row
 	{
@@ -394,38 +422,20 @@
 		my $key = shift;
 		my $val = shift;
 		
+		# DBM::Deep doesn't like undefined keys
+		return wantarray ? () : undef if !defined $key;
+		return wantarray ? () : undef if !defined $val;
+
 		# If $force_index is true, then if $key was not in the original list of index keys,
 		# we will automatically add it and build an index for that $key before returning
 		# any results
 		my $auto_index = $self->{auto_index};
 		
-		# The given key never indexed
-		if(!$self->index->{$key})
-		{
-			# This will add $key to the list of keys to index
-			# and rebuild the index
-			if($auto_index)
-			{
-				my @keys  = @{ $self->db->{keys} };
-				push @keys, $key;
-				
-				# Use this combo of set {keys} and _reindex_single_key()
-				# because it will only rescan the db for that $key,
-				# and not destroy the index of any keys already indexed
-				# (Instead of just calling set_index_keys() with @keys)
-				
-				$self->db->{keys} = \@keys;
-				
-				$self->_reindex_single_key($key);
-			}
-		}
+		# The given key never indexed - add $key to the list of keys to index and rebuild the index
+		$self->add_index_key($key) if !$self->index->{$key} && $auto_index;
 		
 		#print STDERR __PACKAGE__.": by_key: key='$key', val='$val'\n";
 		#print_stack_trace() if !$val;
-		
-		# DBM::Deep doesn't like undefined keys
-		return wantarray ? () : undef if !defined $key;
-		return wantarray ? () : undef if !defined $val;
 		
 		# No values exist for this value for this key
 		return wantarray ? () : undef if !$self->index->{$key}->{$val};
