@@ -379,7 +379,8 @@
 						# msgs could reach the client that are not broadcast and not to the client - they just
 						# got sent to the client because the hub didn't know where the client was
 						# connected - so we dont want the client to work with those messages.
-						to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
+						#to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
+						to	=> $msg->{bcast} ? $peer->uuid : $msg->{to},
 						from	=> $msg->{from},
 					 
 						bcast	=> $msg->{bcast},

@@ -70,7 +70,7 @@ if(1)
 
 	$ch->wait_for_receive($max_msgs);
 
-	my @msgs = $ch->messages(); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
+	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
 	use Data::Dumper;
 	#print STDERR "Received: ".Dumper(\@msgs) if @msgs;
