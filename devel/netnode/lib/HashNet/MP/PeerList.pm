@@ -78,5 +78,13 @@
 		$peer->merge_keys($node_info) if ref $node_info eq 'HASH';
 		return $peer;
 	}
+
+	sub update_peer
+	{
+		my $class = shift;
+		my $peer = shift;
+		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
+		$db->update_row($peer);
+	}
 };
 1;
