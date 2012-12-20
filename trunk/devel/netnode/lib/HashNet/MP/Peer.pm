@@ -3,6 +3,8 @@
 	use common::sense;
 	use Data::Dumper;
 
+	use HashNet::Util::Logging;
+
 	sub from_hash
 	{
 		my $class = shift;
@@ -10,7 +12,7 @@
 		
 		my $self = bless $data, $class;
 		
-		#print STDERR "Peer: New peer from hash, self: ".Dumper($data);
+		#debug "Peer: New peer from hash, self: ".Dumper($data);
 		
 		return $self;
 	}
@@ -27,6 +29,8 @@
 		my $value = shift;
 		
 		$self->{online} = $value;
+
+		HashNet::MP::PeerList->update_peer($self);
 		
 		return $value;
 	}
@@ -41,6 +45,10 @@
 		{
 			$self->{$key} = $data->{$key};
 		}
+
+		#debug "Peer: merge_keys: Dump of self: ".Dumper($self);
+
+		HashNet::MP::PeerList->update_peer($self);
 		
 		return $self;
 	}
