@@ -155,8 +155,8 @@
 		my $count = shift || 1;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
-		#trace "ClientHandle: wait_for_receive: Enter\n";
 		my $uuid  = $self->uuid;
+		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid)\n";
 		my $queue = incoming_queue();
 		my $time  = time;
 		sleep $speed while time - $time < $max
@@ -164,6 +164,7 @@
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
 		my $res = scalar $queue->all_by_key(to => $uuid);
 		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
+		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
 		return $res;
 	}

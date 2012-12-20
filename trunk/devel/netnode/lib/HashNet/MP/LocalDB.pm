@@ -492,6 +492,9 @@ use common::sense;
 		return wantarray ? () : undef if !defined $key;
 		return wantarray ? () : undef if !defined $val;
 
+		# Force shared_ref to check for changes from the disk
+		$self->shared_ref->load_changes;
+
 		# If $force_index is true, then if $key was not in the original list of index keys,
 		# we will automatically add it and build an index for that $key before returning
 		# any results
