@@ -10,11 +10,11 @@ use common::sense;
 	
 	our $DBFILE = '/var/lib/hashnet/localdb';
 	
-	my $data = {};
-
+	my $class_data = {};
+	
 	sub reset_cached_handles
 	{
-		$data = {};
+		$class_data = {};
 	}
 	
 	sub handle
@@ -24,8 +24,8 @@ use common::sense;
 		
 		#trace  "LocalDB: handle: Getting handle for '$file'\n";
 		
-		$data->{$file} = { db_file => $file } if !$data->{$file};
-		my $db_ctx = $data->{$file};
+		$class_data->{$file} = { db_file => $file } if !$class_data->{$file};
+		my $db_ctx = $class_data->{$file};
 		
 		if(!$db_ctx->{db_handle})
 		{
@@ -35,6 +35,7 @@ use common::sense;
 		}
 		return $db_ctx->{db_handle};
 	}
+
 	
 	sub indexed_handle
 	{
@@ -44,6 +45,9 @@ use common::sense;
 
 		return undef if !$path;
 
+		return $class_data->{_cached_handles}->{$path}->{ref} if
+		       $class_data->{_cached_handles}->{$path}->{pid} == $$;
+		
 		use Carp;
 		croak "indexed_handle changed to only use path strings, not refs, as first arg" if ref $path;
 
@@ -56,15 +60,17 @@ use common::sense;
 
 		#trace "LocalDB: indexed_handle: Path file: $file\n";
 
-		return HashNet::MP::LocalDB::IndexedTable->new($path_handle);
+		my $idx_handle = HashNet::MP::LocalDB::IndexedTable->new($path_handle);
+
+		$class_data->{_cached_handles}->{$path} = { ref=> $idx_handle, pid => $$ };
+
+		return $idx_handle;
 	}
 };
 
 {package HashNet::MP::LocalDB::IndexedTable;
 
 	use HashNet::Util::Logging qw/print_stack_trace/;
-	
-	
 	
 	use overload 
 		'+='	=> \&_add_row_op,
