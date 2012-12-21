@@ -45,8 +45,11 @@ use common::sense;
 
 		return undef if !$path;
 
-		return $class_data->{_cached_handles}->{$path}->{ref} if
-		       $class_data->{_cached_handles}->{$path}->{pid} == $$;
+		return $class_data->{_cached_handles}->{$path} if
+		       $class_data->{_cached_handles}->{$path};
+		
+		#return $class_data->{_cached_handles}->{$path}->{ref} if
+		#       $class_data->{_cached_handles}->{$path}->{pid} == $$;
 		
 		use Carp;
 		croak "indexed_handle changed to only use path strings, not refs, as first arg" if ref $path;
@@ -62,7 +65,8 @@ use common::sense;
 
 		my $idx_handle = HashNet::MP::LocalDB::IndexedTable->new($path_handle);
 
-		$class_data->{_cached_handles}->{$path} = { ref=> $idx_handle, pid => $$ };
+		#$class_data->{_cached_handles}->{$path} = { ref=> $idx_handle, pid => $$ };
+		$class_data->{_cached_handles}->{$path} = $idx_handle;
 
 		return $idx_handle;
 	}

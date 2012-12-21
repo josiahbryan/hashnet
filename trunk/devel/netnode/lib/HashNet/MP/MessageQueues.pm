@@ -19,8 +19,8 @@ use common::sense;
 		my $self = $MsgQueueData;
 		my $queue = shift;
 
-		return  $self->{queues}->{$queue}->{ref} if
-			$self->{queues}->{$queue}->{pid} == $$;
+		return  $self->{queues}->{$queue} if defined #->{ref} if
+			$self->{queues}->{$queue};   #->{pid} == $$;
 
 		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
 		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
@@ -28,7 +28,7 @@ use common::sense;
 		# Setup the index as needed
 		$ref->add_index_key(qw/uuid nxthop to/);
 		
-		$self->{queues}->{$queue} = { ref => $ref, pid => $$ };
+		$self->{queues}->{$queue} = $ref; #{ ref => $ref, pid => $$ };
 		return $ref;
 	}
 
