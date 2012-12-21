@@ -140,7 +140,7 @@
 				sfwd	=> 0,
 			);
 			my $new_env = $sw->create_envelope(@args);
-			trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for $msg->{uuid}, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+			trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 			$self->enqueue($new_env);
 		}
 
