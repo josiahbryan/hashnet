@@ -20,6 +20,8 @@ my $time = time();
 if(!fork)
 {
 	$ref->set_data({ time => $time });
+	$ref->{time2} = $time;
+	$ref->save_data;
 
 	exit;
 }
@@ -28,7 +30,11 @@ else
 	sleep 0.1;
 	
 	is($ref->data->{time}, $time, "Data auto-load from other fork");
+	is($ref->{time2}, $time, "Direct set/fetch works");
 }
+
+#use Data::Dumper;
+#print Dumper $ref, $ref->_d;
 
 unlink($datafile);
 done_testing();

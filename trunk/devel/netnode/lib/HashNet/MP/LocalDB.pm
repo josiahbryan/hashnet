@@ -117,7 +117,7 @@ use common::sense;
 			auto_index => $auto_index,
 		}, $class;
 
-		my $data = $shared_ref->{data};
+		my $data = $shared_ref;
 		$data->{data} ||= {};
 		$data->{idx}  ||= {};
 		$data->{cnt}  ||= 0;
@@ -128,15 +128,15 @@ use common::sense;
 
 
 	sub shared_ref { shift->{shared_ref} }
-	sub data       { shift->shared_ref->data->{data} }
+	sub data       { shift->shared_ref->{data} }
 	sub index      {
-		my $data = shift->shared_ref->data;
+		my $data = shift->shared_ref;
 		$data->{idx} = {} if !$data->{idx};
 		return $data->{idx};
 	}
-	sub cur_id     { shift->shared_ref->data->{cnt} }
-	sub next_id    { ++ shift->shared_ref->data->{cnt} }
-	sub keys       { @{ shift->shared_ref->data->{keys} || [] } }
+	sub cur_id     { shift->shared_ref->{cnt} }
+	sub next_id    { ++ shift->shared_ref->{cnt} }
+	sub keys       { @{ shift->shared_ref->{keys} || [] } }
 
 	sub update_begin { shift->shared_ref->update_begin }
 	sub update_end   { shift->shared_ref->update_end }
@@ -147,13 +147,13 @@ use common::sense;
 
 		$self->shared_ref->update_begin;
 
-		my $data = $self->shared_ref->{data};
-		$data->{data} = {};
-		$data->{idx}  = {};
-		$data->{cnt}  = 0;
-		$data->{keys} = [];
+		my $db = $self->shared_ref;
+		$db->{data} = {};
+		$db->{idx}  = {};
+		$db->{cnt}  = 0;
+		$db->{keys} = [];
 
-		$self->shared_ref->{data} = $data;
+		$self->shared_ref->set_data($db);
 		$self->update_end;
 	}
 	
@@ -164,7 +164,7 @@ use common::sense;
 
 		$self->update_begin;
 
-		$self->shared_ref->data->{keys} = \@keys;
+		$self->shared_ref->{keys} = \@keys;
 		$self->_rebuild_index;
 
 		$self->update_end;
@@ -181,7 +181,7 @@ use common::sense;
 		my @keys = $self->keys;
 		my %keys = map { $_=>1 } @keys;
 
-		my $shared_data = $self->shared_ref->data;
+		my $shared_data = $self->shared_ref;
 		foreach my $key (@_)
 		{
 			# The given key never indexed
@@ -403,6 +403,8 @@ use common::sense;
 		my @data  = values %{ $self->data };
 		foreach my $row (@data)
 		{
+			next if ref $row ne 'HASH';
+			
 			# grab the id for this row
 			my $id = $row->{id};
 			
@@ -433,7 +435,7 @@ use common::sense;
 		my @keys  = $self->keys;
 		
 		# clear index
-		$self->shared_ref->data->{idx} = {};
+		$self->shared_ref->{idx} = {};
 		
 		# create hash for each key
 		my $index = $self->index;
@@ -443,6 +445,10 @@ use common::sense;
 		my @data  = values %{ $self->data };
 		foreach my $row (@data)
 		{
+			#use Data::Dumper;
+			#print Dumper $row;
+			next if ref $row ne 'HASH';
+			
 			# grab the id for this row
 			my $id = $row->{id};
 			
@@ -478,7 +484,7 @@ use common::sense;
 		my $sort_key = shift || undef;
 		
 		my @data = values %{ $self->data };
-		return [ sort { $a->{$sort_key} <=> $b->{$sort_key} } @data ] if defined $sort_key;
+		return [ sort { $a->{$sort_key} <=> $b->{$sort_key} } grep { ref $_ eq 'HASH' } @data ] if defined $sort_key;
 		return \@data;
 	}
 
