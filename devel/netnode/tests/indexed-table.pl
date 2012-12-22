@@ -28,7 +28,7 @@ my $handle = HashNet::MP::LocalDB->handle;
 #my $table = HashNet::MP::LocalDB->indexed_handle($handle->{test}->{table1});
 my $table = HashNet::MP::LocalDB->indexed_handle('/test/table1');
 
-ok(defined $table->shared_ref->data->{cnt}, "auto-create table ref from string");
+ok(defined $table->shared_ref->{cnt}, "auto-create table ref from string");
 
 $table->clear;
 #print Dumper $handle;
@@ -43,7 +43,8 @@ my $row2 = {
 	age => 19,
 };
 
-$table += $row1; # implicitly tested if next is() fails
+#$table += $row1; # implicitly tested if next is() fails
+$table->add_row($row1);
 
 $table->set_index_keys(qw/name/);
 is($table->index->{name}->{foobar}->{1}, 1, "rebuild index on set_index_keys()");
@@ -67,6 +68,10 @@ is($n19->{id}, $row2->{id}, "lookup by age (auto_index)");
 my @list = @{$table->list};
 is(scalar @list, 2, "list() returns 2 rows");
 
+# use Data::Dumper;
+# die Dumper $table;
+#die "Done";
+
 my @list = @{$table->list('age')};
 is($list[0]->{id}, $row2->{id}, "list('age') sorts correctly");
 
@@ -81,7 +86,7 @@ is($table->by_id(1), undef, "search by id for deleted row undef");
 is($table->by_key(name => 'framitz')->{id}, $row2->{id}, "del_row didn't clobber index for other name");
 
 $table->clear;
-is($table->shared_ref->data->{cnt}, 0, "clear() resets count");
+is($table->shared_ref->{cnt}, 0, "clear() resets count");
 
 is($table->by_id(2), undef, "search by id for row 2 undef - clear() deleted data");
 
