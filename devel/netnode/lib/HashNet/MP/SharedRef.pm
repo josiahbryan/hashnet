@@ -14,17 +14,15 @@ use common::sense;
 	my %ClassData;
 	tie %ClassData, 'Tie::RefHash';
 
+	## TODO: Try to use a simple tied hash to fetch/store
+
 	sub new
 	{
 		my $class = shift;
 		my $file = shift || Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
-# 		my $self = bless
-# 		{
-# 			file => $file,
-# 			data => {},
-# 		}, $class;
 
 		my $self = bless { }, $class;
+
 		$ClassData{$self} = { data => $self, file => $file };
 		
 		$self->load_data();
@@ -34,7 +32,6 @@ use common::sense;
 		return $self;
 	};
 
-	# NOTE: This sub was causing Segmentation fault (Core dumped) at end of tests/indexed-table.pl when this sub was enabled
 # 	sub DESTROY
 # 	{
 # 		my $self = shift;
@@ -62,15 +59,22 @@ use common::sense;
 		my $self = shift;
 		my $data = shift || {};
 		my $fail_on_updated = shift || 0;
+
 		$self->update_begin;
-		if($self->_d->{updated} && $fail_on_updated)
+
+		if($self->_d->{updated} &&
+		   $fail_on_updated)
 		{
 			warn __PACKAGE__."::set_data: Data updated on disck prior to set_data() call, failing";
 			return 0;
 		}
+		
 		trace "SharedRef: set_data(): ref: '$data', fail_on_updated: '$fail_on_updated'\n" if DEBUG;
+		
 		$self->_set_data($data);
+		
 		$self->update_end;
+		
 		return 1;
 	}
 
@@ -78,14 +82,18 @@ use common::sense;
 	{
 		my $self = shift;
 		my $data = shift || {};
+
 		if(ref $data ne 'HASH'   &&
 		   ref $data ne __PACKAGE__)
 		{
 			Carp::cluck "SharedRef: _set_data: \$data given not a HASH ($data)";
 			return;
 		}
+		
 		trace "SharedRef: _set_data(): ref: '$data'\n" if DEBUG;
+		
 		$self->{$_} = $data->{$_} foreach keys %$data;
+		
 		return $self;
 	}
 
@@ -96,16 +104,12 @@ use common::sense;
 
 		my $data = {};
 #		debug "SharedRef: Loading data file '$file' in pid $$\n";
+
 		if(-f $file && (stat($file))[7] > 0)
 		{
 			local $@;
 			eval
 			{
-				#$state = retrieve($file) if -f $file && (stat($file))[7] > 0;
-
-				#system("cat $file");
-
-				#$state = YAML::Tiny::LoadFile($file);
 				$data = retrieve($file);
 			};
 
@@ -178,7 +182,6 @@ use common::sense;
 		#debug "SharedRef: _unlock_state():  ",$self->url," (-)    [$$]\n"; #: ", $self->file,"\n";
 		_unlock_file($self->file);
 		trace "SharedRef: unlock_file() -\n" if DEBUG;
-
 	}
 
 

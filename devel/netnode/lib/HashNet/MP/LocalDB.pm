@@ -10,11 +10,11 @@ use common::sense;
 	
 	our $DBFILE = '/var/lib/hashnet/localdb';
 	
-	my $class_data = {};
+	my $ClassData = {};
 	
 	sub reset_cached_handles
 	{
-		$class_data = {};
+		$ClassData = {};
 	}
 	
 	sub handle
@@ -24,8 +24,8 @@ use common::sense;
 		
 		#trace  "LocalDB: handle: Getting handle for '$file'\n";
 		
-		$class_data->{$file} = { db_file => $file } if !$class_data->{$file};
-		my $db_ctx = $class_data->{$file};
+		$ClassData->{$file} = { db_file => $file } if !$ClassData->{$file};
+		my $db_ctx = $ClassData->{$file};
 		
 		if(!$db_ctx->{db_handle})
 		{
@@ -58,11 +58,11 @@ use common::sense;
 
 		return undef if !$path;
 
-		return $class_data->{_cached_handles}->{$path} if
-		       $class_data->{_cached_handles}->{$path};
+		return $ClassData->{_cached_handles}->{$path} if
+		       $ClassData->{_cached_handles}->{$path};
 		
-		#return $class_data->{_cached_handles}->{$path}->{ref} if
-		#       $class_data->{_cached_handles}->{$path}->{pid} == $$;
+		#return $ClassData->{_cached_handles}->{$path}->{ref} if
+		#       $ClassData->{_cached_handles}->{$path}->{pid} == $$;
 		
 		use Carp;
 		croak "indexed_handle changed to only use path strings, not refs, as first arg" if ref $path;
@@ -78,8 +78,8 @@ use common::sense;
 
 		my $idx_handle = HashNet::MP::LocalDB::IndexedTable->new($path_handle);
 
-		#$class_data->{_cached_handles}->{$path} = { ref=> $idx_handle, pid => $$ };
-		$class_data->{_cached_handles}->{$path} = $idx_handle;
+		#$ClassData->{_cached_handles}->{$path} = { ref=> $idx_handle, pid => $$ };
+		$ClassData->{_cached_handles}->{$path} = $idx_handle;
 
 		return $idx_handle;
 	}
@@ -92,28 +92,6 @@ use common::sense;
 	use overload 
 		'+='	=> \&_add_row_op,
 		'-='	=> \&del_row;
-	
-# 	sub new
-# 	{
-# 		my $class = shift;
-# 		my $ref   = shift;
-# 		my $auto_index = shift;
-# 		$auto_index = 1 if !defined $auto_index;
-# 		
-# 		my $self  = bless
-# 		{
-# 			db => $ref,
-# 			auto_index => $auto_index,
-# 		}, $class;
-# 		
-# 		$ref->{data} ||= {};
-# 		$ref->{idx}  ||= {};
-# 		$ref->{cnt}  ||= 0;
-# 		$ref->{keys} ||= []; 
-# 		
-# 		return $self;
-# 	}
-
 
 	sub new
 	{
@@ -124,8 +102,7 @@ use common::sense;
 		my $auto_index = shift;
 		$auto_index = 1 if !defined $auto_index;
 
-		my $self  = bless
-		{
+		my $self  = bless {
 			shared_ref => $shared_ref,
 			auto_index => $auto_index,
 		}, $class;
