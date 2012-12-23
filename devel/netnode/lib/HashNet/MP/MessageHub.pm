@@ -61,7 +61,7 @@
 	sub read_config
 	{
 		my $self = shift;
-		my $config = $self->{config} || $DEFAULT_CONFIG_FILE;
+		my $config = $self->{opts}->{config_file} || $DEFAULT_CONFIG_FILE;
 		if(ref $config eq 'ARRAY')
 		{
 			my @list = @{$config || []};
@@ -75,23 +75,15 @@
 			}
 			if(!$config)
 			{
-				$DEFAULT_CONFIG->{name} = `hostname`;
-				$DEFAULT_CONFIG->{name} =~ s/[\r\n]//g;
-	
-				$DEFAULT_CONFIG->{uuid} = `uuidgen`;
-				$DEFAULT_CONFIG->{uuid} =~ s/[\r\n]//g;
-				
-				$DEFAULT_CONFIG->{data_dir} = $self->{data_dir} if $self->{data_dir};
-				
-				warn "MessageHub: read_config: Unable to find config, using default settings: ".Dumper($DEFAULT_CONFIG);
-				$self->{config} = $DEFAULT_CONFIG;
-				
-				$self->write_default_config();
-				
-				$self->check_config_items();
+				$self->setup_default_config;
 				return;
 				
 			}
+		}
+		
+		if(!-f $config)
+		{
+			$self->setup_default_config($config);
 		}
 		
 		open(FILE, "<$config") || die "MessageHub: Cannot read config '$config': $!";
@@ -112,7 +104,27 @@
 		
 # 		use Data::Dumper;
 # 		print Dumper $self->{opts};
-		$self->{config}->{$_} = $self->{opts}->{$_} foreach keys %{$self->{opts} || {}};
+		
+		$self->check_config_items();
+	}
+	
+	sub setup_default_config
+	{
+		my $self = shift;
+		my $file = shift || undef;
+		
+		$DEFAULT_CONFIG->{name} = `hostname`;
+		$DEFAULT_CONFIG->{name} =~ s/[\r\n]//g;
+
+		$DEFAULT_CONFIG->{uuid} = `uuidgen`;
+		$DEFAULT_CONFIG->{uuid} =~ s/[\r\n]//g;
+		
+		$DEFAULT_CONFIG->{data_dir} = $self->{data_dir} if $self->{data_dir};
+		
+		trace "MessageHub: read_config: Unable to find config, using default settings: ".Dumper($DEFAULT_CONFIG);
+		$self->{config} = $DEFAULT_CONFIG;
+		
+		$self->write_default_config($file);
 		
 		$self->check_config_items();
 	}
@@ -120,18 +132,21 @@
 	sub write_default_config
 	{
 		my $self = shift;
+		my $file = shift || undef;
 		my $cfg = $self->{config};
-		my $file = ref $DEFAULT_CONFIG_FILE eq 'ARRAY' ? $DEFAULT_CONFIG_FILE->[0] : $DEFAULT_CONFIG_FILE;
+		my $file = $file ? $file : (ref $DEFAULT_CONFIG_FILE eq 'ARRAY' ? $DEFAULT_CONFIG_FILE->[0] : $DEFAULT_CONFIG_FILE);
 		open(FILE, ">$file") || die "MessageHub: write_default_config: Cannot write to $file: $!";
 		print FILE "$_: $cfg->{$_}\n" foreach keys %{$cfg || {}};
 		close(FILE);
-		warn "MessageHub: Wrote default configuration settings to $file\n";
+		trace "MessageHub: Wrote default configuration settings to $file\n";
 	}
 	
 	sub check_config_items
 	{
 		my $self = shift;
 		my $cfg = shift;
+		
+		$self->{config}->{$_} = $self->{opts}->{$_} foreach keys %{$self->{opts} || {}};
 		
 		mkpath($cfg->{data_dir}) if !-d $cfg->{data_dir};
 	}
