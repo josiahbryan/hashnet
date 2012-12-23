@@ -48,7 +48,9 @@
 		
 		$opts{auto_start} = 1 if !defined $opts{auto_start};
 		
-		my $self = bless \%opts, $class;
+		my $self = bless {}, $class;
+		
+		$self->{opts} = \%opts;
 		
 		$self->read_config();
 		$self->connect_remote_hubs();
@@ -73,7 +75,7 @@
 			}
 			if(!$config)
 			{
-				$DEFAULT_CONFIG->{name} = `hostname -s`;
+				$DEFAULT_CONFIG->{name} = `hostname`;
 				$DEFAULT_CONFIG->{name} =~ s/[\r\n]//g;
 	
 				$DEFAULT_CONFIG->{uuid} = `uuidgen`;
@@ -107,6 +109,10 @@
 			my ($key, $value) = $line =~ /^\s*(.*?):\s*(.*)$/;
 			$self->{config}->{$key} = $value;
 		}
+		
+# 		use Data::Dumper;
+# 		print Dumper $self->{opts};
+		$self->{config}->{$_} = $self->{opts}->{$_} foreach keys %{$self->{opts} || {}};
 		
 		$self->check_config_items();
 	}
@@ -214,6 +220,14 @@
 				
 				#print STDERR "MessageHub::Server: Disconnect from $ENV{REMOTE_ADDR}\n";
 			}
+			
+			# Hook from Net::Server
+			sub write_to_log_hook
+			{
+				my ($self, $level, $line) = @_;
+				my @levels = qw/WARN INFO DEBUG TRACE/;
+				HashNet::Util::Logging::logmsg($levels[$level], "MessageHub (Net::Server): ", $line, "\n");
+			}
 		};
 	
 		my $obj = HashNet::MP::MessageHub::Server->new(
@@ -265,6 +279,12 @@
 		{
 			kill 15, $self->{router_pid};
 		}
+	}
+	
+	sub DESTROY
+	{
+		shift->stop_router();
+		
 	}
 	
 	sub router_process_loop
