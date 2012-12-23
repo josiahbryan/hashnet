@@ -14,24 +14,29 @@ use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
 
 my $test_port = 82814;
-
-my $pid = fork;
+my $test_srv_cfg = 'test-basic-server.conf';
+my $db_client_file = 'db.test-basic-client';
+my $db_server_file = 'db.test-basic-server';
 
 # Mute logging output
 $HashNet::Util::Logging::LEVEL = 0;
 
+my $pid = fork;
 if(!$pid)
 {
-	$HashNet::MP::LocalDB::DBFILE = "db.test-basic-server";
-	HashNet::MP::MessageHub->new( port => $test_port );
+	$HashNet::MP::LocalDB::DBFILE = $db_server_file;
+	HashNet::MP::MessageHub->new(
+		port        => $test_port,
+		config_file => $test_srv_cfg
+	);
 }
 else
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep .1;
+	sleep 1.1;
 	#print STDERR "# Proceeding with test...\n";
 	
-	$HashNet::MP::LocalDB::DBFILE = "db.test-basic-client";
+	$HashNet::MP::LocalDB::DBFILE = $db_client_file;
 	
 	my $node_info = {
 		uuid => '1509280a-5687-4a6b-acc8-bd58beaccbae',
@@ -68,7 +73,12 @@ else
 	
 	$ch->stop();
 }
+
 kill 15, $pid;
+unlink($test_srv_cfg);
+HashNet::MP::LocalDB->dump_db($db_client_file);
+HashNet::MP::LocalDB->dump_db($db_server_file);
+
 
 done_testing();
 

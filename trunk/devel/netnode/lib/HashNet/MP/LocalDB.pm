@@ -35,7 +35,20 @@ use common::sense;
 		}
 		return $db_ctx->{db_handle};
 	}
-
+	
+	sub dump_db
+	{
+		shift if $_[0] eq __PACKAGE__;
+		my $abs = shift;
+		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
+		$path = '.' if !$path;
+		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
+		my @files = grep  { /^$file/ && -f $_ } readdir(DIR);
+		closedir(DIR);
+		#use Data::Dumper;
+		#print STDERR "dump_db($abs = ($path|$file): ".Dumper(\@files);
+		unlink($_) foreach @files;
+	}
 	
 	sub indexed_handle
 	{
