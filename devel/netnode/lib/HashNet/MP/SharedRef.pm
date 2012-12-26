@@ -1,6 +1,9 @@
 use common::sense;
 {package HashNet::MP::SharedRef;
 
+	use Tie::Hash;
+	use base 'Tie::StdHash';
+
 	use HashNet::Util::Logging;
 	use Storable qw/freeze thaw nstore retrieve/;
 	use Time::HiRes qw/time sleep alarm/;
@@ -8,7 +11,7 @@ use common::sense;
 	use Cwd qw/abs_path/;
 	use Carp;
 
-	sub DEBUG { 0 }
+	sub DEBUG { 1 }
 
 	use Tie::RefHash;
 	my %ClassData;
@@ -20,17 +23,88 @@ use common::sense;
 	{
 		my $class = shift;
 		my $file = shift || Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
+		my $tied = shift || 0;
 
-		my $self = bless { }, $class;
+		if($tied)
+		{
+			my %hash;
+			tie %hash, __PACKAGE__, $file;
+			#return \%hash;
+
+			#trace "SharedRef: new: Tied hash\n";
+
+			#$hash{test} = 1;
+
+			#return \%hash;
+
+			#my $self = $class->_create_inst($file, \%hash);
+
+			#$self->{test} = 1;
+
+
+			#my $file2 = $self->file();
+
+			#die "File mismatch: '$file2' != '$file'" if $file2 ne $file;
+			
+			#return $self;
+
+			return \%hash;
+		}
+		else
+		{
+			my $self = $class->_create_inst($file);
+			return $self;
+		}
+	};
+
+	sub _create_inst
+	{
+		my $class = shift;
+		my $file = shift;
+		my $ref = shift || {};
+		my $self = bless $ref, $class;
+		trace "SharedRef: _create_inst(): file: '$file', self: '$self'\n" if DEBUG;
 
 		$ClassData{$self} = { data => $self, file => $file };
-		
+
 		$self->load_data();
 
-		trace "SharedRef: new(): file: '$file'\n" if DEBUG;
-		
 		return $self;
-	};
+	}
+
+	sub TIEHASH
+	{
+		my $class = shift;
+		my $file = shift;
+		my $storage = bless {}, $class; #$class->_create_inst($file);
+		$ClassData{$storage} = { data => $storage, file => $file };
+		$storage->load_data();
+		#warn "New ".__PACKAGE__."created, stored in $storage.\n";
+		trace "SharedRef: TIEHASH: New tied hash created as $storage\n";
+		return $storage;
+	}
+
+	sub STORE
+	{
+		my ($self, $key, $val) = @_;
+		#warn "Storing data with key $_[1] at $_[0].\n";
+		#$_[0]{$_[1]} = $_[2]
+		$self->update_begin;
+		trace "SharedRef: STORE: $self: $key => $val\n";
+		$self->{$key} = $val;
+		$self->update_end;
+	}
+
+	sub FETCH
+	{
+		#warn "Fetching key '$_[1]' at $_[0]\n";
+		#return $_[0]{$_[1]};
+		my ($self, $key, $val) = @_;
+		trace "SharedRef: FETCH: $self: $key\n";
+		$self->load_changes;
+		return $self->{$key};
+	}
+	
 
 # 	sub DESTROY
 # 	{
@@ -39,9 +113,30 @@ use common::sense;
 # 		$self->unlock_file;
 # 	}
 
-	sub _d { $ClassData{shift()} }
+	#sub _d { $ClassData{shift()} }
+	sub _d
+	{
+		my $ref = shift;
+
+		return $ClassData{$ref};
+
+# 		return $ClassData{$ref} if ref($ref) eq __PACKAGE__;
+# 
+# 		my $self = tied(%{$ref});
+# 		print STDERR "SharedRef: _d: \$self from tied: '$self'\n";
+# 		return $self;
+	}
 	
 	sub file { shift->_d->{file} }
+	
+# 	sub file
+# 	{
+# 		my $ref = shift;
+# 		my $self = ref $ref ? $ref : tied( %{ $ref } );
+# 		use Data::Dumper;
+# 		#print Dumper $ref, $self, \%ClassData, "$self";
+# 		return $self->_d->{file};
+# 	}
 	
 	sub data
 	{
@@ -122,6 +217,9 @@ use common::sense;
 			# the cache, sync_in() will notice the change and reload the cache
 			$self->_d->{cache_mtime} = (stat($file))[9];
 			$self->_d->{cache_size}  = (stat(_))[7];
+			$self->_d->{edit_count}  = $self->_get_edit_count;
+
+			debug "SharedRef: load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n";
 		}
 
 		$self->_set_data($data);
@@ -140,6 +238,28 @@ use common::sense;
 		trace "SharedRef: data_loaded_hook()\n" if DEBUG;
 	}
 
+	sub _inc_edit_count
+	{
+		my $self = shift;
+		my $file = $self->file;
+		my $count_file = "$file.counter";
+		my $cnt = 0;
+		my $dat = -f $count_file ? retrieve($count_file) : \$cnt;
+		$cnt = $$dat + 1;
+		nstore(\$cnt, $count_file);
+		return $cnt;
+	}
+
+	sub _get_edit_count
+	{
+		my $self = shift;
+		my $file = $self->file;
+		my $count_file = "$file.counter";
+		my $cnt = 0;
+		my $dat = -f $count_file ? retrieve($count_file) : \$cnt;
+		return $$dat;
+	}
+
 	sub save_data
 	{
 		my $self = shift;
@@ -156,6 +276,9 @@ use common::sense;
 		# the cache, sync_in() will notice the change and reload the cache
 		$self->_d->{cache_mtime} = (stat($file))[9];
 		$self->_d->{cache_size}  = (stat(_))[7];
+		$self->_d->{edit_count}  = $self->_inc_edit_count();
+
+		debug "SharedRef: save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n";
 
 	}
 
@@ -222,16 +345,20 @@ use common::sense;
 	{
 		my $self = shift;
 		my $cache = $self->file;
-		if(-f $cache && (
-			(stat($cache))[9]  != $self->_d->{cache_mtime} ||
-			(stat(_))[7]       != $self->_d->{cache_size}
-		))
+		return 1 if !-f $cache;
+		
+		my $cur_mtime = (stat($cache))[9];
+		my $cur_size  = (stat(_))[7];
+		my $cur_cnt   = $self->_get_edit_count;
+		if($cur_mtime  != $self->_d->{cache_mtime} ||
+		   $cur_size   != $self->_d->{cache_size}  ||
+		   $cur_cnt    != $self->_d->{edit_count})
 		{
 			trace "SharedRef: _cache_dirty(): Cache is dirty\n" if DEBUG;
 			return 1;
 		}
 
-		trace "SharedRef: _cache_dirty(): Cache not dirty, nothing changed\n" if DEBUG;
+		trace "SharedRef: _cache_dirty(): Cache not dirty, nothing changed (cur: $cur_mtime, $cur_size | old: ".$self->_d->{cache_mtime}.', '.$self->_d->{cache_size}.")\n" if DEBUG;
 		return 0;
 	}
 
@@ -259,13 +386,7 @@ use common::sense;
 
 		trace "SharedRef: update_begin()\n" if DEBUG;
 
-		if(!$self->_d->{locked})
-		{
-			if(!$self->lock_file)
-			{
-				return 0;
-			}
-		}
+		return 0 if !$self->lock_file && !$self->_d->{locked};
 
 		$self->_d->{locked} = 1;
 
