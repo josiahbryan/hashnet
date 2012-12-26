@@ -11,7 +11,7 @@ use common::sense;
 	use Cwd qw/abs_path/;
 	use Carp;
 
-	sub DEBUG { 1 }
+	sub DEBUG { 0 }
 
 	use Tie::RefHash;
 	my %ClassData;
@@ -80,7 +80,7 @@ use common::sense;
 		$ClassData{$storage} = { data => $storage, file => $file };
 		$storage->load_data();
 		#warn "New ".__PACKAGE__."created, stored in $storage.\n";
-		trace "SharedRef: TIEHASH: New tied hash created as $storage\n";
+		trace "SharedRef: TIEHASH: New tied hash created as $storage\n" if DEBUG;
 		return $storage;
 	}
 
@@ -89,10 +89,13 @@ use common::sense;
 		my ($self, $key, $val) = @_;
 		#warn "Storing data with key $_[1] at $_[0].\n";
 		#$_[0]{$_[1]} = $_[2]
-		$self->update_begin;
-		trace "SharedRef: STORE: $self: $key => $val\n";
+		#$self->update_begin;
+		$self->lock_file;
+		trace "SharedRef: STORE: $self: $key => $val\n" if DEBUG;
 		$self->{$key} = $val;
-		$self->update_end;
+		#$self->update_end;
+		$self->save_data;
+		$self->unlock_file;
 	}
 
 	sub FETCH
@@ -100,7 +103,7 @@ use common::sense;
 		#warn "Fetching key '$_[1]' at $_[0]\n";
 		#return $_[0]{$_[1]};
 		my ($self, $key, $val) = @_;
-		trace "SharedRef: FETCH: $self: $key\n";
+		trace "SharedRef: FETCH: $self: $key\n" if DEBUG;
 		$self->load_changes;
 		return $self->{$key};
 	}
@@ -219,7 +222,7 @@ use common::sense;
 			$self->_d->{cache_size}  = (stat(_))[7];
 			$self->_d->{edit_count}  = $self->_get_edit_count;
 
-			debug "SharedRef: load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n";
+			debug "SharedRef: load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
 		}
 
 		$self->_set_data($data);
@@ -278,7 +281,7 @@ use common::sense;
 		$self->_d->{cache_size}  = (stat(_))[7];
 		$self->_d->{edit_count}  = $self->_inc_edit_count();
 
-		debug "SharedRef: save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n";
+		debug "SharedRef: save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
 
 	}
 
