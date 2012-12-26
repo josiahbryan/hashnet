@@ -13,7 +13,7 @@ my $datafile = "$0.dat";
 my $time = time();
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::LEVEL = 0;
 
 my $ref_tied    = HashNet::MP::SharedRef->new($datafile, 1);
 #die "Test done";
