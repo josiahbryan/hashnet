@@ -6,8 +6,9 @@ use common::sense;
 use lib '../lib';
 use lib 'lib';
 
-use Time::HiRes qw/time sleep/;
+use Time::HiRes qw/time sleep alarm/;
 use HashNet::MP::SharedRef;
+use HashNet::Util::Logging;
 
 my $datafile = "$0.dat";
 my $time = time();
@@ -16,7 +17,6 @@ my $time = time();
 #$HashNet::Util::Logging::LEVEL = 0;
 
 my $ref_tied    = HashNet::MP::SharedRef->new($datafile, 1);
-#die "Test done";
 test_ref($ref_tied, 'Tied');
 
 my $ref_normal  = HashNet::MP::SharedRef->new($datafile, 0);
@@ -38,6 +38,13 @@ sub test_ref
 	{
 		$ref->{time} = $time;
 		$ref->save_data if !$tied;
+
+		if(!$tied)
+		{
+			$ref->lock_file;
+			sleep 1;
+			$ref->unlock_file;
+		}
 		exit;
 	}
 	else
@@ -47,10 +54,19 @@ sub test_ref
 		is($ref->{time}, $time, $type.' load from other fork');
 	}
 
-	kill 15, $pid;
+	#kill 15, $pid;
 	unlink($datafile);
 	
 }
+
+#die "Test done";
+
+ok($ref_normal->lock_file, "Lock file");
+is($ref_normal->lock_file, 2, "Lock file again");
+ok($ref_normal->unlock_file, "Unlock file");
+is($ref_normal->lock_file, 1, "Lock file after unlock");
+ok($ref_normal->unlock_file, "Unlock file again");
+
 
 done_testing();
 

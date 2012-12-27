@@ -22,7 +22,7 @@ use common::sense;
 	sub new
 	{
 		my $class = shift;
-		my $file = shift || Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
+		my $file = shift || "$0.dat"; #Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
 		my $tied = shift || 0;
 
 		if($tied)
@@ -63,7 +63,7 @@ use common::sense;
 		my $file = shift;
 		my $ref = shift || {};
 		my $self = bless $ref, $class;
-		trace "SharedRef: _create_inst(): file: '$file', self: '$self'\n" if DEBUG;
+		trace "SharedRef: ", $file, ": _create_inst(): file: '$file', self: '$self'\n" if DEBUG;
 
 		$ClassData{$self} = { data => $self, file => $file };
 
@@ -80,7 +80,7 @@ use common::sense;
 		$ClassData{$storage} = { data => $storage, file => $file };
 		$storage->load_data();
 		#warn "New ".__PACKAGE__."created, stored in $storage.\n";
-		trace "SharedRef: TIEHASH: New tied hash created as $storage\n" if DEBUG;
+		trace "SharedRef: ", $file, ": TIEHASH: New tied hash created as $storage\n" if DEBUG;
 		return $storage;
 	}
 
@@ -91,7 +91,7 @@ use common::sense;
 		#$_[0]{$_[1]} = $_[2]
 		#$self->update_begin;
 		$self->lock_file;
-		trace "SharedRef: STORE: $self: $key => $val\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": STORE: $self: $key => $val\n" if DEBUG;
 		$self->{$key} = $val;
 		#$self->update_end;
 		$self->save_data;
@@ -103,7 +103,7 @@ use common::sense;
 		#warn "Fetching key '$_[1]' at $_[0]\n";
 		#return $_[0]{$_[1]};
 		my ($self, $key, $val) = @_;
-		trace "SharedRef: FETCH: $self: $key\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": FETCH: $self: $key\n" if DEBUG;
 		$self->load_changes;
 		return $self->{$key};
 	}
@@ -167,7 +167,7 @@ use common::sense;
 			return 0;
 		}
 		
-		trace "SharedRef: set_data(): ref: '$data', fail_on_updated: '$fail_on_updated'\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": set_data(): ref: '$data', fail_on_updated: '$fail_on_updated'\n" if DEBUG;
 		
 		$self->_set_data($data);
 		
@@ -184,11 +184,11 @@ use common::sense;
 		if(ref $data ne 'HASH'   &&
 		   ref $data ne __PACKAGE__)
 		{
-			Carp::cluck "SharedRef: _set_data: \$data given not a HASH ($data)";
+			Carp::cluck "SharedRef: ", $self->file, ": _set_data: \$data given not a HASH ($data)";
 			return;
 		}
 		
-		trace "SharedRef: _set_data(): ref: '$data'\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": _set_data(): ref: '$data'\n" if DEBUG;
 		
 		$self->{$_} = $data->{$_} foreach keys %$data;
 		
@@ -211,7 +211,7 @@ use common::sense;
 				$data = retrieve($file);
 			};
 
-			logmsg "DEBUG", "SharedRef: Error loading data from '$file': $@" if $@;
+			logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
 		}
 
 		if(-f $file)
@@ -222,23 +222,24 @@ use common::sense;
 			$self->_d->{cache_size}  = (stat(_))[7];
 			$self->_d->{edit_count}  = $self->_get_edit_count;
 
-			debug "SharedRef: load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
+			debug "SharedRef: ", $self->file, ": load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
 		}
 
 		$self->_set_data($data);
 
-		#logmsg "DEBUG", "SharedRef: load_state(): $file: node_info: ".Dumper($state->{node_info});
+		#logmsg "DEBUG", "SharedRef: ", $self->file, ": load_state(): $file: node_info: ".Dumper($state->{node_info});
 
 		$self->data_loaded_hook();
 
-		trace "SharedRef: load_data():  ".$self->_d->{file}." \t (+in)\n"  if DEBUG;
+		trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n"  if DEBUG;
 
 		return $data;
 	}
 
 	sub data_loaded_hook
 	{
-		trace "SharedRef: data_loaded_hook()\n" if DEBUG;
+		my $self = shift;
+		trace "SharedRef: ", $self->file, ": data_loaded_hook()\n" if DEBUG;
 	}
 
 	sub _inc_edit_count
@@ -259,7 +260,7 @@ use common::sense;
 		my $file = $self->file;
 		my $count_file = "$file.counter";
 		my $cnt = 0;
-		my $dat = -f $count_file ? retrieve($count_file) : \$cnt;
+		my $dat = -f $count_file && (stat($count_file))[7] > 0 ? retrieve($count_file) : \$cnt;
 		return $$dat;
 	}
 
@@ -268,10 +269,10 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 
-		trace "SharedRef: save_data():  ".$self->_d->{file}." \t (-out)\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if DEBUG;
 		#print_stack_trace();
 
-		#logmsg "DEBUG", "SharedRef: save_data(): $file: node_info: ".Dumper($state->{node_info});
+		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file: node_info: ".Dumper($state->{node_info});
 
 		nstore($self, $file);
 
@@ -281,23 +282,30 @@ use common::sense;
 		$self->_d->{cache_size}  = (stat(_))[7];
 		$self->_d->{edit_count}  = $self->_inc_edit_count();
 
-		debug "SharedRef: save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
+		debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
 
 	}
 
 	sub lock_file
 	{
 		my $self = shift;
-		#debug "SharedRef: _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
+		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
+		trace "SharedRef: ", $self->file, ": lock_file() +\n" if DEBUG;
+		#print_stack_trace();
+
+		return 2 if $self->_d->{locked};
+
 		if(!_lock_file($self->file, 3)) # 2nd arg max sec to wait
 		{
 			#die "Can't lock ",$self->file;
-			trace "SharedRef: lock_file(): Can't lock file\n" if DEBUG;
+			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
 			return 0;
 		}
 
-		#debug "SharedRef: _lock_state():    ",$self->url," (+)    [$$]\n"; #: ", $self->file,"\n";
-		trace "SharedRef: lock_file() +\n" if DEBUG;
+		$self->_d->{locked} = 1;
+
+		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (+)    [$$]\n"; #: ", $self->file,"\n";
+
 		return 1;
 
 	}
@@ -306,15 +314,17 @@ use common::sense;
 	{
 		my $self = shift;
 		#debug "SharedRef: _unlock_state():  ",$self->url," (-)    [$$]\n"; #: ", $self->file,"\n";
+		trace "SharedRef: ", $self->file, ": unlock_file() -\n" if DEBUG;
+		$self->_d->{locked} = 0;
 		_unlock_file($self->file);
-		trace "SharedRef: unlock_file() -\n" if DEBUG;
+		return 1;
 	}
 
 
 	sub _lock_file
 	{
 		my $file  = shift;
-		my $max   = shift || 5;
+		my $max   = shift || 3; #0.5;
 		my $speed = shift || .01;
 
 		my $result;
@@ -329,7 +339,12 @@ use common::sense;
 		#stdout::debug("Util: lock wait done on $file, result='$result'\n");
 
 		#die "Can't open lockfile $file.lock: $!" if !$result;
-		warn "Can't open lockfile $file.lock: $!" if !$result;
+		if(!$result)
+		{
+			warn "PID $$: Can't open lockfile $file.lock: $!" if !$result;
+			print_stack_trace();
+		}
+		
 
 		return $result;
 	}
@@ -357,11 +372,11 @@ use common::sense;
 		   $cur_size   != $self->_d->{cache_size}  ||
 		   $cur_cnt    != $self->_d->{edit_count})
 		{
-			trace "SharedRef: _cache_dirty(): Cache is dirty\n" if DEBUG;
+			trace "SharedRef: ", $self->file, ": _cache_dirty(): Cache is dirty\n" if DEBUG;
 			return 1;
 		}
 
-		trace "SharedRef: _cache_dirty(): Cache not dirty, nothing changed (cur: $cur_mtime, $cur_size | old: ".$self->_d->{cache_mtime}.', '.$self->_d->{cache_size}.")\n" if DEBUG;
+		#trace "SharedRef: ", $self->file, ": _cache_dirty(): Cache not dirty, nothing changed (cur: $cur_mtime, $cur_size | old: ".$self->_d->{cache_mtime}.', '.$self->_d->{cache_size}.")\n" if DEBUG;
 		return 0;
 	}
 
@@ -372,11 +387,11 @@ use common::sense;
 		if($self->_cache_dirty)
 		{
 			$self->load_data;
-			trace "SharedRef: load_changes(): New data loaded\n" if DEBUG;
+			trace "SharedRef: ", $self->file, ": load_changes(): New data loaded\n" if DEBUG;
 			return 1;
 		}
 
-		trace "SharedRef: load_changes(): Nothing changed\n" if DEBUG;
+		#trace "SharedRef: ", $self->file, ": load_changes(): Nothing changed\n" if DEBUG;
 
 		return 0;
 	}
@@ -387,11 +402,9 @@ use common::sense;
 		my $cache = $self->file;
 		$self->_d->{updated} = 0;
 
-		trace "SharedRef: update_begin()\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": update_begin()\n" if DEBUG;
 
-		return 0 if !$self->lock_file && !$self->_d->{locked};
-
-		$self->_d->{locked} = 1;
+		return 0 if !$self->lock_file;
 
 		if($self->_cache_dirty)
 		{
@@ -422,9 +435,8 @@ use common::sense;
 
 		# Release lock on cache
 		$self->unlock_file;
-		$self->_d->{locked} = 0;
 
-		trace "SharedRef: update_end()\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": update_end()\n" if DEBUG;
 	}
 };
 1;

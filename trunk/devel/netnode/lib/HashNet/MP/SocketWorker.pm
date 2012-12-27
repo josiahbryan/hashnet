@@ -114,14 +114,12 @@ use common::sense;
 
 		$ref->update_begin;
 		
-		my $d = $ref->data;
-		$d->{socketworker} = {} if !$d->{socketworker};
+		$ref->{socketworker} = {} if !$ref->{socketworker};
 		
 		my $id = $self->{state_uuid};
-		my $sw = $d->{socketworker};
+		my $sw = $ref->{socketworker};
 		$sw->{$id} = {} if !$sw->{$id};
 
-		$ref->{data} = $d;
 		$ref->update_end;
 
 		return $sw->{$id};
