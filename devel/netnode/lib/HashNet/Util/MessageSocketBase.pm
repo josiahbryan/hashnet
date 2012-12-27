@@ -8,8 +8,8 @@
 	
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::Logging;
-	
-	use Time::HiRes qw/sleep alarm time/; # needed for exec_timeout
+	use HashNet::Util::ExecTimeout;
+
 	
 	sub new
 	{
@@ -40,9 +40,9 @@
 			die "Fork failed" unless defined($kid);
 			if ($kid == 0)
 			{
-				info "MessageSocketBase: Child $$ running\n";
+				#info "MessageSocketBase: Child $$ running\n";
 				$self->process_loop();
-				info "MessageSocketBase: Child $$ complete, exiting\n";
+				#info "MessageSocketBase: Child $$ complete, exiting\n";
 				exit 0;
 			}
 
@@ -65,39 +65,6 @@
 		{
 			kill 15, $self->{child_pid};
 		}
-	}
-	
-	sub exec_timeout($$)
-	{
-		my $timeout = shift;
-		my $sub = shift;
-		#debug "\t exec_timeout: \$timeout=$timeout, sub=$sub\n";
-		
-		my $timed_out = 0;
-		local $@;
-		eval
-		{
-			#debug "\t exec_timeout: in eval, timeout:$timeout\n";
-			local $SIG{ALRM} = sub
-			{
-				#debug "\t exec_timeout: in SIG{ALRM}, dieing 'alarm'...\n";
-				$timed_out = 1;
-				die "alarm\n"
-			};       # NB \n required
-			my $previous_alarm = alarm $timeout;
-
-			#debug "\t exec_timeout: alarm set, calling sub\n";
-			$sub->(@_); # Pass any additional args given to exec_timout() to the $sub ref
-			#debug "\t exec_timeout: sub done, clearing alarm\n";
-
-			alarm $previous_alarm;
-		};
-		#debug "\t exec_timeout: outside eval, \$\@='$@', \$timed_out='$timed_out'\n";
-		die if $@ && $@ ne "alarm\n";       # propagate errors
-
-		$timed_out = $@ ? 1:0 if !$timed_out;
-		#debug "\t \$timed_out flag='$timed_out'\n";
-		return $timed_out;
 	}
 	
 	sub process_loop
@@ -184,7 +151,7 @@
 				eval
 				{
 					# We're doing our own alarm() setup instead of using exec_timeout() because
-					# we reset the alarm each time they send a byte of data instead of expecting it all in, for example, 30 sec
+					# we reset the alarm each time they send a chunk of data instead of expecting it all in, for example, 30 sec
 					
 					local $SIG{'ALRM'} = sub { die "Timed Out!\n" };
 					my $timeout = 30; # give the user 30 seconds to type some lines

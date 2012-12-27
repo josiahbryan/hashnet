@@ -10,6 +10,7 @@
 	use HashNet::MP::MessageQueues;
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
+	use HashNet::Util::ExecTimeout;
 
 	use POSIX;
 
@@ -231,12 +232,13 @@
 					sock		=> $self->{server}->{client},
 					node_info	=> $self->{node_info},
 					no_fork		=> 1,
+					# no_fork means that the new() method never returns here
 				);
 				
 				#print STDERR "MessageHub::Server: Disconnect from $ENV{REMOTE_ADDR}\n";
 			}
 			
-			# Hook from Net::Server
+			# Hook from Net::Server, so we can mute the logging output with $HashNet::Util::Logging::LEVEL as needed/desired
 			sub write_to_log_hook
 			{
 				my ($self, $level, $line) = @_;
@@ -247,11 +249,12 @@
 	
 		my $obj = HashNet::MP::MessageHub::Server->new(
 			port => $self->{config}->{port},
-			ipv => '*'
+			ipv  => '*'
 		);
 		
 		$obj->{node_info} = $self->node_info,
 		$obj->run();
+		#exit();
 	}
 
 	sub start_router
@@ -270,7 +273,16 @@
 			if ($kid == 0)
 			{
 				info "Router PID $$ running\n";
-				$self->router_process_loop();
+				RESTART_PROC_LOOP:
+				eval
+				{
+					$self->router_process_loop();
+				};
+				if($@)
+				{
+					error "MessageHub: router_process_loop() crashed: $@";
+					goto RESTART_PROC_LOOP;
+				}
 				info "Router PID $$ complete, exiting\n";
 				exit 0;
 			}
@@ -283,23 +295,24 @@
 				debug "Reaped $k stat $stat\n";
 			}
 
-			$self->{router_pid} = $kid;
+			$self->{router_pid} = { pid => $kid, started_from => $$ };
 		}
 	}
 	
 	sub stop_router
 	{
 		my $self = shift;
-		if($self->{router_pid})
+		if($self->{router_pid} &&
+		   $self->{router_pid}->{started_from} == $$)
 		{
-			kill 15, $self->{router_pid};
+			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}\n";
+			kill 15, $self->{router_pid}->{pid};
 		}
 	}
 	
 	sub DESTROY
 	{
 		shift->stop_router();
-		
 	}
 	
 	sub router_process_loop
@@ -313,7 +326,9 @@
 		while(1)
 		{
 			#my @list = $self->pending_messages;
-			my @list = pending_messages(incoming, nxthop => $self_uuid);
+			my @list;
+
+			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid) } );
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 			
 			foreach my $msg (@list)

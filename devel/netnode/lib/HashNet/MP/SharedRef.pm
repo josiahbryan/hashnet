@@ -247,9 +247,7 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 		my $count_file = "$file.counter";
-		my $cnt = 0;
-		my $dat = -f $count_file ? retrieve($count_file) : \$cnt;
-		$cnt = $$dat + 1;
+		my $cnt = $self->_get_edit_count + 1;
 		nstore(\$cnt, $count_file);
 		return $cnt;
 	}
@@ -260,7 +258,12 @@ use common::sense;
 		my $file = $self->file;
 		my $count_file = "$file.counter";
 		my $cnt = 0;
-		my $dat = -f $count_file && (stat($count_file))[7] > 0 ? retrieve($count_file) : \$cnt;
+		my $dat = \$cnt;
+		if(-f $count_file && (stat($count_file))[7] > 0)
+		{
+			local *@;
+			eval { $dat = retrieve($count_file); }
+		}
 		return $$dat;
 	}
 
