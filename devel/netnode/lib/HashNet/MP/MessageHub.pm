@@ -167,7 +167,7 @@
 		
 		if(!$list || !@{$list || []})
 		{
-			my $seed_hub = $self->{config}->{seed_hubs};
+			my $seed_hub = $self->{config}->{seed_hubs} || $self->{config}->{seed_hub};
 			if($seed_hub)
 			{
 
@@ -194,9 +194,17 @@
 			my $peer = HashNet::MP::PeerList->get_peer_by_host($data->{host});
 			if($peer)
 			{
-				my $worker = $peer->open_connection($self);
+				trace "MessageHub: Connecting to remote hub '$data->{host}'\n";
+				my $worker = $peer->open_connection($self->node_info);
+				if(!$worker)
+				{
+					error "MessageHub: Error connecting to hub '$data->{host}'\n";
+				}
 			}
-
+			else
+			{
+				trace "MessageHub: Could not get peer for remote hub '$data->{host}'\n";
+			}
 		}
 	}
 	
@@ -252,7 +260,11 @@
 			ipv  => '*'
 		);
 		
-		$obj->{node_info} = $self->node_info,
+		$obj->{node_info} = $self->node_info;
+
+		#use Data::Dumper;
+		#print STDERR Dumper $obj;
+		
 		$obj->run();
 		#exit();
 	}
