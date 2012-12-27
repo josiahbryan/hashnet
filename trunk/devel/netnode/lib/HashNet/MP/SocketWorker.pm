@@ -255,7 +255,10 @@ use common::sense;
 		my $self = shift;
 		
 		trace "SocketWorker: Sending MSG_NODE_INFO\n";
-		$self->send_message($self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO));
+		my $env = $self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO);
+		#use Data::Dumper;
+		#print STDERR Dumper $env;
+		$self->send_message($env);
 
 		$self->state_update(1);
 		$self->state_handle->{started} = 0.5;
@@ -313,7 +316,7 @@ use common::sense;
 				$self->{peer} = $peer;
 			}
 
-			#die Dumper $peer, $node_info;
+			#print STDERR Dumper $peer, $node_info;
 			
 			$peer->set_online(1);
 
