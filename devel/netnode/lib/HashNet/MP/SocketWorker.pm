@@ -228,7 +228,7 @@ use common::sense;
 			# Data is the actual content of the message
 			data	=> $data,
 			# History of where this envelope/data has been
-			hist	=> $opts{hist},
+			hist	=> clean_ref($opts{hist}),
 		};
 
 		return $env;
