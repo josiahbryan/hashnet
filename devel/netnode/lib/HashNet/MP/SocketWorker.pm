@@ -229,6 +229,7 @@ use common::sense;
 			data	=> $data,
 			# History of where this envelope/data has been
 			hist	=> clean_ref($opts{hist}),
+				# use clean_ref because history was getting changed by future calls to create_envelope() for broadcast messages to other hosts
 		};
 
 		return $env;
@@ -330,7 +331,7 @@ use common::sense;
 		{
 			if(check_env_hist($envelope, $self->node_info->{uuid}))
 			{
-				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here: ".Dumper($envelope);
+				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
 			}
 			else
 			{

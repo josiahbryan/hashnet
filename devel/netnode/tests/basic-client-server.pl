@@ -44,7 +44,7 @@ else
 		type => 'client',
 	};
 
-	my $ch = HashNet::MP::ClientHandle->new('localhost', $test_port, $node_info);
+	my $ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info);
 
 
 	#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
