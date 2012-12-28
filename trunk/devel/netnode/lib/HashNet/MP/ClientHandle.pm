@@ -10,18 +10,20 @@
 
 	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
 
-	sub new
+	sub connect
 	{
 		my $class = shift;
 		my $host  = shift;
-		my $port  = shift || undef;
+		#my $port  = shift || undef;
 		my $node_info = shift || undef;
 
-		my $peer = HashNet::MP::PeerList->get_peer_by_host($port ? "$host:$port" : $host);
+		#my $peer = HashNet::MP::PeerList->get_peer_by_host($port ? "$host:$port" : $host);
+		my $peer = HashNet::MP::PeerList->get_peer_by_host($host);
 		my $worker = $peer->open_connection($node_info);
 		if(!$worker)
 		{
-			die "Unable to connect to $host";
+			#die "Unable to connect to $host";
+			return undef;
 		}
 
 		return bless {
@@ -140,7 +142,7 @@
 				sfwd	=> 0,
 			);
 			my $new_env = $sw->create_envelope(@args);
-			trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+			#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 			$self->enqueue($new_env);
 		}
 
