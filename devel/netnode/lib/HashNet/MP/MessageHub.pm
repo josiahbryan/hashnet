@@ -88,6 +88,7 @@
 		}
 		
 		open(FILE, "<$config") || die "MessageHub: Cannot read config '$config': $!";
+		trace "MessageHub: Reading config from '$config'\n";
 		
 		my @config;
 		push @config, $_ while $_ = <FILE>;
@@ -145,65 +146,58 @@
 	sub check_config_items
 	{
 		my $self = shift;
-		my $cfg = shift;
-		
-		$self->{config}->{$_} = $self->{opts}->{$_} foreach keys %{$self->{opts} || {}};
+		my $cfg = shift || $self->{config};
+
+		foreach my $key (keys %{$self->{opts} || {}})
+		{
+			my $val = $self->{opts}->{$key};
+			trace "MessageHub: Config option overwritten by script code: '$key' => '$val'\n";
+			$cfg->{$key} = $val;
+		}
 		
 		mkpath($cfg->{data_dir}) if !-d $cfg->{data_dir};
-	}
-	
-	sub _dbh
-	{
-		my $self = shift;
-		my $file = $self->{config}->{data_dir} . '/hubdb';
-		return HashNet::MP::LocalDB->handle($file);
+
+		#trace "MessageHub: Config dump: ".Dumper($cfg);
 	}
 	
 	sub connect_remote_hubs
 	{
 		my $self = shift;
-		my $dbh = $self->_dbh;
-		my $list = $dbh->data->{remote_hubs};
+		my @list = HashNet::MP::PeerList->peers_by_type('hub');
 		
-		if(!$list || !@{$list || []})
+		if(!@list)
 		{
 			my $seed_hub = $self->{config}->{seed_hubs} || $self->{config}->{seed_hub};
 			if($seed_hub)
 			{
-
 				my @hubs;
 				if($seed_hub =~ /,/)
 				{
-					@hubs = map { { 'host' => $_ }  } split /\s*,\s*/, $seed_hub;
+					@hubs = split /\s*,\s*/, $seed_hub;
 				}
 				else
 				{
-					@hubs = ({ host => $seed_hub });
+					@hubs = ( $seed_hub );
 				}
 
-				$dbh->update_begin;
-				$list =
-					$dbh->data->{remote_hubs} = \@hubs;
-				$dbh->update_end;
+
+				@list = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
 			}
 		}
 		
-		foreach my $data (@$list)
+		foreach my $peer (@list)
 		{
-			#my $sock = $self->_get_socket($data->{host});
-			my $peer = HashNet::MP::PeerList->get_peer_by_host($data->{host});
-			if($peer)
+			next if !$peer;
+			
+			trace "MessageHub: Connecting to remote hub '$peer->{host}'\n";
+			my $worker = $peer->open_connection($self->node_info);
+			if(!$worker)
 			{
-				trace "MessageHub: Connecting to remote hub '$data->{host}'\n";
-				my $worker = $peer->open_connection($self->node_info);
-				if(!$worker)
-				{
-					error "MessageHub: Error connecting to hub '$data->{host}'\n";
-				}
+				error "MessageHub: Error connecting to hub '$peer->{host}'\n";
 			}
 			else
 			{
-				trace "MessageHub: Could not get peer for remote hub '$data->{host}'\n";
+				trace "MessageHub: Connection established to hub '$peer->{host}'\n";
 			}
 		}
 	}
@@ -214,6 +208,7 @@
 
 		return $self->{node_info} if $self->{node_info};
 		return $self->{node_info} = {
+			host => $self->{config}->{host} || undef,
 			name => $self->{config}->{name},
 			uuid => $self->{config}->{uuid},
 			type => 'hub',
@@ -378,6 +373,7 @@
 				{
 					@recip_list = @peers;
 					# list all known hubs, clients, etc
+					#debug "MessageHub: bcast, peers: ".Dumper(\@peers);
 				}
 				else
 				{

@@ -5,6 +5,7 @@
 		
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::Peer;
+	use HashNet::Util::Logging;
 	
 	use Data::Dumper;
 
@@ -45,12 +46,21 @@
 		my $uuid = ref $node_info eq 'HASH' ? $node_info->{uuid} : $node_info;
 		
 		return undef if !$uuid;
+
+		#trace "PeerList: get_peer_by_uuid: UUID: '$uuid'\n";
+		#trace "PeerList: DEBUG: node_info: ".Dumper($node_info);
 		 
 		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
 		
 		my $peer_data = $db->by_key(uuid => $uuid);
-		$peer_data = $db->add_row({ uuid => $uuid }) # returns hash blessed into DBM::Deep
-			if !$peer_data;
+		if(!$peer_data)
+		{
+			$peer_data = $db->add_row({ uuid => $uuid }); # returns hash with 'id' field set
+			#if !$peer_data;
+			trace "PeerList: get_peer_by_uuid: uuid '$uuid' not found, new peer data inserted as id '$peer_data->{id}'\n";
+		}
+
+		#trace "PeerList: get_peer_by_uuid: Peer data for '$uuid' before merge keys: ".Dumper($peer_data);
 		
 		#print STDERR "get_peer: peers: ".Dumper($db->{peers});
 		#print STDERR "PeerList: get_peer: node_info: ".Dumper($node_info);

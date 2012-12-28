@@ -87,7 +87,8 @@ use common::sense;
 
 {package HashNet::MP::LocalDB::IndexedTable;
 
-	use HashNet::Util::Logging qw/print_stack_trace/;
+	use HashNet::Util::Logging; # qw/print_stack_trace/;
+	use Data::Dumper;
 	
 	use overload 
 		'+='	=> \&_add_row_op,
@@ -131,17 +132,19 @@ use common::sense;
 	sub update_begin { shift->shared_ref->update_begin }
 	sub update_end   { shift->shared_ref->update_end }
 	
+	sub clear_with { shift->clear(@_) }
 	sub clear
 	{
 		my $self = shift;
+		my $new = shift || {};
 
 		$self->shared_ref->update_begin;
 
 		my $db = $self->shared_ref;
-		$db->{data} = {};
-		$db->{idx}  = {};
-		$db->{cnt}  = 0;
-		$db->{keys} = [];
+		$db->{data} = $new->{data} || {};
+		$db->{idx}  = $new->{idx}  || {};
+		$db->{cnt}  = $new->{cnt}  || 0;
+		$db->{keys} = $new->{keys} || [];
 
 		$self->shared_ref->set_data($db);
 		$self->update_end;
@@ -175,7 +178,6 @@ use common::sense;
 		foreach my $key (@_)
 		{
 			# The given key never indexed
-			#if(!$shared_data->{index}->{$key})
 			if(!$keys{$key})
 			{
 				push @keys, $key;
@@ -384,6 +386,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $key = shift;
+		#trace "LocalDB: _reindex_single_key: '$key'\n";
 		
 		my $index = $self->index;
 		
@@ -393,7 +396,7 @@ use common::sense;
 		my @data  = values %{ $self->data };
 		foreach my $row (@data)
 		{
-			next if ref $row ne 'HASH';
+			#next if ref $row ne 'HASH' && ! (eval '$row->{id}');
 			
 			# grab the id for this row
 			my $id = $row->{id};
@@ -437,7 +440,7 @@ use common::sense;
 		{
 			#use Data::Dumper;
 			#print Dumper $row;
-			next if ref $row ne 'HASH';
+			#next if ref $row ne 'HASH' && ! (eval '$row->{id}');
 			
 			# grab the id for this row
 			my $id = $row->{id};
@@ -472,6 +475,8 @@ use common::sense;
 	{
 		my $self = shift;
 		my $sort_key = shift || undef;
+
+		$self->shared_ref->load_changes;
 		
 		my @data = values %{ $self->data };
 		return [ sort { $a->{$sort_key} <=> $b->{$sort_key} } grep { ref $_ eq 'HASH' } @data ] if defined $sort_key;
@@ -501,6 +506,9 @@ use common::sense;
 		# Force shared_ref to check for changes from the disk
 		$self->shared_ref->load_changes;
 
+		#trace "IndexedTable: by_key: $key => $val\n";
+		#trace "IndexedTable: Dump: ".Dumper($self);
+	
 		# If $force_index is true, then if $key was not in the original list of index keys,
 		# we will automatically add it and build an index for that $key before returning
 		# any results
@@ -511,7 +519,7 @@ use common::sense;
 		
 		#print STDERR __PACKAGE__.": by_key: key='$key', val='$val'\n";
 		#print_stack_trace() if !$val;
-		
+	
 		# No values exist for this value for this key
 		return wantarray ? () : undef if !$self->index->{$key};
 		return wantarray ? () : undef if !$self->index->{$key}->{$val};

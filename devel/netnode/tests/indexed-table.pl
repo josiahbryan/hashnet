@@ -112,4 +112,44 @@ $table->del_batch(\@batch);
 is($table->by_key(name => 'foobar'), undef, "lookup by name after del_batch");
 is($table->by_key(name => 'framitz'), undef, "lookup by name after del_batch 2");
 
+# Error testing
+my $bad_data = {                                                           
+                 'keys' => [
+                           'type',
+                           'host'
+                         ],
+                 'idx' => {
+                          'type' => {
+                                    'hub' => {
+                                               '1' => 1
+                                             }
+                                  },
+                          'host' => {
+                                    'localhost:8031' => {
+                                                          '1' => 1
+                                                        }
+                                  }
+                        },
+                 'data' => {
+                           '1' => bless( {
+                                           'name' => 'centos62laptop-main',
+                                           'id' => '1',
+                                           'type' => 'hub',
+                                           'uuid' => '58b4bd86-463a-4383-899c-c7163f2609b7.main',
+                                           'host' => 'localhost:8031',
+                                           'online' => 0
+                                         }, 'HashNet::MP::Peer' )
+                         },
+                 'cnt' => 1
+               };
+$table->clear_with($bad_data);
+
+my $host = $table->by_key(host => 'localhost:8031');
+is($host->{id}, 1, "By host works");
+
+my $uuid = $table->by_key(uuid => '58b4bd86-463a-4383-899c-c7163f2609b7.main');
+is($uuid->{id}, 1, "By uuid works");
+
+# TODO Add tests for $table sharing data across forks and properly loading changes (such as ->list())
+
 done_testing();
