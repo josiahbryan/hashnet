@@ -312,7 +312,7 @@
 		if($self->{router_pid} &&
 		   $self->{router_pid}->{started_from} == $$)
 		{
-			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}\n";
+			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}->{pid}\n";
 			kill 15, $self->{router_pid}->{pid};
 		}
 	}
@@ -333,9 +333,10 @@
 		while(1)
 		{
 			#my @list = $self->pending_messages;
-			my @list;
 
+			my @list;
 			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid) } );
+			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 			
 			foreach my $msg (@list)
@@ -356,10 +357,15 @@
 
 					my $queue = outgoing_queue();
 					my $rx_msg_uuid = $msg->{data}->{msg_uuid};
-					my $queued_msg = $queue->by_key(uuid => $rx_msg_uuid);
-					$queue->del_row($queued_msg) if $queued_msg;
+					my @queued = $queue->by_key(uuid => $rx_msg_uuid);
+					@queued = grep { $_->{to} eq $msg->{from} } @queued;
 
 					trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+
+					#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
+
+					$queue->del_batch(\@queued) if @queued;
+
 				}
 
 				my @recip_list;
@@ -369,7 +375,14 @@
 
 				my $last_hop_uuid = $msg->{curhop};
 				
-				if($msg->{bcast})
+
+				if($msg->{type} eq MSG_CLIENT_RECEIPT)
+				{
+					# If it's a broadcast client receipt, we grep out the last hop
+					# so we dont just bounce it right back to the recipient
+					@recip_list = grep { $_->uuid ne $last_hop_uuid } @peers;
+				}
+				elsif($msg->{bcast})
 				{
 					@recip_list = @peers;
 					# list all known hubs, clients, etc
@@ -404,21 +417,16 @@
 						# If not store-forward, then we only want to send to peers currently online
 						# since we dont want to store this message for any peers that are not currently
 						# connect to this hub
-						if(!$msg->{swfd})
-						{
-							@recip_list = grep { $_->{online} } @recip_list;
-						}
 					}
 				}
 
-				if($msg->{type} eq MSG_CLIENT_RECEIPT)
+				if(!$msg->{sfwd})
 				{
-					# If it's a broadcast client receipt, we grep out the last hop
-					# so we dont just bounce it right back to the recipient
-					@recip_list = grep { $_->uuid ne $last_hop_uuid } @peers;
+					@recip_list = grep { $_->{online} } @recip_list;
 				}
 
 				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n";
+				#debug Dumper $msg, \@peers;
 
 				foreach my $peer (@recip_list)
 				{
