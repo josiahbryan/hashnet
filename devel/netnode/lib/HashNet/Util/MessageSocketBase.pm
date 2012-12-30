@@ -10,6 +10,10 @@
 	use HashNet::Util::Logging;
 	use HashNet::Util::ExecTimeout;
 
+	use UUID::Generator::PurePerl; # for use in boundary generation
+	my $UUID_GEN = UUID::Generator::PurePerl->new();
+
+	sub CRLF { "\015\012" }
 	
 	sub new
 	{
@@ -244,26 +248,31 @@
 		
 		my $type = 'json'; # assume json
 		my $boundary = undef;
-			
+
+		# Content-Type, up to and including the boundary string is expected to be on one line
 		if($msg =~ /^Content-Type:\s*(.*?)$/)
 		{
 			$type = $1;
 			$boundary = undef;
 		
-			if($type =~ /multipart\/mixed; boundary=(.*)/)
+			if($type =~ /multipart\/mixed; boundary=(.*)$/)
 			{
 				$boundary = $1;
 			}
 			#Content-Type: multipart/mixed;
 			#boundary=gc0p4Jq0M2Yt08jU534c0p
+
+			# Remove the first line
 			$msg =~ s/^Content-Type:.*?$//g;
-			
-			$type = 'json' if $type =~ /json/;
+
+			# Cheat with application/json or text/json
+			$type = 'json' if $type =~ /json/ || $type =~ /^multipart\/mixed/;
 		}
 		
 		my $second_part = undef;
 		if($boundary)
 		{
+			# TODO: Adapt to handle "--$boundary", not just "$boundary"
 			my $idx = index($msg, $boundary);
 			$msg = substr($msg, $idx-1);
 			$second_part = substr($msg, $idx+length($boundary));
@@ -322,6 +331,7 @@
 	{
 		my $self = shift;
 		my $hash = shift;
+		my $att  = shift;
 		my $json = "";
 		my $clean_ref = undef;
 		undef $@;
@@ -334,6 +344,11 @@
 			Carp::cluck "send_message: Error cleaning ref: $@, orig ref: ".Dumper($hash);
 			return;
 		}
+		if(!$att && defined $clean_ref->{_att})
+		{
+			$att = $clean_ref->{_att};
+			delete $clean_ref->{_att};
+		}
 		undef $@;
 		eval {
 			$json = to_json($clean_ref)
@@ -344,9 +359,43 @@
 			Carp::cluck "send_message: Error encoding json: $@";
 			return;
 		}
-		my $msg  = $json."\015\012";
-		my $sock = $self->{sock};
-		print $sock $msg;
+
+		if(defined $att)
+		{
+			my $boundary = $UUID_GEN->generate_v1->as_string();
+
+			my @tmp;
+			# First line will be XCRLF where X is length of final buffer
+			# Second line is Content-type
+			# Third line is JSON
+			# Fourth line STARTS with $boundary, then immediately followed by $att
+			push @tmp,"Content-Type: multipart\/mixed; boundary=".$boundary.CRLF;
+			push @tmp, $json.CRLF;
+			push @tmp, $boundary;
+			
+			my $buffer    = join '', @tmp;
+			my $total_len = length($buffer) + length($att);
+
+			# We print the buffer and att directly to the $sock instead of building up
+			# a temporary $msg variable, then printing $msg to the sock because that
+			# at least one memory copy (copy $att into the $msg) - this way, we
+			# dont ever move $att into a buffer, it just goes from the $hash (or
+			# @_ arg list) to the socket
+			my $sock = $self->{sock};
+			print $sock $total_len.CRLF;
+			print $sock $buffer;
+			print $sock $att;
+
+			# TODO: Write test for this functionality
+		}
+		else
+		{
+			my $msg  = $json.CRLF;
+			my $sock = $self->{sock};
+			print $sock $msg;
+		}
+		
+  
 	}
 	
 	# TODO: Override in subclasses to return a list of pending messages to send using send_message() in process_loop

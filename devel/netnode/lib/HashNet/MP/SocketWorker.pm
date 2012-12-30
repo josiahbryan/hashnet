@@ -227,6 +227,10 @@ use common::sense;
 			type	=> $opts{type} || MSG_USER,
 			# Data is the actual content of the message
 			data	=> $data,
+			# _att is handled specially by the underlying MessageSocketBase class - it's never encoded to JSON,
+			# it's just transmitted raw as an 'attachment' to the JSON message (this envelope) - it's removed from the envelope,
+			# transmitted (envelope as JSON, _att as raw data), then re-added to the envelope at the other end in the _att key on that side
+			_att	=> $opts{_att} || undef,
 			# History of where this envelope/data has been
 			hist	=> clean_ref($opts{hist}),
 				# use clean_ref because history was getting changed by future calls to create_envelope() for broadcast messages to other hosts
@@ -335,6 +339,7 @@ use common::sense;
 			}
 			else
 			{
+				#$envelope->{_att} = $second_part if defined $second_part;
 				incoming_queue()->add_row($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}, Data: '$envelope->{data}'\n";

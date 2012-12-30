@@ -49,8 +49,8 @@ if(!$ch)
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $max_msgs = 3;
-my $msg_size = 1024 * 1024;
+my $max_msgs = 1;
+my $msg_size = 0; #1024 * 1024;
 
 my $count = 0;
 for my $x (1..$max_msgs)
