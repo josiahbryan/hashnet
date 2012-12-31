@@ -98,9 +98,6 @@
 				#print STDERR __PACKAGE__.": process_loop(): Loop# $counter\n";
 				#$counter ++;
 				
-				# TODO: Send any stuff from outside the process
-				# TODO: Determine how to get data in from outside the process - database? DBM::Deep
-				
 				my @messages = $self->pending_messages();
 				$self->send_message($_) foreach @messages;
 				
@@ -109,7 +106,8 @@
 				#print STDERR "\t mark2\n";
 				
 				next PROCESS_LOOP if $timed_out;
-				
+
+				# line starts with anything but digits...
 				if($first_line =~ /^\D/)
 				{
 					# Assume client is lazy, speak only JSON with newlines encoded, don't prepend outgoing messages with byte counts
@@ -121,7 +119,8 @@
 						#print STDERR "Client speaking HTTP, not processing\n";
 						last PROCESS_LOOP;
 					}
-					
+
+					# Trim newline and pass text to process_message()
 					$first_line =~ s/[\r\n]$//g;
 					$self->process_message($first_line);
 					
