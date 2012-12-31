@@ -441,7 +441,7 @@
 
 						# Rewrwite the 'to' address if the msg is a broadcast msg AND the next hop is a 'client' because
 						# clients just check the 'to' field to pickup messages
-						# Clients do NOT check nxthop, just 'to' when picking up messages from the queue because
+						# Clients do NOT check 'nxthop', just 'to' when picking up messages from the queue because
 						# msgs could reach the client that are not broadcast and not to the client - they just
 						# got sent to the client because the hub didn't know where the client was
 						# connected - so we dont want the client to work with those messages.
