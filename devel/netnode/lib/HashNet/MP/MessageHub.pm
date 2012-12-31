@@ -452,6 +452,8 @@
 						bcast	=> $msg->{bcast},
 						sfwd	=> $msg->{sfwd},
 						type	=> $msg->{type},
+
+						_att	=> $msg->{_att} || undef,
 					);
 					my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
 					$self->outgoing_queue->add_row($new_env);

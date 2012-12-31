@@ -49,17 +49,18 @@ if(!$ch)
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $max_msgs = 1;
-my $msg_size = 0; #1024 * 1024;
+my $max_msgs = 1024;
+my $msg_size = 1024; # * 1024;
 
 my $count = 0;
 for my $x (1..$max_msgs)
 {
 	#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
 	#my $msg = "Hello # $x to PID $$";
-	my $msg = "Msg $x ".('#' x $msg_size);
-	$count += length($msg);
-	if(!$ch->send($msg, bcast => 1, flush => 0))
+	my $msg = "Msg $x";
+	my $att = '#' x $msg_size;
+	$count += length($msg) + $msg_size;
+	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
 	{
 		die "Unable to send message";
 	}
