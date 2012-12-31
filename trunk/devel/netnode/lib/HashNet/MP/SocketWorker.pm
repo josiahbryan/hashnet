@@ -179,6 +179,11 @@ use common::sense;
 			$opts{nxthop} = $self->peer_uuid;
 		}
 
+		if(!$opts{to} && $opts{nxthop})
+		{
+			$opts{to} = $opts{nxthop};
+		}
+
 		if(!$opts{to})
 		{
 			#print STDERR Dumper $self;
@@ -276,6 +281,7 @@ use common::sense;
 		my $self = shift;
 		
 		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n"; #peer: $self->{peer}\n";
+		print STDERR "\n\n\n\n\n";
 		$self->{peer}->set_online(0) if $self->{peer};
 	}
 	
@@ -339,10 +345,11 @@ use common::sense;
 			}
 			else
 			{
-				#$envelope->{_att} = $second_part if defined $second_part;
+				$envelope->{_att} = $second_part if defined $second_part;
 				incoming_queue()->add_row($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}, Data: '$envelope->{data}'\n";
+				#print STDERR Dumper $envelope;
 			}
 		}
 	}
@@ -371,7 +378,7 @@ use common::sense;
 		my $uuid  = $self->state_handle->{remote_node_info}->{uuid};
 		my $queue = outgoing_queue();
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
-		#trace "SocketWorker: wait_for_send: Enter, res: $res\n";		
+		#trace "SocketWorker: wait_for_send: Enter, res: $res\n";
 		my $time  = time;
 		sleep $speed while time - $time < $max and
 		                   defined $queue->by_field(nxthop => $uuid);
@@ -393,7 +400,9 @@ use common::sense;
  		return () if !$self->peer;
 
  		my $uuid  = $self->peer->uuid;
-		return HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid);
+		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid);
+		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);
+		return @res;
 	}
 };
 

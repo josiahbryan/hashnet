@@ -70,6 +70,8 @@
 			kill 15, $self->{child_pid};
 		}
 	}
+
+	sub DEBUG_RX { 1 }
 	
 	sub process_loop
 	{
@@ -104,7 +106,7 @@
 				#print STDERR "\t mark1\n";
 				my $timed_out = exec_timeout 0.1, sub { $first_line = $sock->getline() };
 				#print STDERR "\t mark2\n";
-				
+
 				next PROCESS_LOOP if $timed_out;
 
 				# line starts with anything but digits...
@@ -122,14 +124,18 @@
 
 					# Trim newline and pass text to process_message()
 					$first_line =~ s/[\r\n]$//g;
+
+					#trace "MessageSocketBase: Non-integer first line, '$first_line'\n";
+
 					$self->process_message($first_line);
-					
+
 					next PROCESS_LOOP;
 				}
 				
 				#print STDERR "Debug: First line: '$first_line'\n";
-				
 				my $bytes_expected = int($first_line);
+
+				#trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n" if DEBUG_RX;
 				
 				if($bytes_expected <= 0)
 				{
@@ -171,7 +177,7 @@
 						die "read failed on $!" unless defined($res);
 						last BUFRD if $res == 0; # EOF
 						
-						#print STDERR "Read($res): $data\n";
+						#print STDERR "Read($res, $bytes_rxd): $data\n";
 						push @buffer, $data;
 						$bytes_rxd += $res;
 						
@@ -195,6 +201,8 @@
 				my $len = length $data;
 				#print STDERR "Final answer: len:$len/$bytes_expected, data: '$data'\n";
 				#print STDERR "Data: '$data'\n";
+
+				#trace "MessageSocketBase: Data: '$data'\n" if DEBUG_RX;
 				
 				$self->process_message($data);
 			}
@@ -232,10 +240,11 @@
 		my $self = shift;
 		my $msg  = shift;
 		
-		if($msg =~ /^[\w-]+:\s+/ || $msg =~ /^(GET|POST)\s+\//)
+		#if($msg =~ /^[\w-]+:\s+/ || $msg =~ /^(GET|POST)\s+\//)
+		if($msg =~ /^(GET|POST)\s+\//)
 		{
 			# looks like a http request or header..
-			#print STDERR "Ignore HTTP request/header: '$msg'\n";
+			trace "MessageSocketBase: process_message(): Ignore HTTP request/header: '$msg'\n";
 			return;
 		}
 		
@@ -249,35 +258,50 @@
 		my $boundary = undef;
 
 		# Content-Type, up to and including the boundary string is expected to be on one line
-		if($msg =~ /^Content-Type:\s*(.*?)$/)
+		if($msg =~ /^Content-Type:\s*(.*)[\r\n]*/)
 		{
 			$type = $1;
 			$boundary = undef;
-		
+
+			#trace "MessageSocketBase: process_message(): Content-Type: '$type'\n";
+
 			if($type =~ /multipart\/mixed; boundary=(.*)$/)
 			{
 				$boundary = $1;
+				$boundary =~ s/[\r\n]//g;
+				#trace "MessageSocketBase: process_message(): boundary: '$boundary'\n";
 			}
+
 			#Content-Type: multipart/mixed;
 			#boundary=gc0p4Jq0M2Yt08jU534c0p
 
 			# Remove the first line
-			$msg =~ s/^Content-Type:.*?$//g;
+			$msg =~ s/^Content-Type:.*[\n\r]*//g;
 
 			# Cheat with application/json or text/json
 			$type = 'json' if $type =~ /json/ || $type =~ /^multipart\/mixed/;
+
+			#die "good: $type";
+			#trace "MessageSocketBase: process_message(): Message after type removal: '$msg'\n";
 		}
-		
+
 		my $second_part = undef;
 		if($boundary)
 		{
 			# TODO: Adapt to handle "--$boundary", not just "$boundary"
 			my $idx = index($msg, $boundary);
-			$msg = substr($msg, $idx-1);
-			$second_part = substr($msg, $idx+length($boundary));
+			my $len = length($boundary);
+			my $first_part = substr($msg, 0, $idx);
+			$second_part = substr($msg, $idx + $len);
+
+			#trace "MessageSocketBase: process_message(): idx: $idx, len: $len\n"; #, msg: '$msg', boundary: '$boundary'\n";
+
+			$msg = $first_part;
 		}
-		
+
 		#print STDERR "Got msg: $msg\n";
+
+		#trace "MessageSocketBase: process_message():\n\tmsg: '$msg'\n\tatt: '$second_part'\n" if $second_part;
 		
 		my $sock = $self->{sock};
 		#print $sock "Thanks, I got: '$msg'\n";
@@ -381,10 +405,18 @@
 			# dont ever move $att into a buffer, it just goes from the $hash (or
 			# @_ arg list) to the socket
 			my $sock = $self->{sock};
+
+			# This is the real code
 			print $sock $total_len.CRLF;
 			print $sock $buffer;
 			print $sock $att;
 
+			# For debugging
+			#my $msg = $total_len.CRLF.$buffer.$att;
+			#trace "MessageSocketBase: \$msg: ".Dumper(\$msg);
+			#print $sock $msg;
+			#print $sock $att;
+			
 			# TODO: Write test for this functionality
 		}
 		else
