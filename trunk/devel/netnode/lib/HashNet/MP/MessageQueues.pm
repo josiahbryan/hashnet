@@ -38,7 +38,6 @@ use common::sense;
 	sub incoming_queue { msg_queue(incoming) }
 	sub outgoing_queue { msg_queue(outgoing) }
 
-
 	sub pending_messages
 	{
 		shift if $_[0] eq __PACKAGE__;
@@ -51,8 +50,11 @@ use common::sense;
 		}
 		
 		my $queue_name = shift;
-		my $idx_key = shift;
-		my $uuid = shift;
+		my $idx_key    = shift;
+		my $uuid       = shift;
+
+		my %opts       = @_;
+		my $no_del     = $opts{no_del} || 0;
 
 		$queue_name = 'outgoing' if $queue_name eq 'out' || $queue_name eq 'tx';
 		$queue_name = 'incoming' if $queue_name eq 'in'  || $queue_name eq 'rx';
@@ -69,7 +71,7 @@ use common::sense;
 
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 
-		$queue->del_batch(\@list);
+		$queue->del_batch(\@list) unless $no_del;
 		#print STDERR Dumper(\@return_list) if @return_list;
 		return @return_list;
 	}

@@ -106,22 +106,31 @@ use common::sense;
 		my $self = shift;
 
 		#trace "SocketWorker: state_handle: Access in $$\n";
-
-#  		return $self->{state_handle}->{ref}
-#  		    if $self->{state_handle}->{pid} == $$;
-
 		my $ref = HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
 
-		$ref->update_begin;
+		$ref->load_changes;
+
+		my $changes = 0;
 		
-		$ref->{socketworker} = {} if !$ref->{socketworker};
+		if(!$ref->{socketworker})
+		{
+			$ref->{socketworker} = {};
+			$changes = 1;
+		}
 		
 		my $id = $self->{state_uuid};
 		my $sw = $ref->{socketworker};
-		$sw->{$id} = {} if !$sw->{$id};
 
-		$ref->update_end;
+		if(!$sw->{$id})
+		{
+			$sw->{$id} = {};
+			$changes = 1;
+		}
 
+		$ref->save_data if $changes;
+
+		#$self->{state_handle} = { ref => $ref, hdl => $sw->{$id} };
+		#return $self->{state_handle}->{hdl};
 		return $sw->{$id};
 	}
 
@@ -348,7 +357,7 @@ use common::sense;
 				$envelope->{_att} = $second_part if defined $second_part;
 				incoming_queue()->add_row($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
-				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}, Data: '$envelope->{data}'\n";
+				info "SocketWorker: dispatch_msg: New incoming envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 				#print STDERR Dumper $envelope;
 			}
 		}
@@ -358,7 +367,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $max   = shift || 4;
-		my $speed = shift || 0.01;
+		my $speed = shift || 0.1;
 		#trace "SocketWorker: wait_for_start: Enter: ".$self->state_handle->{started}."\n";
 		my $time  = time;
 		sleep $speed while time - $time < $max and
@@ -374,8 +383,8 @@ use common::sense;
 	{
 		my $self  = shift;
 		my $max   = shift || 4;
-		my $speed = shift || 0.01;
-		my $uuid  = $self->state_handle->{remote_node_info}->{uuid};
+		my $speed = shift || 0.1;
+		my $uuid  = $self->peer_uuid;
 		my $queue = outgoing_queue();
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: wait_for_send: Enter, res: $res\n";
