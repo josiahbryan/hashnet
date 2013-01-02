@@ -129,8 +129,34 @@ use common::sense;
 	sub next_id    { ++ shift->shared_ref->{cnt} }
 	sub keys       { @{ shift->shared_ref->{keys} || [] } }
 
-	sub update_begin { shift->shared_ref->update_begin }
-	sub update_end   { shift->shared_ref->update_end }
+	sub pause_update_saves
+	{
+		my $self = shift;
+		#$self->update_begin;
+		$self->{_updates_paused} = 1;
+		$self->{_update_end_count_while_locked} = 0;
+	}
+
+	sub resume_update_saves
+	{
+		my $self = shift;
+		$self->{_updates_paused} = 0;
+		$self->update_end if $self->{_update_end_count_while_locked};
+	}
+
+	sub update_begin
+	{
+		my $self = shift;
+		$self->shared_ref->update_begin; # unless $self->{_updates_paused};
+		#$self->shared_ref->load_changes if $self->{_updates_paused};
+	}
+	
+	sub update_end
+	{
+		my $self = shift;
+		$self->{_update_end_count_while_locked} = 1 if $self->{_updates_paused};
+		$self->shared_ref->update_end unless $self->{_updates_paused};
+	}
 	
 	sub clear_with { shift->clear(@_) }
 	sub clear

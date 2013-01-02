@@ -11,6 +11,8 @@ use HashNet::Util::Logging;
 
 use IO::Socket;
 
+#$HashNet::Util::Logging::ANSI_ENABLED = 1;
+
 my @hosts = @ARGV;
 
 @hosts = ('localhost:8031') if !@hosts;
@@ -52,6 +54,8 @@ if(!$ch)
 my $max_msgs = 1024;
 my $msg_size = 1024; # * 1024;
 
+#$ch->outgoing_queue->pause_update_saves;
+
 my $count = 0;
 for my $x (1..$max_msgs)
 {
@@ -60,11 +64,13 @@ for my $x (1..$max_msgs)
 	my $msg = "Msg $x";
 	my $att = '#' x $msg_size;
 	$count += length($msg) + $msg_size;
-	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
+	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 1))
 	{
 		die "Unable to send message";
 	}
 }
+
+#$ch->outgoing_queue->resume_update_saves;
 
 #sleep 2;
 
@@ -80,13 +86,18 @@ for my $x (1..$max_msgs)
 
 #	$worker->stop;
 
-$ch->wait_for_send;
+trace "$0: Wait for send\n";
+my $res = $ch->wait_for_send;
+trace "$0: Wait res: $res\n";
 
 #sleep 30;
 
-$ch->wait_for_receive($max_msgs, 300); # 300 sec
+trace "$0: Wait for receive\n";
+$res = $ch->wait_for_receive($max_msgs, 300); # 300 sec
+trace "$0: Wait res: $res\n";
 
 sleep 1;
+trace "$0: Pickup messages\n";
 my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
 use Data::Dumper;
@@ -103,7 +114,7 @@ else
 
 info "$0: Sent ".sprintf('%.02f', $count/1024)." KB\n";
 
-info "$0: Disconnect from $ENV{REMOTE_ADDR}\n";
+info "$0: Disconnect from $ENV{REMOTE_ADDR}\n\n\n";
 
 
 HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);

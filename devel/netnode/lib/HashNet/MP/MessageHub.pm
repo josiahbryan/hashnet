@@ -12,6 +12,8 @@
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::ExecTimeout;
 
+	#$HashNet::Util::Logging::ANSI_ENABLED = 1;
+
 	use POSIX;
 
 	use Time::HiRes qw/alarm sleep/;
@@ -335,9 +337,12 @@
 			#my @list = $self->pending_messages;
 
 			my @list;
-			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid) } );
+
+			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
 			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
+
+			$self->outgoing_queue->pause_update_saves;
 			
 			foreach my $msg (@list)
 			{
@@ -459,8 +464,10 @@
 					$self->outgoing_queue->add_row($new_env);
 					#debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
 				}
-					
 			}
+
+			$self->incoming_queue->del_batch(\@list);
+			$self->outgoing_queue->resume_update_saves;
 
 			sleep 0.25;
 		}

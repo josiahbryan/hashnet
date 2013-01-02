@@ -2,12 +2,15 @@ use common::sense;
 package HashNet::Util::Logging;
 {
 	use Time::HiRes qw/time/;
+
+	use Data::Dumper;
+	use HashNet::Util::ANSIUtil;
 	
 	# base class of this module
 	our @ISA = qw(Exporter);
 	
 	# Exporting by default
-	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file);
+	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 	
@@ -32,6 +35,9 @@ package HashNet::Util::Logging;
 		DEBUG	=> 4,
 		TRACE	=> 5,
 	);
+
+	# Enable/disable ANSI color-coding of output
+	our $ANSI_ENABLED = 0;
 	
 	# The level at which to limit logging output.
 	# Anything greater than $LEVEL will not be output.
@@ -42,6 +48,11 @@ package HashNet::Util::Logging;
 	
 	# Use this to add custom prefix right before user text or called_from (if $SHOW_FROM set)
 	our $CUSTOM_OUTPUT_PREFIX = '';
+
+	# Used for changing line color by PID if $ANSI_ENABLED
+	my %PidColorLut;
+	my @PidColorList = (ON_RED.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_BLUE.BLACK, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK);
+	my $NextPidColor = 0;
 	
 	sub logmsg
 	{
@@ -58,7 +69,24 @@ package HashNet::Util::Logging;
 		}
 		
 		lock_stdout;
-		print STDERR sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+		if($ANSI_ENABLED)
+		{
+			my $color_on = $PidColorLut{$$};
+			if(!$color_on)
+			{
+				$NextPidColor = rand($#PidColorList);
+				$color_on = $PidColorList[$NextPidColor];
+				#$NextPidColor ++;
+				#$NextPidColor = 0 if $NextPidColor > $#PidColorList;
+
+				$PidColorLut{$$} = $color_on;
+			}
+			print STDERR $color_on, sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
+		}
+		else
+		{
+			print STDERR sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+		}
 		unlock_stdout;
 	}
 	

@@ -117,11 +117,14 @@
  	sub incoming_messages
 	{
 		my $self = shift;
+
+		#$self->outgoing_queue->pause_update_saves;
+
 		# Check 'to' and not 'nxthop' because msgs could reach us
 		# that are not broadcast and not to us - they just
 		# got sent to our socket because the hub didn't know where the client was
 		# connected - so we dont want the client to work with those messages
-		my @msgs = pending_messages(incoming, to => $self->uuid);
+		my @msgs = pending_messages(incoming, to => $self->uuid); #, no_del => 1);
 
 		my $sw = $self->sw;
 
@@ -145,6 +148,9 @@
 			#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 			$self->enqueue($new_env);
 		}
+
+		#$self->incoming_queue->del_batch(\@msgs);
+		#$self->outgoing_queue->resume_update_saves;
 
 		$self->sw->wait_for_send if @msgs;
 		

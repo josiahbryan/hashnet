@@ -17,6 +17,8 @@ use common::sense;
 	my %ClassData;
 	tie %ClassData, 'Tie::RefHash';
 
+	my %Counts;
+
 	## TODO: Try to use a simple tied hash to fetch/store
 
 	sub new
@@ -202,13 +204,19 @@ use common::sense;
 
 		my $data = {};
 #		debug "SharedRef: Loading data file '$file' in pid $$\n";
-
+		
 		if(-f $file && (stat($file))[7] > 0)
 		{
 			local $@;
 			eval
 			{
+				$Counts{load} ++;
+				my $t1 = time();
 				$data = retrieve($file);
+				my $len = time - $t1;
+				$Counts{load_t} += $len;
+				
+				debug "SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n"  if DEBUG;
 			};
 
 			logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
@@ -277,7 +285,14 @@ use common::sense;
 
 		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file: node_info: ".Dumper($state->{node_info});
 
+		$Counts{store} ++;
+		my $t1 = time();
 		nstore($self, $file);
+		my $len = time - $t1;
+		$Counts{store_t} += $len;
+
+		debug "SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" if DEBUG;
+		#print_stack_trace(1);
 
 		# Store our cache size/time in memory, so if another fork changes
 		# the cache, sync_in() will notice the change and reload the cache
