@@ -363,6 +363,17 @@ use common::sense;
 		}
 	}
 
+	sub bulk_read_start_hook
+	{
+		incoming_queue()->pause_update_saves;
+	}
+	
+	sub bulk_read_end_hook
+	{
+		incoming_queue()->resume_update_saves;
+	}
+	
+
 	sub wait_for_start
 	{
 		my $self = shift;
@@ -406,12 +417,19 @@ use common::sense;
 	sub pending_messages
 	{
 		my $self = shift;
- 		return () if !$self->peer;
+		return () if !$self->peer;
 
  		my $uuid  = $self->peer->uuid;
-		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid);
+		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);
 		return @res;
+	}
+
+	sub messages_sent
+	{
+		my $self = shift;
+		my $batch = shift;
+		$self->outgoing_queue->del_batch($batch);
 	}
 };
 

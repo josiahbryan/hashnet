@@ -5,6 +5,8 @@ use common::sense;
 	# base class of this module
 	our @ISA = qw(Exporter);
 
+	use HashNet::Util::Logging;
+
 	# Exporting by default
 	our @EXPORT = qw(exec_timeout);
 	# Exporting on demand basis.
@@ -40,7 +42,7 @@ use common::sense;
 		die if $@ && $@ ne "alarm\n";       # propagate errors
 
 		$timed_out = $@ ? 1:0 if !$timed_out;
-		#debug "\t \$timed_out flag='$timed_out'\n";
+		#debug "\t exec_timeout: \$timed_out flag='$timed_out'\n";
 		return $timed_out;
 	}
 };
