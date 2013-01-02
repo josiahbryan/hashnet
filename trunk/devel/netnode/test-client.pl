@@ -52,7 +52,7 @@ if(!$ch)
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
 my $max_msgs = 1024;
-my $msg_size = 1024; # * 1024;
+my $msg_size = 512; # * 1024;
 
 #$ch->outgoing_queue->pause_update_saves;
 
@@ -64,11 +64,15 @@ for my $x (1..$max_msgs)
 	my $msg = "Msg $x";
 	my $att = '#' x $msg_size;
 	$count += length($msg) + $msg_size;
-	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 1))
+	#next;
+	
+	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
 	{
 		die "Unable to send message";
 	}
 }
+
+trace "$0: Enqueued $max_msgs messages\n";
 
 #$ch->outgoing_queue->resume_update_saves;
 
@@ -87,13 +91,13 @@ for my $x (1..$max_msgs)
 #	$worker->stop;
 
 trace "$0: Wait for send\n";
-my $res = $ch->wait_for_send;
+my $res = $ch->wait_for_send(300, 1);
 trace "$0: Wait res: $res\n";
 
 #sleep 30;
 
 trace "$0: Wait for receive\n";
-$res = $ch->wait_for_receive($max_msgs, 300); # 300 sec
+$res = $ch->wait_for_receive($max_msgs, 300, 1); # 300 sec
 trace "$0: Wait res: $res\n";
 
 sleep 1;

@@ -32,8 +32,8 @@
 		}, $class;	
 	};
 
-	sub wait_for_start { shift->sw->wait_for_start }
-	sub wait_for_send  { shift->sw->wait_for_send  }
+	sub wait_for_start { shift->sw->wait_for_start(@_) }
+	sub wait_for_send  { shift->sw->wait_for_send(@_)  }
 	sub stop           { shift->sw->stop }
 
 	sub uuid { shift->sw->node_info->{uuid} }
@@ -90,7 +90,7 @@
 		
 		if($env)
 		{
-			info "ClientHandle: Sending '$env->{data}' to '$env->{to}'\n";
+			#info "ClientHandle: Sending '$env->{data}' to '$env->{to}'\n";
 			$self->enqueue($env, $flush);
 		}
 		else
@@ -164,11 +164,18 @@
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
 		my $uuid  = $self->uuid;
-		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid)\n";
+		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
 		sleep $speed while time - $time < $max
 		               and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
+# 		while(time - $time < $max)
+# 		{
+# 			my $cnt = scalar ( $queue->all_by_key(to => $uuid) );
+# 			#trace "ClientHandle: wait_for_receive: Have $cnt, want $count ...\n";
+# 			last if $cnt >= $count;
+# 		}
+		
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
 		my $res = scalar $queue->all_by_key(to => $uuid);
 		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
