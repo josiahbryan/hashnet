@@ -22,6 +22,7 @@ use common::sense;
 	sub MSG_INTERNAL_ERROR	{ 'MSG_INTERNAL_ERROR' }
 	sub MSG_ACK		{ 'MSG_ACK' }
 	sub MSG_USER		{ 'MSG_USER' }
+	sub MSG_OFFLINE		{ 'MSG_OFFLINE' }
 	sub MSG_UNKNOWN		{ 'MSG_UNKNOWN' }
 
 	# Can store our state_handle data in another db file if needed/wanted - just set this to the path of the file to use (autocreated)
@@ -148,6 +149,14 @@ use common::sense;
 	{
 		my $self = shift;
 		my $ref= HashNet::MP::LocalDB->handle($STATE_HANDLE_DB);
+
+		my $env = $self->create_envelope($self->{node_info}->{name}.' Shutdown',
+						to => '*',
+						sfwd => 0,
+						bcast => 1,
+						type => MSG_OFFLINE);
+		$self->send_message($env);
+		#print STDERR Dumper $env;
 
 		# Remove the state data from the database
 		$ref->update_begin;

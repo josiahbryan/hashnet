@@ -10,6 +10,7 @@ use common::sense;
 	our @EXPORT_OK = qw();
 
 	use HashNet::Util::CleanRef;
+	use HashNet::MP::LocalDB;
 
 	# Class Data
 	my $MsgQueueData = {};

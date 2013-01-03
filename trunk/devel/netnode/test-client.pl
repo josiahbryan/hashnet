@@ -55,9 +55,9 @@ if(!$ch)
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
 my $msg_size = 1024 * 16;
-my $max_msgs = 64 * 16;
+my $max_msgs = 64 * 8; #64 * 16; #64 * 16;
 
-#$ch->outgoing_queue->pause_update_saves;
+$ch->outgoing_queue->pause_update_saves;
 
 my $count = 0;
 for my $x (1..$max_msgs)
@@ -77,7 +77,7 @@ for my $x (1..$max_msgs)
 
 trace "$0: Enqueued $max_msgs messages\n";
 
-#$ch->outgoing_queue->resume_update_saves;
+$ch->outgoing_queue->resume_update_saves;
 
 #sleep 2;
 

@@ -167,8 +167,8 @@
 		my $self = shift;
 		my @list = HashNet::MP::PeerList->peers_by_type('hub');
 		
-		if(!@list)
-		{
+		#if(!@list)
+		#{
 			my $seed_hub = $self->{config}->{seed_hubs} || $self->{config}->{seed_hub};
 			if($seed_hub)
 			{
@@ -182,10 +182,15 @@
 					@hubs = ( $seed_hub );
 				}
 
+				trace "MessageHub: \@hubs: (@hubs)\n";
 
-				@list = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
+				my %peers_by_host = map { $_->{host} => 1 } @list;
+				@hubs = grep { !$peers_by_host{$_} } @hubs;
+				
+				my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
+				push @list, @peers;
 			}
-		}
+		#}
 		
 		foreach my $peer (@list)
 		{
@@ -223,6 +228,7 @@
 		{package HashNet::MP::MessageHub::Server;
 		
 			use base qw(Net::Server::PreFork);
+			use HashNet::Util::Logging;
 			
 			sub process_request
 			{
@@ -232,6 +238,10 @@
 				#print STDERR "MessageHub::Server: Connect from $ENV{REMOTE_ADDR}\n";
 				
 				#HashNet::MP::SocketWorker->new('-', 1); # '-' = stdin/out, 1 = no fork
+				my $old_proc_name = $0;
+
+				$0 = "$0 [Peer $ENV{REMOTE_ADDR}]";
+				trace "MessageHub::Server: Client connected, forked $0\n";
 				
 				HashNet::MP::SocketWorker->new(
 					sock		=> $self->{server}->{client},
@@ -239,6 +249,8 @@
 					no_fork		=> 1,
 					# no_fork means that the new() method never returns here
 				);
+
+				$0 = $old_proc_name;
 				
 				#print STDERR "MessageHub::Server: Disconnect from $ENV{REMOTE_ADDR}\n";
 			}
@@ -281,7 +293,9 @@
 			die "Fork failed" unless defined($kid);
 			if ($kid == 0)
 			{
-				info "Router PID $$ running\n";
+				$0 = "$0 [Message Router]";
+				
+				info "Router PID $$ running as '$0'\n";
 				RESTART_PROC_LOOP:
 				eval
 				{
@@ -365,7 +379,7 @@
 					my @queued = $queue->by_key(uuid => $rx_msg_uuid);
 					@queued = grep { $_->{to} eq $msg->{from} } @queued;
 
-					trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+					#trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
 
 					#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
 
@@ -430,7 +444,9 @@
 					@recip_list = grep { $_->{online} } @recip_list;
 				}
 
-				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n";
+				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+					if @recip_list;
+					
 				#debug Dumper $msg, \@peers;
 
 				foreach my $peer (@recip_list)

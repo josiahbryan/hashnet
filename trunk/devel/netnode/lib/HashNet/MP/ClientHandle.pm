@@ -124,7 +124,7 @@
 		# that are not broadcast and not to us - they just
 		# got sent to our socket because the hub didn't know where the client was
 		# connected - so we dont want the client to work with those messages
-		my @msgs = pending_messages(incoming, to => $self->uuid); #, no_del => 1);
+		my @msgs = pending_messages(incoming, to => $self->uuid, no_del => 1);
 
 		my $sw = $self->sw;
 
