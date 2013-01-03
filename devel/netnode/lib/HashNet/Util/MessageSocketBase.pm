@@ -45,6 +45,19 @@
 			die "Fork failed" unless defined($kid);
 			if ($kid == 0)
 			{
+
+				# This sequence of functions to get the IP/port/hostname
+				# taken from http://perldoc.perl.org/functions/getpeername.html
+				use Socket;
+				my $sock           = $self->{sock};
+				my $hersockaddr    = getpeername($sock);
+				my ($port, $iaddr) = sockaddr_in($hersockaddr);
+				my $herhostname    = gethostbyaddr($iaddr, AF_INET);
+				my $herstraddr     = inet_ntoa($iaddr);
+
+				$0 = "$0 [Peer $herhostname]";
+				trace "MessageSocketBase: Connected to $herstraddr:$port ($herhostname) in PID $$ as '$0'\n";
+
 				#info "MessageSocketBase: Child $$ running\n";
 				$self->process_loop();
 				#info "MessageSocketBase: Child $$ complete, exiting\n";
@@ -85,7 +98,8 @@
 		#my $read_socket  = $socket eq '-' ? *STDIN  : $socket;
 		#my $write_socket = $socket eq '-' ? *STDOUT : $socket;
 		
-		my $zero_counter = 0;
+		$self->{zero_counter} = 0;
+		
 		my $sock = $self->{sock};
 
 		# IO::Socket has autoflush turned on by default
@@ -237,7 +251,7 @@
 		{
 			if($self->{zero_counter} ++)
 			{
-				#print STDERR "Client sending 0's for data, disconnecting\n";
+				#trace "MessageSocketBase: Client sending 0's for data, disconnecting\n";
 				return -1;
 			}
 
@@ -294,7 +308,7 @@
 
 
 		my $data = join '', @buffer;
-		my $len = length $data;
+		#my $len = length $data;
 		#print STDERR "Final answer: len:$len/$bytes_expected, data: '$data'\n";
 		#print STDERR "Data: '$data'\n";
 

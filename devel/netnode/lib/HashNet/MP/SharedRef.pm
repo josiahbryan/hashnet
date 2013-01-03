@@ -422,13 +422,13 @@ use common::sense;
 
 		trace "SharedRef: ", $self->file, ": update_begin()\n" if DEBUG;
 
-		return 0 if !$self->lock_file;
-
 		if($self->_cache_dirty)
 		{
 			$self->load_data;
 			$self->_d->{updated} = 1;
 		}
+
+		return 0 if !$self->lock_file;
 
 		# Returns undef if in void context
 		#if(defined wantarray)
