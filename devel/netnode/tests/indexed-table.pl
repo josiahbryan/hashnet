@@ -83,7 +83,8 @@ is($ref, undef, "search for deleted name undef");
 
 is($table->by_id(1), undef, "search by id for deleted row undef");
 
-is($table->by_key(name => 'framitz')->{id}, $row2->{id}, "del_row didn't clobber index for other name");
+my $tmp= $table->by_key(name => 'framitz');
+is($tmp ? $tmp->{id} : -1, $row2->{id}, "del_row didn't clobber index for other name");
 
 $table->clear;
 is($table->shared_ref->{cnt}, 0, "clear() resets count");
