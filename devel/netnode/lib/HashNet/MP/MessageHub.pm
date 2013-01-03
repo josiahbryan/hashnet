@@ -57,6 +57,10 @@
 		
 		$self->read_config();
 		$self->connect_remote_hubs();
+
+		# TODO Integrate GlobalDB so it works with a MessageHub generically (e.g. watching the queues, instead of using a SocketWorker)
+		#$self->{globaldb} = HashNet::MP::GlobalDB->new(hub => $self);
+		
 		$self->start_router() if $opts{auto_start};
 		$self->start_server() if $opts{auto_start};
 	}
@@ -246,6 +250,7 @@
 				HashNet::MP::SocketWorker->new(
 					sock		=> $self->{server}->{client},
 					node_info	=> $self->{node_info},
+					use_globaldb	=> 1,
 					no_fork		=> 1,
 					# no_fork means that the new() method never returns here
 				);
