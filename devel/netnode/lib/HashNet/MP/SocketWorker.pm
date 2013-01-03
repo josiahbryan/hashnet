@@ -15,6 +15,7 @@ use common::sense;
 	
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
+	use HashNet::Util::SNTP;
 	
 	use UUID::Generator::PurePerl; # for use in gen_node_info
 	
@@ -92,6 +93,9 @@ use common::sense;
 
 		# Create a UUID for this *object instance* to use to sync state across forks via LocalDB
 		$self->{state_uuid} = $UUID_GEN->generate_v1->as_string();
+
+		# Update time offset via SNTP
+		$self->update_time_offset;
 
 		# Set startup flag to 0, will be set to 0.5 when connected and 1 when rx'd node_info from other side
 		$self->state_update(1);
@@ -227,13 +231,13 @@ use common::sense;
 		{
 			from => $opts{curhop} || $opts{from}, #$self->node_info->{uuid},
 			to   => $opts{nxthop} || $opts{to},
-			time => time(),
+			time => $self->sntp_time(),
 		};
 		
 
 		my $env =
 		{
-			time	=> time(),
+			time	=> $self->sntp_time(),
 			uuid	=> $opts{uuid} || $UUID_GEN->generate_v1->as_string(),
 			# From is the hub/client where this envelope originated
 			from    => $opts{from},
@@ -338,7 +342,7 @@ use common::sense;
 						msg_uuid    => $envelope->{uuid},
 						msg_hist    => $envelope->{hist},
 						node_info   => $self->node_info,
-						pong_time   => time(),
+						pong_time   => $self->sntp_time(),
 					},
 					type	=> MSG_PONG,
 					nxthop	=> $self->peer_uuid,
@@ -410,7 +414,7 @@ use common::sense;
 			else
 			{
 				$envelope->{_att} = $second_part if defined $second_part;
-				$envelope->{_rx_time} = time();
+				$envelope->{_rx_time} = $self->sntp_time();
 				incoming_queue()->add_row($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
@@ -429,6 +433,19 @@ use common::sense;
 		incoming_queue()->resume_update_saves;
 	}
 
+	sub update_time_offset
+	{
+		my $self = shift;
+		$self->state_update(1);
+
+		# (undef, 1) tells sync_time() to only get the offset, not to try and adjust the time
+		$self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1);
+		$self->state_update(0);
+	}
+
+	sub time_offset { shift->state_handle->{time_offset} }
+	sub sntp_time   { time() + shift->time_offset }
+
 	sub send_ping
 	{
 		my $self = shift;
@@ -436,7 +453,7 @@ use common::sense;
 		my $max   = shift || 5;
 		my $speed = shift || 0.01;
 
-		my $start_time = time();
+		my $start_time = $self->sntp_time();
 		my $bcast = $uuid_to ? 0 : 1;
 
 		$self->wait_for_start if !$self->is_started;
@@ -496,7 +513,7 @@ use common::sense;
 
 		$queue->del_batch(\@list);
 
-		my $final_rx_time = time();
+		my $final_rx_time = $self->sntp_time();
 
 		if(!$bcast)
 		{
