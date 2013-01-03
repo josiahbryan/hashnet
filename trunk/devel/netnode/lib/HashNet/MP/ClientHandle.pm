@@ -118,7 +118,7 @@
 	{
 		my $self = shift;
 
-		#$self->outgoing_queue->pause_update_saves;
+		$self->outgoing_queue->pause_update_saves;
 
 		# Check 'to' and not 'nxthop' because msgs could reach us
 		# that are not broadcast and not to us - they just
@@ -149,11 +149,15 @@
 			$self->enqueue($new_env);
 		}
 
-		#$self->incoming_queue->del_batch(\@msgs);
-		#$self->outgoing_queue->resume_update_saves;
+		$self->outgoing_queue->resume_update_saves;
 
+		# Wait for all the MSG_CLIENT_RECEIPTs to transmit before deleting the messages
+		# from the incoming queue and returning to caller so that we can be assured
+		# that receipts are sent
 		$self->sw->wait_for_send if @msgs;
-		
+
+		$self->incoming_queue->del_batch(\@msgs);
+
 		return @msgs;
 	}
 

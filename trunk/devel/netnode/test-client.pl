@@ -8,6 +8,7 @@ use HashNet::MP::SocketWorker;
 use HashNet::MP::LocalDB;
 use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
+use Time::HiRes qw/time/;
 
 use IO::Socket;
 
@@ -31,6 +32,8 @@ $HashNet::MP::LocalDB::DBFILE = "testdb";
 
 my $ch;
 
+my $t_start = time;
+
 while(my $host = shift @hosts)
 {
 	$ch = HashNet::MP::ClientHandle->connect($host, $node_info);
@@ -51,8 +54,8 @@ if(!$ch)
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $max_msgs = 1024;
-my $msg_size = 512; # * 1024;
+my $msg_size = 1024 * 16;
+my $max_msgs = 64 * 16;
 
 #$ch->outgoing_queue->pause_update_saves;
 
@@ -92,17 +95,21 @@ trace "$0: Enqueued $max_msgs messages\n";
 
 trace "$0: Wait for send\n";
 my $res = $ch->wait_for_send(300, 1);
-trace "$0: Wait res: $res\n";
+#trace "$0: Wait res: $res\n";
 
 #sleep 30;
 
 trace "$0: Wait for receive\n";
 $res = $ch->wait_for_receive($max_msgs, 300, 1); # 300 sec
-trace "$0: Wait res: $res\n";
+#trace "$0: Wait res: $res\n";
 
 sleep 1;
 trace "$0: Pickup messages\n";
 my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
+
+my $t_end = time;
+my $t_diff = $t_end - $t_start;
+my $kb_sec = int(($count / 1024) / $t_diff);
 
 use Data::Dumper;
 #print STDERR "Received: ".Dumper(\@msgs) if @msgs;
@@ -116,7 +123,7 @@ else
 	debug "$0: Did not receive any messages\n";
 }
 
-info "$0: Sent ".sprintf('%.02f', $count/1024)." KB\n";
+info "$0: Sent ".sprintf('%.02f', $count/1024)." KB in ".sprintf('%.02f', $t_diff)." sec, avg $kb_sec KB/sec\n";
 
 info "$0: Disconnect from $ENV{REMOTE_ADDR}\n\n\n";
 

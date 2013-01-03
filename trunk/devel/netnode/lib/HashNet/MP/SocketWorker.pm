@@ -289,8 +289,8 @@ use common::sense;
 	{
 		my $self = shift;
 		
-		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n"; #peer: $self->{peer}\n";
-		print STDERR "\n\n\n\n\n";
+		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n\n\n\n\n\n"; #peer: $self->{peer}\n";
+		#print STDERR "\n\n\n\n\n";
 		$self->{peer}->set_online(0) if $self->{peer};
 	}
 	
