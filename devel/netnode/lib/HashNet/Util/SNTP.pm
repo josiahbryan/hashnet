@@ -146,11 +146,11 @@ use Time::HiRes qw(time);
 		vec($rin, fileno($remote), 1) = 1;
 		
 		select($rout=$rin, undef, $eout=$rin, $timeout)
-		or do {print "No answer from $server\n"; return undef};
+		or do {warn "No answer from $server\n"; return undef};
 		
 		# receive the ntp-message from the server
 		$remote -> recv($ntp_msg, length($ntp_msg))
-			or do {print "Receive error from $server ($!)\n"; return undef};
+			or do {warn "Receive error from $server ($!)\n"; return undef};
 		
 		# measure local time AFTER timeserver query
 		$LocalTime2 = time();
@@ -385,9 +385,9 @@ use Time::HiRes qw(time);
 		# of our request packet shows up in the Originate Time field of the received reply.
 		if (($LocalTime0H . $LocalTime0FH) ne ($OriginateTimeH . $OriginateTimeFH))
 		{
-			print "*** The received reply seems to be faulty and NOT the reply to our request packet:\n";
-			print "*** The OriginateTime stamp $OriginateTimeH.$OriginateTimeFH of the received packet does not \n";
-			print "***  show our Transmit Time $LocalTime0H.$LocalTime0FH.\n";
+			warn "*** The received reply seems to be faulty and NOT the reply to our request packet:\n";
+			warn "*** The OriginateTime stamp $OriginateTimeH.$OriginateTimeFH of the received packet does not \n";
+			warn "***  show our Transmit Time $LocalTime0H.$LocalTime0FH.\n";
 			return undef;
 		}
 		

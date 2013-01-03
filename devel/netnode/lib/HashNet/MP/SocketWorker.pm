@@ -97,6 +97,9 @@ use common::sense;
 		# Update time offset via SNTP
 		$self->update_time_offset;
 
+		# Add time_offset to node_info for other nodes in the network to use if every needed (not used at the moment)
+		$self->{node_info}->{time_offset} = $self->time_offset;
+
 		# Set startup flag to 0, will be set to 0.5 when connected and 1 when rx'd node_info from other side
 		$self->state_update(1);
 		$self->state_handle->{started} = 0;
@@ -330,10 +333,10 @@ use common::sense;
 			{
 				info "SocketWorker: dispatch_msg: MSG_PING: Ignoring this ping, it's been here before\n";
 			}
-			elsif($envelope->{from} eq $self->node_info->{uuid})
-			{
-				info "SocketWorker: dispatch_msg: MSG_PING: Not responding to self-ping\n";
-			}
+# 			elsif($envelope->{from} eq $self->node_info->{uuid})
+# 			{
+# 				info "SocketWorker: dispatch_msg: MSG_PING: Not responding to self-ping\n";
+# 			}
 			else
 			{
 				my @args =
@@ -545,7 +548,7 @@ use common::sense;
 				};
 
 				push @output, $out;
-				info "SocketWorker: Broadcast Ping: ".sprintf('%.03f', $delta)." sec to {$out->{node_info}->{uuid}} '$out->{node_info}->{name}'\n";
+				info "SocketWorker: Broadcast Ping: ".sprintf('%.03f', $delta)." sec to '$out->{node_info}->{name}' \t {$out->{node_info}->{uuid}} \n";
 			}
 
 			return @output;
