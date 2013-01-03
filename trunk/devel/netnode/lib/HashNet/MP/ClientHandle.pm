@@ -34,6 +34,7 @@
 
 	sub wait_for_start { shift->sw->wait_for_start(@_) }
 	sub wait_for_send  { shift->sw->wait_for_send(@_)  }
+	sub wait_for_receive{shift->sw->wait_for_receive(@_) }
 	sub stop           { shift->sw->stop }
 
 	sub uuid { shift->sw->node_info->{uuid} }
@@ -47,6 +48,8 @@
 
 	sub sw { shift->{sw} }
 	sub peer { shift->{peer} }
+
+	sub send_ping { shift->sw->send_ping(@_) }
 	
 	sub send
 	{
@@ -159,33 +162,6 @@
 		$self->incoming_queue->del_batch(\@msgs);
 
 		return @msgs;
-	}
-
-	sub wait_for_receive
-	{
-		my $self  = shift;
-		my $count = shift || 1;
-		my $max   = shift || 4;
-		my $speed = shift || 0.01;
-		my $uuid  = $self->uuid;
-		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
-		my $queue = incoming_queue();
-		my $time  = time;
-		sleep $speed while time - $time < $max
-		               and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
-# 		while(time - $time < $max)
-# 		{
-# 			my $cnt = scalar ( $queue->all_by_key(to => $uuid) );
-# 			#trace "ClientHandle: wait_for_receive: Have $cnt, want $count ...\n";
-# 			last if $cnt >= $count;
-# 		}
-		
-		# Returns 1 if at least one msg received, 0 if incoming queue empty
-		my $res = scalar $queue->all_by_key(to => $uuid);
-		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
-		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
-		#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
-		return $res;
 	}
 
 	sub messages

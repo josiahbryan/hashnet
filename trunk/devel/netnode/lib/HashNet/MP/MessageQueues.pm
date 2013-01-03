@@ -27,7 +27,7 @@ use common::sense;
 		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
 
 		# Setup the index as needed
-		$ref->add_index_key(qw/uuid nxthop to/);
+		$ref->add_index_key(qw/uuid nxthop to type/);
 		
 		$self->{queues}->{$queue} = $ref; #{ ref => $ref, pid => $$ };
 		return $ref;

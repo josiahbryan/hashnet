@@ -50,12 +50,15 @@ if(!$ch)
 	die "Couldn't connect to any hosts (@hosts)";
 }
 
+$ch->send_ping();
+die "Test done";
+
 #$ch->send("Test of ClientHandle");
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
 my $msg_size = 1024 * 16;
-my $max_msgs = 64 * 8; #64 * 16; #64 * 16;
+my $max_msgs = 64; # * 8; #64 * 16; #64 * 16;
 
 $ch->outgoing_queue->pause_update_saves;
 

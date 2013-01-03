@@ -241,7 +241,7 @@
 				my $old_proc_name = $0;
 
 				$0 = "$0 [Peer $ENV{REMOTE_ADDR}]";
-				trace "MessageHub::Server: Client connected, forked $0\n";
+				trace "MessageHub::Server: Client connected, forked PID $$ as '$0'\n";
 				
 				HashNet::MP::SocketWorker->new(
 					sock		=> $self->{server}->{client},

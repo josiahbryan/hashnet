@@ -2,7 +2,7 @@ use common::sense;
 
 {package HashNet::MP::LocalDB;
 
-	use DBM::Deep;
+	use Data::Dumper;
 
 	use HashNet::Util::Logging;
 
@@ -156,6 +156,16 @@ use common::sense;
 		my $self = shift;
 		$self->{_update_end_count_while_locked} = 1 if $self->{_updates_paused};
 		$self->shared_ref->update_end unless $self->{_updates_paused};
+
+		#$self->{_ext_change} = 0;
+	}
+
+	sub has_external_changes
+	{
+		my $self = shift;
+		#return 1 if $self->{_ext_change};
+		$self->{_ext_change} = $self->shared_ref->_cache_dirty;
+		return $self->{_ext_change};
 	}
 	
 	sub clear_with { shift->clear(@_) }
@@ -174,6 +184,8 @@ use common::sense;
 
 		$self->shared_ref->set_data($db);
 		$self->update_end;
+
+		#$self->{_ext_change} = 0;
 	}
 	
 	sub set_index_keys
@@ -518,53 +530,122 @@ use common::sense;
 		return @return;
 	}
 	
-	sub by_field { shift->by_key(@_) }
-	sub by_key
+	sub _build_id_list
 	{
-		my $self = shift;
-		my $key = shift;
-		my $val = shift;
+		my ($self, $key, $val) = @_;
 		
 		# DBM::Deep doesn't like undefined keys
-		return wantarray ? () : undef if !defined $key;
-		return wantarray ? () : undef if !defined $val;
+		return () if !defined $key;
+		return () if !defined $val;
 
 		# Force shared_ref to check for changes from the disk
 		$self->shared_ref->load_changes;
 
 		#trace "IndexedTable: by_key: $key => $val\n";
 		#trace "IndexedTable: Dump: ".Dumper($self);
-	
+
 		# If $force_index is true, then if $key was not in the original list of index keys,
 		# we will automatically add it and build an index for that $key before returning
 		# any results
 		my $auto_index = $self->{auto_index};
-		
+
 		# The given key never indexed - add $key to the list of keys to index and rebuild the index
 		$self->add_index_key($key) if !$self->index->{$key} && $auto_index;
-		
+
 		#print STDERR __PACKAGE__.": by_key: key='$key', val='$val'\n";
 		#print_stack_trace() if !$val;
-	
+
 		# No values exist for this value for this key
-		return wantarray ? () : undef if !$self->index->{$key};
-		return wantarray ? () : undef if !$self->index->{$key}->{$val};
-		
+		return () if !$self->index->{$key};
+		return () if !$self->index->{$key}->{$val};
+
 		# Grab the list of IDs that have this key/value
-		my @id_list = keys %{ $self->index->{$key}->{$val} };
+		return keys %{ $self->index->{$key}->{$val} };
+	}
+
+	sub _id_list_to_data
+	{
+		my $self = shift;
+		my @id_list = @_;
 		
 		# This might occur if a key/val *was* indexed in the past,
 		# but removed by del_row() - that would leave the key/val
 		# hash, just an empty list
 		return wantarray ? () : undef if !@id_list;
-		
+
 		# If used in a scalar context, dont bother looking up the whole list, just the first element.
 		# Note that $id_list[0] is safe in assuming that @id_list has at least one element because
 		# we just checked in the previous statement
 		return $self->by_id($id_list[0]) if !wantarray;
-		
+
 		# If we got here, we are in a list context and we have at least one id in @id_list
 		return map { $self->data->{$_} } @id_list;
 	}
+	
+	sub by_field { shift->by_key(@_) }
+	sub by_key
+	{
+		my $self = shift;
+
+# 		if(@_ == 2)
+# 		{
+# 			my ($key, $val) = @_;
+# 
+# 			# Get list of IDs that have the requested key/val pair
+# 			my @id_list = $self->_build_id_list($key, $val);
+# 
+# 			# Convert @id_list to actual stored data
+# 			return $self->_id_list_to_data(@id_list);
+# 		}
+
+		my %pairs = @_;
+		my %results;
+
+		my $first = 1;
+		foreach my $key (keys %pairs)
+		{
+			# Get list of IDs that have the requested key/val pair
+			my @list = $self->_build_id_list($key, $pairs{$key});
+			
+			if($first)
+			{
+				# F/or first key pair, the %results hash is empty,
+				# so fill it. Multiple key/value pairs
+				# are assumed to be boolean "AND" (e.g. age=>19, name=>Stan is assumed to mean
+				# all rows that have both 'age' == 19 && 'name' == 'Stan')
+				# Therefore, we just fill the list with the results of the 'age' query
+				# (assuminge 'age' was the first key) and then the next time thru, we
+				# delete all the results from the hash that aren't named Stan (for example)
+				%results = map { $_ => 1 } @list;
+				$first = 0;
+
+				#print "by_key: [first pair: $key/$pairs{$key}]: \@list: ".join('|',@list)."\n";
+			}
+			else
+			{
+				#print "by_key: [ 'n'  pair: $key/$pairs{$key}]: \@list: ".join('|',@list)."\n";
+				
+				my %id_map = map { $_ => 1 } @list;
+				foreach my $id (keys %results)
+				{
+					# Trim the IDs in %results since we are performing
+					# a boolean AND operation (e.g. a UNION of all the key/values in %pairs)
+					delete $results{$id} if !$id_map{$id};
+				}
+			}
+		}
+		
+		# %results just holds a list of IDs (the union of all the key/value pairs)
+		my @id_list = sort keys %results;
+
+		#print STDERR "\@id_list: ".Dumper(\@id_list);
+		#print STDERR "\%pairs: ".Dumper(\%pairs);
+		#print STDERR "\$self->shared_ref: ".Dumper($self->shared_ref);
+		
+		# Convert @id_list to actual stored data
+		return $self->_id_list_to_data(@id_list);
+	}
+
+
 };
 1;
