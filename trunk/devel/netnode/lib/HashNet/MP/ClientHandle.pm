@@ -32,24 +32,25 @@
 		}, $class;	
 	};
 
-	sub wait_for_start { shift->sw->wait_for_start(@_) }
-	sub wait_for_send  { shift->sw->wait_for_send(@_)  }
-	sub wait_for_receive{shift->sw->wait_for_receive(@_) }
-	sub stop           { shift->sw->stop }
+	sub sw			{ shift->{sw} }
+	sub peer		{ shift->{peer} }
 
-	sub uuid { shift->sw->node_info->{uuid} }
+	sub send_ping		{ shift->sw->send_ping(@_) }
+	
+	sub wait_for_start	{ shift->sw->wait_for_start(@_)   }
+	sub wait_for_send	{ shift->sw->wait_for_send(@_)    }
+	sub wait_for_receive	{ shift->sw->wait_for_receive(@_) }
+	sub stop		{ shift->sw->stop }
 
+	sub uuid 		{ shift->sw->node_info->{uuid} }
+	sub peer_uuid		{ shift->sw->state_handle->{remote_node_info}->{uuid} }
+	
 	sub DESTROY
 	{
 		my $self = shift;
 
 		$self->stop;
 	}
-
-	sub sw { shift->{sw} }
-	sub peer { shift->{peer} }
-
-	sub send_ping { shift->sw->send_ping(@_) }
 	
 	sub send
 	{
@@ -110,11 +111,6 @@
 		
 		$self->sw->outgoing_queue->add_row($env);
 		$self->sw->wait_for_send if $flush;
-	}
-
-	sub peer_uuid
-	{
-		shift->sw->state_handle->{remote_node_info}->{uuid};
 	}
 	
  	sub incoming_messages

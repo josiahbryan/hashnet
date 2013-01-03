@@ -8,10 +8,12 @@ use common::sense;
 	use Time::HiRes qw/time sleep/;
 
 	use Carp qw/carp croak/;
-	
+	use POSIX qw( WNOHANG );
+
 	use HashNet::MP::PeerList;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::MessageQueues;
+	use HashNet::MP::GlobalDB;
 	
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
@@ -105,6 +107,12 @@ use common::sense;
 		$self->state_handle->{started} = 0;
 		$self->state_update(0);
 
+		# Integrate with GlobalDB if requested
+		if($opts{use_globaldb})
+		{
+			$self->{globaldb} = HashNet::MP::GlobalDB->new(sw => $self);
+		}
+
 		# Allow the caller to call start() if desired
 		$self->start unless defined $old_auto_start && !$old_auto_start;
 		 
@@ -171,6 +179,10 @@ use common::sense;
 		$ref->update_begin;
 		delete $ref->data->{socketworker}->{$self->{state_uuid}};
 		$ref->update_end;
+
+		# Kill any receiver forks
+		my @fork_pids = @{ $self->{receiver_forks} || [] };
+		kill 15, $_ foreach @fork_pids;
 	}
 
 	sub bad_message_handler
@@ -220,19 +232,19 @@ use common::sense;
 
 		if(!$opts{from})
 		{
-			$opts{from} = $self->node_info->{uuid};
+			$opts{from} = $self->uuid;
 		}
 
 		if(!$opts{curhop})
 		{
-			$opts{curhop} = $self->node_info->{uuid};
+			$opts{curhop} = $self->uuid;
 		}
 
 		$opts{hist} = [] if !$opts{hist};
 
 		push @{$opts{hist}},
 		{
-			from => $opts{curhop} || $opts{from}, #$self->node_info->{uuid},
+			from => $opts{curhop} || $opts{from}, #$self->uuid,
 			to   => $opts{nxthop} || $opts{to},
 			time => $self->sntp_time(),
 		};
@@ -329,11 +341,11 @@ use common::sense;
 
 		if($msg_type eq MSG_PING)
 		{
-			if(check_env_hist($envelope, $self->node_info->{uuid}))
+			if(check_env_hist($envelope, $self->uuid))
 			{
 				info "SocketWorker: dispatch_msg: MSG_PING: Ignoring this ping, it's been here before\n";
 			}
-# 			elsif($envelope->{from} eq $self->node_info->{uuid})
+# 			elsif($envelope->{from} eq $self->uuid)
 # 			{
 # 				info "SocketWorker: dispatch_msg: MSG_PING: Not responding to self-ping\n";
 # 			}
@@ -349,7 +361,7 @@ use common::sense;
 					},
 					type	=> MSG_PONG,
 					nxthop	=> $self->peer_uuid,
-					curhop	=> $self->node_info->{uuid},
+					curhop	=> $self->uuid,
 					to	=> $envelope->{from},
 					bcast	=> 0,
 					sfwd	=> 1,
@@ -366,6 +378,13 @@ use common::sense;
 			}
 		}
 		# We let MSG_PINGs fall thru to be dropped in the incoming queue as well so they can be processed by the MessageHub
+
+# 		# Hook for custom message handlers to be called based on the type of message
+# 		my $msg_handlers = $self->state_handle->{msg_handlers};
+# 		if($msg_handlers->{$msg_type})
+# 		{
+# 			$msg_handlers->{$msg_type}->($envelope);
+# 		}
 		
 		if($msg_type eq MSG_ACK)
 		{
@@ -410,7 +429,7 @@ use common::sense;
 		}
 		else
 		{
-			if(check_env_hist($envelope, $self->node_info->{uuid}))
+			if(check_env_hist($envelope, $self->uuid))
 			{
 				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
 			}
@@ -459,7 +478,7 @@ use common::sense;
 		my $start_time = $self->sntp_time();
 		my $bcast = $uuid_to ? 0 : 1;
 
-		$self->wait_for_start if !$self->is_started;
+		$self->wait_for_start; # if !$self->is_started;
 
 		my @args =
 		(
@@ -469,7 +488,7 @@ use common::sense;
 			},
 			type	=> MSG_PING,
 			nxthop	=> $self->peer_uuid,
-			curhop	=> $self->node_info->{uuid},
+			curhop	=> $self->uuid,
 			to	=> $uuid_to || '*',
 			bcast	=> $bcast,
 			sfwd	=> 1,
@@ -483,7 +502,7 @@ use common::sense;
 		#$self->outgoing_queue->add_row($new_env);
 		#$self->wait_for_send();
 
-		my $uuid  = $self->node_info->{uuid};
+		my $uuid  = $self->uuid;
 		my $queue = incoming_queue();
 		if(!$bcast)
 		{
@@ -494,7 +513,7 @@ use common::sense;
 				my $flag = defined ( $queue->by_key(to => $uuid, type => 'MSG_PONG') );
 				if(!$self->state_handle->{online})
 				{
-					error "SocketWorker: wait_for_receive; SocketWorker dead or dieing, not waiting anymore\n";
+					error "SocketWorker: wait_for_receive; child thread gone away, not waiting anymore\n";
 					last;
 				}
 
@@ -505,7 +524,7 @@ use common::sense;
 		}
 		else
 		{
-			# Just wait for broadcast pings to come in
+			# Just wait for broadcast pings to come in to the child fork
 			sleep $max;
 		}
 
@@ -600,7 +619,7 @@ use common::sense;
 		my $count = shift || 1;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
-		my $uuid  = $self->node_info->{uuid};
+		my $uuid  = $self->uuid;
 		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
@@ -637,7 +656,9 @@ use common::sense;
 
 	
 	sub peer { shift->{peer} }
+
 	sub peer_uuid { shift->state_handle->{remote_node_info}->{uuid} }
+	sub uuid      { shift->node_info->{uuid} }
 	
 	# Returns a list of pending messages to send using send_message() in process_loop
 	use Data::Dumper;
@@ -657,6 +678,92 @@ use common::sense;
 		my $self = shift;
 		my $batch = shift;
 		$self->outgoing_queue->del_batch($batch);
+	}
+
+	# Won't work because we cant store coderefs via Storable
+# 	sub reg_msg_handler
+# 	{
+# 		my $self = shift;
+# 		my $msg_name = shift;
+# 		my $coderef = shift;
+# 
+# 		$self->state_update(1);
+# 		$self->state_handle->{msg_handlers}->{$msg_name} = $coderef;
+# 		$self->state_update(0);
+# 	}
+
+	sub fork_receiver
+	{
+		my $self = shift;
+		my $msg_name = shift;
+		my $code_ref = shift;
+		my $speed    = shift || 0.05;
+
+		my $kid = fork();
+		die "Fork failed" unless defined($kid);
+		if ($kid == 0)
+		{
+
+			$0 = "$0 [SocketWorker:$msg_name]";
+			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
+
+			$self->wait_for_start;
+
+			my $uuid  = $self->uuid;
+			my $queue = incoming_queue();
+
+			# Wait for a single pong back
+			my %seen_msg_flag;
+			while(1)
+			{
+				my @list = $queue->by_key(to => $uuid, type => $msg_name);
+
+# 				my $seen_batch = 0;
+# 				foreach my $msg (@list)
+# 				{
+# 					if($seen_msg_flag{$msg->{uuid}})
+# 					{
+# 						$seen_batch = 1;
+# 					}
+# 				}
+
+# 				next if $seen_batch;
+# 				%seen_msg_flag = map { $_->{uuid} => 1 } @list;
+				
+				if(@list)
+				{
+					#trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
+				
+					$code_ref->($_) foreach @list;
+
+					$queue->del_batch(\@list);
+				}
+				
+				
+				if(!$self->state_handle->{online})
+				{
+					error "SocketWorker: fork_receiver/$msg_name; socket thread gone away, not listening anymore\n";
+					last;
+				}
+				sleep $speed;
+			}
+
+			exit 0;
+		}
+
+		# Parent continues here.
+		while ((my $k = waitpid(-1, WNOHANG)) > 0)
+		{
+			# $k is kid pid, or -1 if no such, or 0 if some running none dead
+			my $stat = $?;
+			debug "Reaped $k stat $stat\n";
+		}
+
+		$self->{receiver_forks} ||= [];
+		push @{$self->{receiver_forks}}, $kid;
+
+
+		
 	}
 };
 
