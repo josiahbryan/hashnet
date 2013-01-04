@@ -47,14 +47,22 @@ package HashNet::MP::GlobalDB;
 		{
 			$sw->wait_for_start;
 			$self->{sw} = $sw;
-			$sw->fork_receiver(MSG_GLOBALDB_TR => sub
+		}
+
+		# rx_uuid can be given in args so GlobalDB can listen for incoming messages
+		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
+		my $uuid = $sw ? $sw->uuid : $args{rx_uuid};
+		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+		$sw_handle->fork_receiver(MSG_GLOBALDB_TR => sub
 			{
 				my $msg = shift;
 
 				trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
 				$self->_put_local_batch($msg->{data});
-			});
-		}
+				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+			},
+			uuid => $uuid,
+			no_del => $sw ? 0 : 1);
 
 		# Store the database version in case we need to check against future code feature changes
 		my $db_data_ver_file = $self->db_root . '/.db_ver';
@@ -236,7 +244,11 @@ package HashNet::MP::GlobalDB;
 			);
 			my $new_env = $self->sw->create_envelope(@args);
 			$self->sw->outgoing_queue->add_row($new_env);
+
+			trace "GlobalDB: _push_tr: new_env to nxthop {$new_env->{nxthop}}\n";
+			#trace "GlobalDB: _push_tr: new_env dump: ".Dumper($new_env,$self->sw->outgoing_queue);
 			$self->sw->wait_for_send(); # Make sure the data gets off this node
+			#trace "GlobalDB: _push_tr: final queue: ".Dumper($self->sw->outgoing_queue);
 		}
 	}
 

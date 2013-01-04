@@ -129,10 +129,14 @@ use common::sense;
 	sub next_id    { ++ shift->shared_ref->{cnt} }
 	sub keys       { @{ shift->shared_ref->{keys} || [] } }
 
+	sub lock_file   { shift->shared_ref->lock_file   }
+	sub unlock_file { shift->shared_ref->unlock_file }
+
 	sub pause_update_saves
 	{
 		my $self = shift;
 		#$self->update_begin;
+		$self->lock_file;
 		$self->{_updates_paused} = 1;
 		$self->{_update_end_count_while_locked} = 0;
 	}
@@ -142,6 +146,7 @@ use common::sense;
 		my $self = shift;
 		$self->{_updates_paused} = 0;
 		$self->update_end if $self->{_update_end_count_while_locked};
+		$self->unlock_file;
 	}
 
 	sub update_begin
@@ -212,6 +217,7 @@ use common::sense;
 		my @keys = $self->keys;
 		my %keys = map { $_=>1 } @keys;
 
+		my $updated = 0;
 		my $shared_data = $self->shared_ref;
 		foreach my $key (@_)
 		{
@@ -219,6 +225,8 @@ use common::sense;
 			if(!$keys{$key})
 			{
 				push @keys, $key;
+
+				$updated = 1;
 
 				# Use this combo of set {keys} and _reindex_single_key()
 				# because it will only rescan the db for that $key,
@@ -233,7 +241,7 @@ use common::sense;
 
 		$self->_rebuild_index if @_ > 2;
 
-		$self->update_end;
+		$self->update_end($updated);
 	}
 	
 	sub add_row
@@ -287,6 +295,12 @@ use common::sense;
 
 		$self->update_begin;
 		
+# 		if($row->{nxthop} eq '58b4bd86-463a-4383-899c-c7163f2609b7.main')
+# 		{
+# 			trace "LocalDB: del_row: Deleting row with nxthop '58b4bd86-463a-4383-899c-c7163f2609b7.main'\n";
+# 			print_stack_trace();
+# 		}
+
 		$self->_deindex_row($row);
 		
 		delete $self->data->{$id};
@@ -354,6 +368,12 @@ use common::sense;
 		{
 			my $id   = $row->{id};
 			next if !$id;
+
+# 			if($row->{nxthop} eq '58b4bd86-463a-4383-899c-c7163f2609b7.main')
+# 			{
+# 				trace "LocalDB: del_batch: Deleting row with nxthop '58b4bd86-463a-4383-899c-c7163f2609b7.main'\n";
+# 				print_stack_trace();
+# 			}
 			
 			# See comments on this loop below in _rebuild_index() for notes on how/why
 			foreach my $key (@keys)

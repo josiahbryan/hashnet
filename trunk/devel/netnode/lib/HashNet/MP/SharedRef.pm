@@ -316,7 +316,7 @@ use common::sense;
 		if(!_lock_file($self->file, 3)) # 2nd arg max sec to wait
 		{
 			#die "Can't lock ",$self->file;
-			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
+			#trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
 			return 0;
 		}
 
@@ -359,8 +359,8 @@ use common::sense;
 		#die "Can't open lockfile $file.lock: $!" if !$result;
 		if(!$result)
 		{
-			warn "PID $$: Can't open lockfile $file.lock: $!" if !$result;
-			print_stack_trace();
+			#warn "PID $$: Can't open lockfile $file.lock: $!" if !$result;
+			#print_stack_trace();
 		}
 		
 
