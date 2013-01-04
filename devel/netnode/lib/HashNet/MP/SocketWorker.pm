@@ -107,11 +107,11 @@ use common::sense;
 		$self->state_handle->{started} = 0;
 		$self->state_update(0);
 
-		# Integrate with GlobalDB if requested
-		if($opts{use_globaldb})
-		{
-			$self->{globaldb} = HashNet::MP::GlobalDB->new(sw => $self);
-		}
+# 		# Integrate with GlobalDB if requested
+# 		if($opts{use_globaldb})
+# 		{
+# 			$self->{globaldb} = HashNet::MP::GlobalDB->new(sw => $self);
+# 		}
 
 		# Allow the caller to call start() if desired
 		$self->start unless defined $old_auto_start && !$old_auto_start;
@@ -181,8 +181,10 @@ use common::sense;
 		$ref->update_end;
 
 		# Kill any receiver forks
-		my @fork_pids = @{ $self->{receiver_forks} || [] };
-		kill 15, $_ foreach @fork_pids;
+# 		my @fork_pids = @{ $self->{receiver_forks} || [] };
+# 		kill 15, $_ foreach @fork_pids;
+
+		#trace "SocketWorker: Shutting down\n";
 	}
 
 	sub bad_message_handler
@@ -319,7 +321,7 @@ use common::sense;
 	{
 		my $self = shift;
 		
-		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n\n\n\n\n\n"; #peer: $self->{peer}\n";
+		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n"; #\n\n\n\n\n"; #peer: $self->{peer}\n";
 		#print STDERR "\n\n\n\n\n";
 		$self->{peer}->set_online(0) if $self->{peer};
 
@@ -447,11 +449,13 @@ use common::sense;
 
 	sub bulk_read_start_hook
 	{
+		#trace "SocketWorker: bulk_read_start_hook()\n";
 		incoming_queue()->pause_update_saves;
 	}
 	
 	sub bulk_read_end_hook
 	{
+		#trace "SocketWorker: bulk_read_end_hook()\n";
 		incoming_queue()->resume_update_saves;
 	}
 
@@ -528,8 +532,11 @@ use common::sense;
 			sleep $max;
 		}
 
-		my @list = $queue->by_key(to => $uuid, type => 'MSG_PONG');
+		#my @list = $queue->by_key(to => $uuid, type => 'MSG_PONG');
+		my @list = $queue->by_key(type => 'MSG_PONG');
 		@list = sort { $a->{time} cmp $b->{time} } @list;
+
+		#trace "SocketWorker: Ping dump: ".Dumper(\@list);
 
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 
@@ -560,6 +567,7 @@ use common::sense;
 
 				my $out =
 				{
+					start_t   => $start_time,
 					msg       => $msg,
 					node_info => $msg->{data}->{node_info},
 					time      => $delta,
@@ -601,14 +609,16 @@ use common::sense;
 		my $uuid  = $self->peer_uuid;
 		my $queue = outgoing_queue();
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
-		#trace "SocketWorker: wait_for_send: Enter, res: $res\n";
+		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
+		#trace "SocketWorker: wait_for_send: Enter ($uuid), res: $res\n";
 		my $time  = time;
 		sleep $speed while time - $time < $max
 			       #and !$queue->has_external_changes # check is_changed first to prevent having to re-load data every time if nothing changed
 		               and defined $queue->by_field(nxthop => $uuid);
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		$res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
-		#trace "SocketWorker: wait_for_send: Exit, res: $res\n";
+		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
+		#trace "SocketWorker: wait_for_send: Exit ($uuid), res: $res\n";
 		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
 	}
@@ -640,7 +650,7 @@ use common::sense;
 				return $cnt;
 			}
 
-			trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
+			#trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
 			last if $cnt >= $count;
 			sleep $speed;
 		}
@@ -665,11 +675,12 @@ use common::sense;
 	sub pending_messages
 	{
 		my $self = shift;
-		return () if !$self->peer;
+		#return () if !$self->peer;
 
- 		my $uuid  = $self->peer->uuid;
+ 		my $uuid  = $self->peer_uuid; #$self->peer->uuid;
+		return () if !$uuid;
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
-		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);
+		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res) if @res;
 		return @res;
 	}
 
@@ -697,8 +708,29 @@ use common::sense;
 		my $self = shift;
 		my $msg_name = shift;
 		my $code_ref = shift;
-		my $speed    = shift || 0.05;
+		my %opts     = @_;
+		my $speed    = $opts{speed} || 0.05;
+		my $uuid     = $opts{uuid};
+		my $no_del   = $opts{no_del} || 0;
+		
+		if(!$uuid)
+		{
+			if(!ref $self)
+			{
+				warn "SocketWorker::fork_receiver() called without a blessed ref, unable to find self-uuid automatically, not forking receiver for '$msg_name'";
+				return;
+			}
 
+			$uuid = $self->uuid;
+		}
+
+		# wiat_for_start because if we dont, then state_handle->{online} could still
+		# be false when we get to that point in the fork if we havn't started yet,
+		# causing the fork to exit before the other thread even starts
+		$self->wait_for_start if ref $self;
+
+		my $parent_pid = $$;
+		
 		my $kid = fork();
 		die "Fork failed" unless defined($kid);
 		if ($kid == 0)
@@ -707,42 +739,80 @@ use common::sense;
 			$0 = "$0 [SocketWorker:$msg_name]";
 			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
 
-			$self->wait_for_start;
-
-			my $uuid  = $self->uuid;
 			my $queue = incoming_queue();
+			my $recipt_queue = ref $self ? outgoing_queue() : incoming_queue();
 
-			# Wait for a single pong back
 			my %seen_msg_flag;
 			while(1)
 			{
-				my @list = $queue->by_key(to => $uuid, type => $msg_name);
+				my @list = $queue->by_key(nxthop => $uuid, type => $msg_name);
+				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
-# 				my $seen_batch = 0;
-# 				foreach my $msg (@list)
-# 				{
-# 					if($seen_msg_flag{$msg->{uuid}})
-# 					{
-# 						$seen_batch = 1;
-# 					}
-# 				}
+				if($no_del)
+				{
+					my $seen_batch = 0;
+					foreach my $msg (@list)
+					{
+						$seen_batch = 1 if $seen_msg_flag{$msg->{uuid}};
+					}
 
-# 				next if $seen_batch;
-# 				%seen_msg_flag = map { $_->{uuid} => 1 } @list;
-				
+					next if $seen_batch;
+					%seen_msg_flag = map { $_->{uuid} => 1 } @list;
+				}
+
 				if(@list)
 				{
-					#trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
-				
-					$code_ref->($_) foreach @list;
+					trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
 
-					$queue->del_batch(\@list);
+					$recipt_queue->pause_update_saves;
+					foreach my $msg (@list)
+					{
+						$code_ref->($msg);
+
+						my @args =
+						(
+							{
+								msg_uuid    => $msg->{uuid},
+								msg_hist    => $msg->{hist},
+								client_uuid => $uuid,
+							},
+							type	=> 'MSG_CLIENT_RECEIPT',
+							nxthop	=> ref $self ? $self->peer_uuid : $uuid, # See note below on 'cheating'
+							curhop	=> $uuid,
+							from    => $uuid,
+							to	=> '*',
+							bcast	=> 1,
+							sfwd	=> 0,
+						);
+
+						# We're cheating the system a bit if we don't have a $self ref -
+						# we assume that if no ref $self, we are running on a hub,
+						# so we dump the receipt into the *incoming* queue instead
+						# of the outgoing queue, and set the nxthop to the *hub's* uuid
+						# instead of the uuid on the other end of the socket,
+						# so then the local hub picks up the receipt and routes it to
+						# all connected clients.
+
+						my $new_env = $self->create_envelope(@args);
+						$recipt_queue->add_row($new_env);
+					}
+
+					$recipt_queue->resume_update_saves;
+
+					#trace "SocketWorker: fork_receiver/$msg_name: Deleting batch: ".Dumper(\@list);
+
+					$queue->del_batch(\@list) unless $no_del;
+
+					$self->wait_for_send if ref $self;
+					#error "SocketWorker: fork_receiver/$msg_name: !ref \$self, not waiting for send\n" if !ref $self;
+
+					#print STDERR Dumper $recipt_queue;
 				}
-				
-				
-				if(!$self->state_handle->{online})
+
+				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
+				unless(kill 0, $parent_pid)
 				{
-					error "SocketWorker: fork_receiver/$msg_name; socket thread gone away, not listening anymore\n";
+					#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
 					last;
 				}
 				sleep $speed;
@@ -758,12 +828,14 @@ use common::sense;
 			my $stat = $?;
 			debug "Reaped $k stat $stat\n";
 		}
+# 
+# 		if(ref $self)
+# 		{
+# 			$self->{receiver_forks} ||= [];
+# 			push @{$self->{receiver_forks}}, $kid;
+# 		}
 
-		$self->{receiver_forks} ||= [];
-		push @{$self->{receiver_forks}}, $kid;
-
-
-		
+		return $kid;
 	}
 };
 

@@ -58,8 +58,8 @@
 		$self->read_config();
 		$self->connect_remote_hubs();
 
-		# TODO Integrate GlobalDB so it works with a MessageHub generically (e.g. watching the queues, instead of using a SocketWorker)
-		#$self->{globaldb} = HashNet::MP::GlobalDB->new(hub => $self);
+		# Start GlobalDB running and listening for incoming updates
+		$self->{globaldb} = HashNet::MP::GlobalDB->new(rx_uuid => $self->node_info->{uuid});
 		
 		$self->start_router() if $opts{auto_start};
 		$self->start_server() if $opts{auto_start};
@@ -189,7 +189,7 @@
 				trace "MessageHub: \@hubs: (@hubs)\n";
 
 				my %peers_by_host = map { $_->{host} => 1 } @list;
-				@hubs = grep { !$peers_by_host{$_} } @hubs;
+				@hubs = grep { $_ && !$peers_by_host{$_} } @hubs;
 				
 				my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
 				push @list, @peers;
@@ -198,7 +198,7 @@
 		
 		foreach my $peer (@list)
 		{
-			next if !$peer;
+			next if !$peer || !$peer->{host};
 			
 			trace "MessageHub: Connecting to remote hub '$peer->{host}'\n";
 			my $worker = $peer->open_connection($self->node_info);
@@ -250,7 +250,7 @@
 				HashNet::MP::SocketWorker->new(
 					sock		=> $self->{server}->{client},
 					node_info	=> $self->{node_info},
-					use_globaldb	=> 1,
+					#use_globaldb	=> 1,
 					no_fork		=> 1,
 					# no_fork means that the new() method never returns here
 				);
@@ -408,7 +408,9 @@
 				}
 				elsif($msg->{bcast})
 				{
-					@recip_list = @peers;
+					# If it's a broadcast message, we don't want to broadcast it back
+					# to the last hop - but only if that last hop is a hub
+					@recip_list = grep { $_->type eq 'hub' ? $_->uuid ne $last_hop_uuid : 1 } @peers;
 					# list all known hubs, clients, etc
 					#debug "MessageHub: bcast, peers: ".Dumper(\@peers);
 				}
@@ -434,9 +436,9 @@
 						#   we grep our routing map for the hub from which we got a reply and try sending it there
 						#	- That word 'try' implies we followup to make sure the msg was delivered......
 
-						# Message not to a peer directly connected (could be broadcast, or just to a client on another hub),
-						# so until we develop a routing table mechanism, we just broadcast to all connected peers
-						@recip_list = @peers;
+						# Message not to a peer directly connected (e.g. to a client on another hub),
+						# so until we develop a routing table mechanism, we just broadcast to all connected peers that are hubs
+						@recip_list = grep { $_->type eq 'hub' } @peers;
 
 						# If not store-forward, then we only want to send to peers currently online
 						# since we dont want to store this message for any peers that are not currently
@@ -449,8 +451,8 @@
 					@recip_list = grep { $_->{online} } @recip_list;
 				}
 
-				debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
-					if @recip_list;
+				debug "MessageHub: router_process_loop: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+					;#if @recip_list;
 					
 				#debug Dumper $msg, \@peers;
 

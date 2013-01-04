@@ -164,7 +164,12 @@
 					my $ret = $self->read_message();
 
 					# read_message() returns -1 if fatal
-					last PROCESS_LOOP if $ret < 0;
+					#last PROCESS_LOOP if $ret < 0;
+					if($ret < 0)
+					{
+						$self->bulk_read_end_hook();
+						last PROCESS_LOOP;
+					}
 
 					# DON'T do while(can_read) because can_read COULD lie!
 					# If can_read lied when used in while(), then you might
@@ -441,7 +446,7 @@
 		my $att  = shift;
 		my $json = "";
 		my $clean_ref = undef;
-		#trace "MessageSocketBase: send_message: '$hash->{data}'\n";
+		#trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n";
 		undef $@;
 		eval {
 			$clean_ref = clean_ref($hash);
