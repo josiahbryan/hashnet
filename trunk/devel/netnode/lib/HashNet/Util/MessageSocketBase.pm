@@ -15,6 +15,11 @@
 	my $UUID_GEN = UUID::Generator::PurePerl->new();
 
 	sub CRLF { "\015\012" }
+
+	sub DEBUG { 0 }
+
+	sub DEBUG_RX { 1 }  # not used (commented out below)
+
 	
 	sub new
 	{
@@ -85,8 +90,6 @@
 		}
 	}
 
-	sub DEBUG_RX { 1 }
-
 	use IO::Select;
 	
 	sub process_loop
@@ -123,7 +126,7 @@
 				my $msg_total = scalar @messages;
 				my $msg_counter = 0;
 
-				#trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total;
+				trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total && DEBUG;
 				my @sent;
 				my $limit = 256;  # an arbitrary max number of messages to send on one loop
 				my $max_msg = $msg_total > $limit ? $limit : $msg_total;
@@ -137,7 +140,7 @@
 					# a second if there are a lot of messages to write, we don't want to wait for it to return
 					if($sel->can_write(0.001 / ($limit * 100)))
 					{
-						#trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n";
+						trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n" if DEBUG;
 						$self->send_message($msg);
 
 						push @sent, $msg;
@@ -151,7 +154,7 @@
 				# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
 				sleep 0.75 if $msg_total && $msg_total != $msg_counter;
 
-				#trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total;
+				trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
 
 				# Subclasses can use this hook to block updates while doing bulk reads
 				$self->bulk_read_start_hook();
@@ -446,7 +449,7 @@
 		my $att  = shift;
 		my $json = "";
 		my $clean_ref = undef;
-		#trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n";
+		trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n"  if DEBUG;
 		undef $@;
 		eval {
 			$clean_ref = clean_ref($hash);

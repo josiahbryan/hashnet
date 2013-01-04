@@ -190,11 +190,26 @@
 
 				my %peers_by_host = map { $_->{host} => 1 } @list;
 				@hubs = grep { $_ && !$peers_by_host{$_} } @hubs;
+
+				#trace "MessageHub: \@hubs2: (@hubs)\n";
 				
-				my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
-				push @list, @peers;
+				#my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
+				foreach my $hub (@hubs)
+				{
+					# Provide a hashref to get_peer... so it automatically updates $peer if $host is not correct
+					my $peer = HashNet::MP::PeerList->get_peer_by_host({host => $hub});
+					push @list, $peer unless $peers_by_host{$hub};
+
+					%peers_by_host = map { $_->{host} => 1 } @list;
+				}
+
+				#trace "MessageHub: \@peers: ".Dumper(\@peers);
+				
+				#push @list, @peers;
 			}
 		#}
+
+		#trace "MessageHub: Final \@list: ".Dumper(\@list);
 		
 		foreach my $peer (@list)
 		{
@@ -357,6 +372,7 @@
 
 			my @list;
 
+			$self->incoming_queue->lock_file;
 			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
 			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
@@ -452,7 +468,7 @@
 				}
 
 				debug "MessageHub: router_process_loop: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
-					;#if @recip_list;
+					if @recip_list;
 					
 				#debug Dumper $msg, \@peers;
 
@@ -462,7 +478,7 @@
 					(
 						$msg->{data},
 						uuid	=> $msg->{uuid},
-						hist	=> $msg->{hist},
+						hist	=> clean_ref($msg->{hist}),
 
 						curhop	=> $self_uuid,
 						nxthop	=> $peer->uuid,
@@ -490,6 +506,7 @@
 			}
 
 			$self->incoming_queue->del_batch(\@list);
+			$self->incoming_queue->unlock_file;
 			$self->outgoing_queue->resume_update_saves;
 
 			sleep 0.25;

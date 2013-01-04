@@ -41,7 +41,7 @@ package HashNet::MP::GlobalDB;
 		my $sw = $args{sw};
 		if(!$sw)
 		{
-			warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data";
+			#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data";
 		}
 		else
 		{

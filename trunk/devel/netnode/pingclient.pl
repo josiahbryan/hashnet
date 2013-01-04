@@ -14,6 +14,9 @@ use IO::Socket;
 
 #$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
+# Mute logging output
+$HashNet::Util::Logging::LEVEL = 0;
+
 my @hosts = @ARGV;
 
 @hosts = ('localhost:8031') if !@hosts;
@@ -51,9 +54,14 @@ if(!$ch)
 }
 
 
-my @results = $ch->send_ping();
+print "Pinging HashNet network via $ENV{REMOTE_ADDR} (takes approx 10 sec)\n";
+
+my @results = $ch->send_ping(undef, 10.);
 
 my %nodes = map { $_->{node_info}->{uuid} => $_->{node_info} } @results;
+
+# Add our own node_info to hash
+$nodes{$node_info->{uuid}} = $node_info;
 
 print "\n\n";
 foreach my $res (@results)
@@ -63,26 +71,42 @@ foreach my $res (@results)
 	my $msg   = $res->{msg};
 	my @hist  = @{ $msg->{data}->{msg_hist} || [] };
 
+	# Old/stale PONG message that was queued somewhere else and just now reached us on this run
+	next if $delta < 0;
+
 	#print "$res->{node_info}->{name} - ".sprintf('%.03f', $delta)." sec\n";
 	print sprintf('%.03f', $delta)." sec - $res->{node_info}->{name}\n";
 
-	print "\t $0 -> ";
+	#print "\t $0 -> ";
+
+	my %ident;
+	my $ident = 0;
 
 	$hist[$#hist]->{last} = 1 if @hist;
-	my $last_from = undef;
+	my $last_to = undef;
+	my $last_time = $start;
 	foreach my $item (@hist)
 	{
-		#next if $item->{from} eq $last_from;
+		#next if defined $last_to && !$item->{last} && $item->{from} ne $last_to;
 		
 		my $time  = $item->{time};
 		my $uuid  = $item->{to};
-		my $delta = $time - $start;
+		my $uuid2 = $item->{from};
+		my $delta = $time - $last_time;
 		my $info  = $nodes{$uuid};
-		next if !$info;
+
+		#next if !$info;
+		my $key = $uuid2; #.$uuid;
+		my $ident = $ident{$key} || ++ $ident;
+		$ident{$key} = $ident;
+		my $prefix = "\t" x $ident;
 		
-		print "$info->{name} (".sprintf('%.03f', $delta)."s)";
-		print " -> " unless $item->{last};
-		#$last_from = $item->{from};
+		#print "$prefix -> " . ($info ? $info->{name} : ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> $uuid")." (".sprintf('%.03f', $delta)."s)\n";
+		print "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
+		#print " -> " unless $item->{last};
+
+		$last_to = $uuid;
+		$last_time = $time;
 	}
 
 	print "\n";
@@ -91,3 +115,4 @@ foreach my $res (@results)
 
 
 HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);
+
