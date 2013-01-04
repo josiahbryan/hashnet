@@ -50,14 +50,14 @@ if(!$ch)
 	die "Couldn't connect to any hosts (@hosts)";
 }
 
-$ch->sw->fork_receiver('MSG_USER' => sub {
-
-	my $msg = shift;
-	use Data::Dumper;
-	
-	trace "$0: Custom Message Handler: Received msg: ".Dumper($msg);
-
-});
+# $ch->sw->fork_receiver('MSG_USER' => sub {
+# 
+# 	my $msg = shift;
+# 	use Data::Dumper;
+# 	
+# 	trace "$0: Custom Message Handler: Received msg: ".Dumper($msg);
+# 
+# });
 
 #$ch->send_ping();
 #die "Test done";
@@ -66,8 +66,8 @@ $ch->sw->fork_receiver('MSG_USER' => sub {
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $msg_size = 8; #1024 * 16;
-my $max_msgs = 1; # * 8; #64 * 16; #64 * 16;
+my $msg_size = 1024 * 16;
+my $max_msgs = 64 * 16; #64 * 16;
 
 $ch->outgoing_queue->pause_update_saves;
 

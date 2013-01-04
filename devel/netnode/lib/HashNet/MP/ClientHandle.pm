@@ -29,6 +29,7 @@
 		return bless {
 			sw   => $worker,
 			peer => $peer,
+			send_receipts => 1,
 		}, $class;	
 	};
 
@@ -125,35 +126,38 @@
 		# connected - so we dont want the client to work with those messages
 		my @msgs = pending_messages(incoming, to => $self->uuid, no_del => 1);
 
-		my $sw = $self->sw;
-
-		foreach my $msg (@msgs)
+		if($self->{send_receipts})
 		{
-			my @args =
-			(
-				{
-					msg_uuid    => $msg->{uuid},
-					msg_hist    => $msg->{hist},
-					client_uuid => $self->uuid,
-				},
-				type	=> MSG_CLIENT_RECEIPT,
-				nxthop	=> $self->peer_uuid,
-				curhop	=> $self->uuid,
-				to	=> '*',
-				bcast	=> 1,
-				sfwd	=> 0,
-			);
-			my $new_env = $sw->create_envelope(@args);
-			#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
-			$self->enqueue($new_env);
+			my $sw = $self->sw;
+
+			foreach my $msg (@msgs)
+			{
+				my @args =
+				(
+					{
+						msg_uuid    => $msg->{uuid},
+						msg_hist    => $msg->{hist},
+						client_uuid => $self->uuid,
+					},
+					type	=> MSG_CLIENT_RECEIPT,
+					nxthop	=> $self->peer_uuid,
+					curhop	=> $self->uuid,
+					to	=> '*',
+					bcast	=> 1,
+					sfwd	=> 0,
+				);
+				my $new_env = $sw->create_envelope(@args);
+				#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+				$self->enqueue($new_env);
+			}
+
+			$self->outgoing_queue->resume_update_saves;
+
+			# Wait for all the MSG_CLIENT_RECEIPTs to transmit before deleting the messages
+			# from the incoming queue and returning to caller so that we can be assured
+			# that receipts are sent
+			$self->sw->wait_for_send if @msgs;
 		}
-
-		$self->outgoing_queue->resume_update_saves;
-
-		# Wait for all the MSG_CLIENT_RECEIPTs to transmit before deleting the messages
-		# from the incoming queue and returning to caller so that we can be assured
-		# that receipts are sent
-		$self->sw->wait_for_send if @msgs;
 
 		$self->incoming_queue->del_batch(\@msgs);
 

@@ -449,13 +449,16 @@ use common::sense;
 
 	sub bulk_read_start_hook
 	{
-		#trace "SocketWorker: bulk_read_start_hook()\n";
+		my $self = shift;
+		#trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		incoming_queue()->pause_update_saves;
 	}
 	
 	sub bulk_read_end_hook
 	{
-		#trace "SocketWorker: bulk_read_end_hook()\n";
+		my $self = shift;
+		#trace "SocketWorker: bulk_read_end_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
+		#trace "SocketWorker: bulk_read_end_hook(): ".Dumper(incoming_queue());
 		incoming_queue()->resume_update_saves;
 	}
 

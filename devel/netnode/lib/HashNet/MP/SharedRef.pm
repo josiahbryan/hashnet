@@ -203,7 +203,8 @@ use common::sense;
 		my $file = $self->file;
 
 		my $data = {};
-#		debug "SharedRef: Loading data file '$file' in pid $$\n";
+		#debug "SharedRef: Loading data file '$file' in pid $$\n";
+		#debug "SharedRef: ", $self->file, ": load_data\n";
 		
 		if(-f $file && (stat($file))[7] > 0)
 		{
@@ -280,7 +281,8 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 
-		trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if DEBUG;
+		#trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n";# if DEBUG;
+		#trace "SharedRef: ", $self->file, ": save_data():  data: ".Dumper($self);
 		#print_stack_trace();
 
 		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file: node_info: ".Dumper($state->{node_info});
