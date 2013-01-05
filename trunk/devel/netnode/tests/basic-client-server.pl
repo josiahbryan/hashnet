@@ -18,6 +18,11 @@ my $test_srv_cfg = 'test-basic-server.conf';
 my $db_client_file = 'db.test-basic-client';
 my $db_server_file = 'db.test-basic-server';
 
+unlink($test_srv_cfg);
+HashNet::MP::LocalDB->dump_db($db_client_file);
+HashNet::MP::LocalDB->dump_db($db_server_file);
+
+
 # Mute logging output
 $HashNet::Util::Logging::LEVEL = 0;
 

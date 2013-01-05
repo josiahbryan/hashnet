@@ -309,16 +309,17 @@ use common::sense;
 	sub lock_file
 	{
 		my $self = shift;
+		my $time = shift || 30;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
 		trace "SharedRef: ", $self->file, ": lock_file() +\n" if DEBUG;
 		#print_stack_trace();
 
 		return 2 if $self->_d->{locked};
 
-		if(!_lock_file($self->file, 3)) # 2nd arg max sec to wait
+		if(!_lock_file($self->file, $time)) # 2nd arg max sec to wait
 		{
 			#die "Can't lock ",$self->file;
-			#trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
+			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
 			return 0;
 		}
 
@@ -362,6 +363,7 @@ use common::sense;
 		if(!$result)
 		{
 			#warn "PID $$: Can't open lockfile $file.lock: $!" if !$result;
+			#trace "Can't open lockfile $file.lock: $!";
 			#print_stack_trace();
 		}
 		
