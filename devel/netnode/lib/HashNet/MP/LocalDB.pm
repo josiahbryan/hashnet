@@ -129,8 +129,10 @@ use common::sense;
 	sub next_id    { ++ shift->shared_ref->{cnt} }
 	sub keys       { @{ shift->shared_ref->{keys} || [] } }
 
-	sub lock_file   { shift->shared_ref->lock_file   }
-	sub unlock_file { shift->shared_ref->unlock_file }
+	sub lock_file   { shift->shared_ref->lock_file(@_) }
+	sub unlock_file { shift->shared_ref->unlock_file   }
+	sub lock   { shift->lock_file(@_) }
+	sub unlock { shift->unlock_file(@_) }
 
 	sub pause_update_saves
 	{

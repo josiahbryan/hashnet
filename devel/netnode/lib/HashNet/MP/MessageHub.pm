@@ -372,8 +372,9 @@
 
 			my @list;
 
-			$self->incoming_queue->lock_file;
-			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
+			#$self->incoming_queue->lock_file;
+			#exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
+			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid ) } );
 			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 
@@ -505,8 +506,8 @@
 				}
 			}
 
-			$self->incoming_queue->del_batch(\@list);
-			$self->incoming_queue->unlock_file;
+			#$self->incoming_queue->del_batch(\@list);
+			#$self->incoming_queue->unlock_file;
 			$self->outgoing_queue->resume_update_saves;
 
 			sleep 0.25;
