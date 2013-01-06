@@ -24,7 +24,8 @@ HashNet::MP::LocalDB->dump_db($db_server_file);
 
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
 my $pid = fork;
 if(!$pid)
@@ -50,16 +51,29 @@ else
 	};
 
 	my $ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info);
+
+	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
+	$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
 	$ch->wait_for_start;
 
-
-	#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
+	trace "$0: Lock outgoing queue\n";
+	#$ch->sw->outgoing_queue->lock_file;
+	$ch->sw->outgoing_queue->pause_update_saves;
+	
 	my $orig_data = "Hello to PID $$";
 	if(!$ch->send($orig_data, bcast => 1, flush => 0))
 	{
 		die "Unable to send message";
 	}
+
+	#my $len = 20;
+	#trace "$0: Sleeping $len sec just to test\n";
+	#sleep $len;
+	
+	#$ch->sw->outgoing_queue->unlock_file;
+	trace "$0: Unlock outgoing queue\n";
+	$ch->sw->outgoing_queue->resume_update_saves;
 	
 	$ch->wait_for_send;
 	$ch->wait_for_receive;
@@ -106,6 +120,8 @@ else
 # 	
 # 	$ch->stop();
 }
+
+#sleep 60;
 
 kill 15, $pid;
 unlink($test_srv_cfg);

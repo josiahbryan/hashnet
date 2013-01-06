@@ -65,8 +65,15 @@ use common::sense;
 		$queue_name = 'incoming' if $queue_name eq 'in'  || $queue_name eq 'rx';
 
 		my $queue = msg_queue($queue_name);
+		$queue->lock_file;
+		
 		my @list  = $queue->by_key($idx_key => $uuid);
-		return () if !@list;
+		#return () if !@list;
+		if(!@list)
+		{
+			$queue->unlock_file;
+			return ();
+		}
 		
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
@@ -77,6 +84,8 @@ use common::sense;
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 
 		$queue->del_batch(\@list) unless $no_del;
+
+		$queue->unlock_file;
 		#print STDERR Dumper(\@return_list) if @return_list;
 		return @return_list;
 	}

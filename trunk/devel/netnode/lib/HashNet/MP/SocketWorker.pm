@@ -424,7 +424,7 @@ use common::sense;
 			
 			$peer->set_online(1);
 
-			$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
+			#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 
 			$self->state_update(1);
 			$self->state_handle->{online} = 1;
@@ -454,14 +454,15 @@ use common::sense;
 	sub bulk_read_start_hook
 	{
 		my $self = shift;
-		#trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
+		trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		incoming_queue()->pause_update_saves;
+		#trace "SocketWorker: bulk_read_start_hook() [done]\n"
 	}
 	
 	sub bulk_read_end_hook
 	{
 		my $self = shift;
-		#trace "SocketWorker: bulk_read_end_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
+		trace "SocketWorker: bulk_read_end_hook() - queue size: ".incoming_queue()->size()."\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		#trace "SocketWorker: bulk_read_end_hook(): ".Dumper(incoming_queue());
 		incoming_queue()->resume_update_saves;
 	}

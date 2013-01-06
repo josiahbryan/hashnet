@@ -51,8 +51,8 @@ package HashNet::Util::Logging;
 
 	# Used for changing line color by PID if $ANSI_ENABLED
 	my %PidColorLut;
-	my @PidColorList = (ON_RED.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_BLUE.WHITE, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK,
-	                    RED.ON_WHITE, GREEN.ON_BLACK, YELLOW.ON_BLACK, BLUE.ON_WHITE, MAGENTA.ON_BLACK, CYAN.ON_BLACK, WHITE.ON_BLACK);
+	my @PidColorList = (ON_RED.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK,
+	                    RED.ON_WHITE, GREEN.ON_BLACK, YELLOW.ON_BLACK, MAGENTA.ON_BLACK, CYAN.ON_BLACK, WHITE.ON_BLACK);
 	my $NextPidColor = 0;
 	my $SharedRef;
 	
@@ -149,6 +149,7 @@ package HashNet::Util::Logging;
 			{
 				#print STDERR "\t$x: Called from $filename:$line".($subroutine?" in $subroutine":"")."\n";
 				$str .= "\t$x: Called from $filename:$line".($subroutine?" in $subroutine":"")."\n";
+				return $str if $filename =~ /Server.pm/;
 			}
 			else
 			{

@@ -15,6 +15,7 @@ my $time = time();
 
 # Mute logging output
 $HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
 my $ref_tied    = HashNet::MP::SharedRef->new($datafile, 1);
 test_ref($ref_tied, 'Tied');
@@ -36,6 +37,7 @@ sub test_ref
 	my $pid = fork;
 	if(!$pid)
 	{
+		trace "$0: Write fork\n";
 		$ref->{time} = $time;
 		$ref->save_data if !$tied;
 
@@ -50,6 +52,7 @@ sub test_ref
 	else
 	{
 		sleep 0.25;
+		trace "$0: Read fork\n";
 		$ref->load_changes if !$tied;
 		is($ref->{time}, $time, $type.' load from other fork');
 	}
@@ -63,7 +66,8 @@ sub test_ref
 
 ok($ref_normal->lock_file, "Lock file");
 is($ref_normal->lock_file, 2, "Lock file again");
-ok($ref_normal->unlock_file, "Unlock file");
+is($ref_normal->unlock_file, 2, "Unlock file");
+is($ref_normal->unlock_file, 1, "Unlock file (really)");
 is($ref_normal->lock_file, 1, "Lock file after unlock");
 ok($ref_normal->unlock_file, "Unlock file again");
 
