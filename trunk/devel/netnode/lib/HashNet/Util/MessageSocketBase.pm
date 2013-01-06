@@ -122,39 +122,7 @@
 			PROCESS_LOOP:
 			while(1)
 			{
-				my @messages = $self->pending_messages();
-				my $msg_total = scalar @messages;
-				my $msg_counter = 0;
-
-				trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total && DEBUG;
-				my @sent;
-				my $limit = 256;  # an arbitrary max number of messages to send on one loop
-				my $max_msg = $msg_total > $limit ? $limit : $msg_total;
-				@messages = @messages[0..$max_msg] if $msg_total != $max_msg;
-				foreach my $msg (@messages)
-				{
-					#trace "MessageSocketBase: wait for can_write\n";
-
-					# Set a very low timeout to can_write() because we use this to detect when the socket buffer is full
-					# (eg waiting on the other side to process) - since we may hit can_write() several thousand times
-					# a second if there are a lot of messages to write, we don't want to wait for it to return
-					if($sel->can_write(0.001 / ($limit * 100)))
-					{
-						trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n" if DEBUG;
-						$self->send_message($msg);
-
-						push @sent, $msg;
-						$msg_counter ++;
-						#trace "MessageSocketBase: call to send_message done\n";
-						#trace "MessageSocketBase: timedout sending msg $msg_counter, skipping the rest of the messages till we read some data\n";
-					}
-				}
-				$self->messages_sent(\@sent);
-
-				# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
-				sleep 0.75 if $msg_total && $msg_total != $msg_counter;
-
-				trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
+				$self->send_pending_messages();
 
 				# Subclasses can use this hook to block updates while doing bulk reads
 				$self->bulk_read_start_hook();
@@ -213,6 +181,43 @@
 		
 		$self->disconnect_handler();
 		die "Quitting process due to error above" if $die_please;
+	}
+
+	sub send_pending_messages
+	{
+		my @messages = $self->pending_messages();
+		my $msg_total = scalar @messages;
+		my $msg_counter = 0;
+
+		trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total && DEBUG;
+		my @sent;
+		my $limit = 256;  # an arbitrary max number of messages to send on one loop
+		my $max_msg = $msg_total > $limit ? $limit : $msg_total;
+		@messages = @messages[0..$max_msg] if $msg_total != $max_msg;
+		foreach my $msg (@messages)
+		{
+			#trace "MessageSocketBase: wait for can_write\n";
+
+			# Set a very low timeout to can_write() because we use this to detect when the socket buffer is full
+			# (eg waiting on the other side to process) - since we may hit can_write() several thousand times
+			# a second if there are a lot of messages to write, we don't want to wait for it to return
+			if($sel->can_write(0.001 / ($limit * 100)))
+			{
+				trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n" if DEBUG;
+				$self->send_message($msg);
+
+				push @sent, $msg;
+				$msg_counter ++;
+				#trace "MessageSocketBase: call to send_message done\n";
+				#trace "MessageSocketBase: timedout sending msg $msg_counter, skipping the rest of the messages till we read some data\n";
+			}
+		}
+		$self->messages_sent(\@sent);
+
+		# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
+		sleep 0.75 if $msg_total && $msg_total != $msg_counter;
+
+		trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
 	}
 
 	sub read_message
