@@ -114,6 +114,7 @@ use common::sense;
 # 		}
 
 		# Allow the caller to call start() if desired
+		$self->start_tx_loop();
 		$self->start unless defined $old_auto_start && !$old_auto_start;
 		 
 		return $self;
