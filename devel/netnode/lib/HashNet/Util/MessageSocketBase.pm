@@ -29,11 +29,53 @@
 		$opts{auto_start} = 1 if !defined $opts{auto_start};
 		
 		my $self = bless \%opts, $class;
-		
+
+		$self->start_tx_loop();
 		$self->start if $self->{auto_start};
 		
 		
 		return $self;
+	}
+
+	sub start_tx_loop
+	{
+		my $self = shift;
+
+		$self->{tx_loop_parent_pid} = $$;
+		
+		# Fork processing thread
+		my $kid = fork();
+		die "Fork failed" unless defined($kid);
+		if ($kid == 0)
+		{
+
+			# This sequence of functions to get the IP/port/hostname
+			# taken from http://perldoc.perl.org/functions/getpeername.html
+			use Socket;
+			my $sock           = $self->{sock};
+			my $hersockaddr    = getpeername($sock);
+			my ($port, $iaddr) = sockaddr_in($hersockaddr);
+			my $herhostname    = gethostbyaddr($iaddr, AF_INET);
+			my $herstraddr     = inet_ntoa($iaddr);
+
+			$0 = "$0 [TX]";
+			trace "MessageSocketBase: Connected to $herstraddr ($herhostname) in PID $$ as '$0'\n";
+
+			#info "MessageSocketBase: Child $$ running\n";
+			$self->tx_loop();
+			#info "MessageSocketBase: Child $$ complete, exiting\n";
+			exit 0;
+		}
+
+		# Parent continues here.
+		while ((my $k = waitpid(-1, WNOHANG)) > 0)
+		{
+			# $k is kid pid, or -1 if no such, or 0 if some running none dead
+			my $stat = $?;
+			debug "Reaped $k stat $stat\n";
+		}
+
+		$self->{tx_pid} = $kid;
 	}
 	
 	sub start
@@ -88,9 +130,44 @@
 		{
 			kill 15, $self->{child_pid};
 		}
+
+		if($self->{tx_pid})
+		{
+			kill 15, $self->{tx_pid};
+		}
 	}
 
 	use IO::Select;
+	sub tx_loop
+	{
+		my $self = shift;
+		
+		my $sock = $self->{sock};
+
+		# IO::Socket has autoflush turned on by default
+		$sock->autoflush(1);
+		#$sock->blocking(0);
+
+		my $sel = IO::Select->new();
+		$sel->add($sock);
+		$self->{socket_select} = $sel;
+
+		my $parent_pid = $self->{tx_loop_parent_pid};
+
+		trace "MessageSocketBase: Starting tx_loop\n";
+		while(1)
+		{
+			#trace "MessageSocketBase: tx_loop: mark1\n";
+			$self->send_pending_messages();
+
+			unless(kill 0, $parent_pid)
+			{
+				#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
+				last;
+			}
+			sleep 0.1;
+		}
+	}
 	
 	sub process_loop
 	{
@@ -109,10 +186,10 @@
 		$sock->autoflush(1);
 		#$sock->blocking(0);
 
+		#my $counter = 0;
 		my $sel = IO::Select->new();
 		$sel->add($sock);
 		
-		#my $counter = 0;
 
 		Restart_Process_Loop:
 
@@ -122,8 +199,6 @@
 			PROCESS_LOOP:
 			while(1)
 			{
-				$self->send_pending_messages();
-
 				# Subclasses can use this hook to block updates while doing bulk reads
 				$self->bulk_read_start_hook();
 
@@ -153,6 +228,12 @@
 				#trace "MessageSocketBase: Exit bulk read loop\n";
 
 				$self->bulk_read_end_hook();
+
+				# Restart tx loop if it dies
+				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
+				{
+					$self->start_tx_loop();
+				}
 			}
 		
 			
@@ -185,7 +266,11 @@
 
 	sub send_pending_messages
 	{
+		my $self = shift;
+		my $sel = $self->{socket_select};
+		
 		my @messages = $self->pending_messages();
+		#trace "MessageSocketBase: \@messages: @messages\n";
 		my $msg_total = scalar @messages;
 		my $msg_counter = 0;
 
@@ -215,7 +300,7 @@
 		$self->messages_sent(\@sent);
 
 		# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
-		sleep 0.75 if $msg_total && $msg_total != $msg_counter;
+		#sleep 0.75 if $msg_total && $msg_total != $msg_counter;
 
 		trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
 	}

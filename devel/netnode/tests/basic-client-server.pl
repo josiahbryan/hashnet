@@ -24,7 +24,7 @@ HashNet::MP::LocalDB->dump_db($db_server_file);
 
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::LEVEL = 0;
 
 my $pid = fork;
 if(!$pid)
@@ -78,31 +78,31 @@ else
 
 #######
 
-	my $att = "PID $$";
-	if(!$ch->send($orig_data, _att => $att, bcast => 1, flush => 0))
-	{
-		die "Unable to send message";
-	}
-
-	$ch->wait_for_send;
-	$ch->wait_for_receive;
-
-	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
-
-	if(@msgs)
-	{
-		#info "$0: Received msg '$_->{data}'\n" foreach @msgs;
-		my $msg = shift @msgs;
-		is($msg->{data}, $orig_data, "Orig data with attachment");
-		is($msg->{_att}, $att, "Attachment transmitted");
-	}
-	else
-	{
-		#debug "$0: Did not receive any message\n";
-		ok(0, "Did not receive any messages");
-	}
-	
-	$ch->stop();
+# 	my $att = "PID $$";
+# 	if(!$ch->send($orig_data, _att => $att, bcast => 1, flush => 0))
+# 	{
+# 		die "Unable to send message";
+# 	}
+# 
+# 	$ch->wait_for_send;
+# 	$ch->wait_for_receive;
+# 
+# 	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
+# 
+# 	if(@msgs)
+# 	{
+# 		#info "$0: Received msg '$_->{data}'\n" foreach @msgs;
+# 		my $msg = shift @msgs;
+# 		is($msg->{data}, $orig_data, "Orig data with attachment");
+# 		is($msg->{_att}, $att, "Attachment transmitted");
+# 	}
+# 	else
+# 	{
+# 		#debug "$0: Did not receive any message\n";
+# 		ok(0, "Did not receive any messages");
+# 	}
+# 	
+# 	$ch->stop();
 }
 
 kill 15, $pid;
