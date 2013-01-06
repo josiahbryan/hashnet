@@ -428,6 +428,9 @@ use common::sense;
 			$self->state_update(1);
 			$self->state_handle->{online} = 1;
 			$self->state_update(0);
+
+			#trace "SocketWorker: state_handle: ".Dumper($self);
+
 		}
 		else
 		{
@@ -681,9 +684,11 @@ use common::sense;
 		#return () if !$self->peer;
 
  		my $uuid  = $self->peer_uuid; #$self->peer->uuid;
+		#trace "SocketWorker: pending_messages: uuid '$uuid'\n";
+		#trace Dumper $self->state_handle;
 		return () if !$uuid;
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
-		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res) if @res;
+		trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
 		return @res;
 	}
 
