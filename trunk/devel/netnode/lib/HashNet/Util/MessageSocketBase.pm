@@ -59,7 +59,7 @@
 			my $herstraddr     = inet_ntoa($iaddr);
 
 			$0 = "$0 [TX]";
-			trace "MessageSocketBase: Connected to $herstraddr ($herhostname) in PID $$ as '$0'\n";
+			trace "MessageSocketBase: Connected to $herstraddr ($herhostname) in PID $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
 
 			#info "MessageSocketBase: Child $$ running\n";
 			$self->tx_loop();
@@ -154,7 +154,7 @@
 
 		my $parent_pid = $self->{tx_loop_parent_pid};
 
-		trace "MessageSocketBase: Starting tx_loop\n";
+		#trace "MessageSocketBase: Starting tx_loop\n";
 		while(1)
 		{
 			#trace "MessageSocketBase: tx_loop: mark1\n";
@@ -269,40 +269,49 @@
 		my $self = shift;
 		my $sel = $self->{socket_select};
 		
-		my @messages = $self->pending_messages();
-		#trace "MessageSocketBase: \@messages: @messages\n";
-		my $msg_total = scalar @messages;
-		my $msg_counter = 0;
-
-		trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total && DEBUG;
-		my @sent;
-		my $limit = 256;  # an arbitrary max number of messages to send on one loop
-		my $max_msg = $msg_total > $limit ? $limit : $msg_total;
-		@messages = @messages[0..$max_msg] if $msg_total != $max_msg;
-		foreach my $msg (@messages)
+		if($self->outgoing_queue->lock_file)
 		{
-			#trace "MessageSocketBase: wait for can_write\n";
-
-			# Set a very low timeout to can_write() because we use this to detect when the socket buffer is full
-			# (eg waiting on the other side to process) - since we may hit can_write() several thousand times
-			# a second if there are a lot of messages to write, we don't want to wait for it to return
-			if($sel->can_write(0.001 / ($limit * 100)))
+			my @messages = $self->pending_messages();
+			#trace "MessageSocketBase: \@messages: @messages\n";
+			my $msg_total = scalar @messages;
+			my $msg_counter = 0;
+	
+			trace "MessageSocketBase: Found $msg_total messages to send...\n" if $msg_total && DEBUG;
+			my @sent;
+			my $limit = 256;  # an arbitrary max number of messages to send on one loop
+			my $max_msg = $msg_total > $limit ? $limit : $msg_total;
+			@messages = @messages[0..$max_msg] if $msg_total != $max_msg;
+			foreach my $msg (@messages)
 			{
-				trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n" if DEBUG;
-				$self->send_message($msg);
-
-				push @sent, $msg;
-				$msg_counter ++;
-				#trace "MessageSocketBase: call to send_message done\n";
-				#trace "MessageSocketBase: timedout sending msg $msg_counter, skipping the rest of the messages till we read some data\n";
+				#trace "MessageSocketBase: wait for can_write\n";
+	
+				# Set a very low timeout to can_write() because we use this to detect when the socket buffer is full
+				# (eg waiting on the other side to process) - since we may hit can_write() several thousand times
+				# a second if there are a lot of messages to write, we don't want to wait for it to return
+				if($sel->can_write(0.001 / ($limit * 100)))
+				{
+					trace "MessageSocketBase: Sending msg $msg_counter/$max_msg ($msg_total actual): '$msg->{data}'\n" if DEBUG;
+					$self->send_message($msg);
+	
+					push @sent, $msg;
+					$msg_counter ++;
+					#trace "MessageSocketBase: call to send_message done\n";
+					#trace "MessageSocketBase: timedout sending msg $msg_counter, skipping the rest of the messages till we read some data\n";
+				}
 			}
+			$self->messages_sent(\@sent);
+	
+			# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
+			#sleep 0.75 if $msg_total && $msg_total != $msg_counter;
+	
+			trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
+			
+			$self->outgoing_queue->unlock_file;
 		}
-		$self->messages_sent(\@sent);
-
-		# If the buffer is full, add some 'yield' to this thread to not chew up CPU while we wait on the other side to process
-		#sleep 0.75 if $msg_total && $msg_total != $msg_counter;
-
-		trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG;
+		else
+		{
+			trace "MessageSocketBase: Unable to lock outgoing queue, trying again in a bit\n";
+		}
 	}
 
 	sub read_message
@@ -343,7 +352,7 @@
 		#print STDERR "Debug: First line: '$first_line'\n";
 		my $bytes_expected = int($first_line);
 
-		#trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n" if DEBUG_RX;
+		#trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n";# if DEBUG_RX;
 
 		if($bytes_expected <= 0)
 		{
@@ -410,7 +419,7 @@
 		#print STDERR "Final answer: len:$len/$bytes_expected, data: '$data'\n";
 		#print STDERR "Data: '$data'\n";
 
-		#trace "MessageSocketBase: Data: '$data'\n" if DEBUG_RX;
+		#trace "MessageSocketBase: Data: '$data'\n";# if DEBUG_RX;
 
 		$self->process_message($data);
 
@@ -539,7 +548,7 @@
 		my $att  = shift;
 		my $json = "";
 		my $clean_ref = undef;
-		trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n"  if DEBUG;
+		trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n";#  if DEBUG;
 		undef $@;
 		eval {
 			$clean_ref = clean_ref($hash);

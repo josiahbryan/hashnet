@@ -211,12 +211,12 @@ use common::sense;
 		
 		my %opts = @_;
 
-		if(!$opts{to} && $self->peer)
+		if(!$opts{to} && $self->peer_uuid)
 		{
 			$opts{to} = $self->peer_uuid;
 		}
 
-		if(!$opts{nxthop} && $self->peer)
+		if(!$opts{nxthop} && $self->peer_uuid)
 		{
 			$opts{nxthop} = $self->peer_uuid;
 		}

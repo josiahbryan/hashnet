@@ -311,19 +311,23 @@ use common::sense;
 		my $self = shift;
 		my $time = shift || 30;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
-		trace "SharedRef: ", $self->file, ": lock_file() +\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": lock_file() +\n"; # if DEBUG;
 		#print_stack_trace();
-
-		return 2 if $self->_d->{locked};
-
+		
+		$self->_d->{locked} = 0 if !$self->_d->{locked};
+		$self->_d->{locked} ++;
+		
+		return 2 if $self->_d->{locked} > 1;
+		
 		if(!_lock_file($self->file, $time)) # 2nd arg max sec to wait
 		{
 			#die "Can't lock ",$self->file;
 			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
+			trace "SharedRef: lock failed at: ".get_stack_trace();
 			return 0;
 		}
 
-		$self->_d->{locked} = 1;
+		
 
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (+)    [$$]\n"; #: ", $self->file,"\n";
 
@@ -335,9 +339,9 @@ use common::sense;
 	{
 		my $self = shift;
 		#debug "SharedRef: _unlock_state():  ",$self->url," (-)    [$$]\n"; #: ", $self->file,"\n";
-		trace "SharedRef: ", $self->file, ": unlock_file() -\n" if DEBUG;
-		$self->_d->{locked} = 0;
-		_unlock_file($self->file);
+		trace "SharedRef: ", $self->file, ": unlock_file() -\n";# if DEBUG;
+		$self->_d->{locked} --;
+		_unlock_file($self->file);# if $self->_d->{locked} <= 0;
 		return 1;
 	}
 
