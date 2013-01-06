@@ -51,8 +51,10 @@ package HashNet::Util::Logging;
 
 	# Used for changing line color by PID if $ANSI_ENABLED
 	my %PidColorLut;
-	my @PidColorList = (ON_RED.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_BLUE.BLACK, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK);
+	my @PidColorList = (ON_RED.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_BLUE.WHITE, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK,
+	                    RED.ON_WHITE, GREEN.ON_BLACK, YELLOW.ON_BLACK, BLUE.ON_WHITE, MAGENTA.ON_BLACK, CYAN.ON_BLACK, WHITE.ON_BLACK);
 	my $NextPidColor = 0;
+	my $SharedRef;
 	
 	sub logmsg
 	{
@@ -74,12 +76,31 @@ package HashNet::Util::Logging;
 			my $color_on = $PidColorLut{$$};
 			if(!$color_on)
 			{
-				$NextPidColor = rand($#PidColorList);
+				srand(time);
+				
+				#$NextPidColor = rand($#PidColorList);
+				$NextPidColor = $$ % $#PidColorList;
+# 				if(!$SharedRef)
+# 				{
+# 					eval 'use HashNet::MP::SharedRef';
+# 					$SharedRef = HashNet::MP::SharedRef->new(".logging.colorcounter");
+# 				}
+# 				
+# 				$SharedRef->update_begin;
+# 				
+# 				$NextPidColor = $SharedRef->{next_color};
+				
 				$color_on = $PidColorList[$NextPidColor];
-				#$NextPidColor ++;
-				#$NextPidColor = 0 if $NextPidColor > $#PidColorList;
+				
+				$NextPidColor ++;
+				$NextPidColor = 0 if $NextPidColor > $#PidColorList;
 
 				$PidColorLut{$$} = $color_on;
+				
+# 				$SharedRef->{next_color} = $NextPidColor;
+# 				$SharedRef->update_end;
+				
+				
 			}
 			print STDERR $color_on, sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
 		}

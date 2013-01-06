@@ -50,6 +50,8 @@ else
 	};
 
 	my $ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info);
+	
+	$ch->wait_for_start;
 
 
 	#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))

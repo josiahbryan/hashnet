@@ -22,8 +22,8 @@ HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
-#$HashNet::Util::Logging::ANSI_ENABLED = 1;
+#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
 my $pid = fork;
 if(!$pid)
@@ -52,6 +52,8 @@ else
 
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
 	$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
+	
+	$ch->wait_for_start;
 
 	my $num_msgs = 20;
 	trace "$0: Lock outgoing queue\n";
