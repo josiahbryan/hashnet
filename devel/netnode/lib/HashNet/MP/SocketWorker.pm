@@ -689,7 +689,7 @@ use common::sense;
 		#trace Dumper $self->state_handle;
 		return () if !$uuid;
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
-		trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
+		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
 		return @res;
 	}
 
