@@ -165,7 +165,7 @@ use common::sense;
 		if($self->_d->{updated} &&
 		   $fail_on_updated)
 		{
-			warn __PACKAGE__."::set_data: Data updated on disck prior to set_data() call, failing";
+			warn __PACKAGE__."::set_data: Data updated on disk prior to set_data() call, failing";
 			return 0;
 		}
 		
@@ -208,19 +208,17 @@ use common::sense;
 		
 		if(-f $file && (stat($file))[7] > 0)
 		{
-			local $@;
-			eval
-			{
-				$Counts{load} ++;
-				my $t1 = time();
-				$data = retrieve($file);
-				my $len = time - $t1;
-				$Counts{load_t} += $len;
-				
-				debug "SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n"  if DEBUG;
-			};
+			#local $@;
+			
+			$Counts{load} ++;
+			my $t1 = time();
+			eval '$data = retrieve($file);';
+			my $len = time - $t1;
+			$Counts{load_t} += $len;
 
-			logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
+			debug "SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n"  if DEBUG;
+
+			#logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
 		}
 
 		if(-f $file)
@@ -293,8 +291,8 @@ use common::sense;
 		my $len = time - $t1;
 		$Counts{store_t} += $len;
 
-		debug "SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" if DEBUG;
-		#print_stack_trace(1);
+		#debug "\t\tSharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+		#debug "\t\t".get_stack_trace(0);
 
 		# Store our cache size/time in memory, so if another fork changes
 		# the cache, sync_in() will notice the change and reload the cache
@@ -309,14 +307,16 @@ use common::sense;
 	sub lock_file
 	{
 		my $self = shift;
-		my $time = shift || 30;
+		my $time = shift || 60;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
-		trace "SharedRef: ", $self->file, ": lock_file() +\n"; # if DEBUG;
 		#print_stack_trace();
 		
 		$self->_d->{locked} = 0 if !$self->_d->{locked};
 		$self->_d->{locked} ++;
 		
+		#trace "\t\t SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n";# if $self->_d->{locked} < 1; # if DEBUG;
+		#trace "\t\t ".get_stack_trace();# if $self->_d->{locked} < 1;
+
 		return 2 if $self->_d->{locked} > 1;
 		
 		if(!_lock_file($self->file, $time)) # 2nd arg max sec to wait
@@ -324,6 +324,7 @@ use common::sense;
 			#die "Can't lock ",$self->file;
 			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
 			trace "SharedRef: lock failed at: ".get_stack_trace();
+			$self->_d->{locked} --;
 			return 0;
 		}
 
@@ -339,9 +340,18 @@ use common::sense;
 	{
 		my $self = shift;
 		#debug "SharedRef: _unlock_state():  ",$self->url," (-)    [$$]\n"; #: ", $self->file,"\n";
-		trace "SharedRef: ", $self->file, ": unlock_file() -\n";# if DEBUG;
+		
+		#trace "SharedRef: ", $self->file, ": unlock_file() - from:\n ".get_stack_trace();
+
 		$self->_d->{locked} --;
-		_unlock_file($self->file);# if $self->_d->{locked} <= 0;
+		
+		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n" ;# if $self->_d->{locked} <= 0;;# if DEBUG;
+		#trace "\t\t ".get_stack_trace() if $self->_d->{locked} <= 0;
+
+		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
+
+		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() -\n";# if DEBUG;
+		_unlock_file($self->file);
 		return 1;
 	}
 

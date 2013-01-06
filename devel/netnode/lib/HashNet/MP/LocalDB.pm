@@ -139,6 +139,7 @@ use common::sense;
 		my $self = shift;
 		#$self->update_begin;
 		$self->lock_file;
+		$self->shared_ref->load_changes;
 		$self->{_updates_paused} = 1;
 		$self->{_update_end_count_while_locked} = 0;
 	}
@@ -154,7 +155,7 @@ use common::sense;
 	sub update_begin
 	{
 		my $self = shift;
-		$self->shared_ref->update_begin; # unless $self->{_updates_paused};
+		$self->shared_ref->update_begin unless $self->{_updates_paused};
 		#$self->shared_ref->load_changes if $self->{_updates_paused};
 	}
 	
@@ -541,6 +542,17 @@ use common::sense;
 		my @data = values %{ $self->data };
 		return [ sort { $a->{$sort_key} <=> $b->{$sort_key} } grep { ref $_ eq 'HASH' } @data ] if defined $sort_key;
 		return \@data;
+	}
+
+	sub size
+	{
+		my $self = shift;
+		my $sort_key = shift || undef;
+
+		$self->shared_ref->load_changes;
+
+		my @data = values %{ $self->data };
+		return scalar @data;
 	}
 
 	sub all_by_field { shift->all_by_key(@_) }

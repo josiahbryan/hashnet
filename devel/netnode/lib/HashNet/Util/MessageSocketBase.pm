@@ -30,7 +30,7 @@
 		
 		my $self = bless \%opts, $class;
 
-		$self->start_tx_loop();
+		#$self->start_tx_loop();
 		$self->start if $self->{auto_start};
 		
 		
@@ -165,6 +165,7 @@
 				#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
 				last;
 			}
+
 			sleep 0.1;
 		}
 	}
@@ -200,40 +201,50 @@
 			while(1)
 			{
 				# Subclasses can use this hook to block updates while doing bulk reads
-				$self->bulk_read_start_hook();
+				#$self->bulk_read_start_hook();
 
 				#trace "MessageSocketBase: Enter bulk read loop\n";
 
-				my $done_reading = 0;
-				while(!$done_reading)
+				eval
 				{
-					my $ret = $self->read_message();
-
-					# read_message() returns -1 if fatal
-					#last PROCESS_LOOP if $ret < 0;
-					if($ret < 0)
+					my $done_reading = 0;
+					while(!$done_reading)
 					{
-						$self->bulk_read_end_hook();
-						last PROCESS_LOOP;
-					}
+						my $ret = $self->read_message();
 
-					# DON'T do while(can_read) because can_read COULD lie!
-					# If can_read lied when used in while(), then you might
-					# never read some data. This way, we ASSUME there
-					# is data to read and read_message() can gracefully
-					# timeout if there really isn't data there.
-					$done_reading = $sel->can_read(0.01) ? 0 : 1;
+						# read_message() returns -1 if fatal
+						#last PROCESS_LOOP if $ret < 0;
+						if($ret < 0)
+						{
+							$self->bulk_read_end_hook();
+							last PROCESS_LOOP;
+						}
+
+						# DON'T do while(can_read) because can_read COULD lie!
+						# If can_read lied when used in while(), then you might
+						# never read some data. This way, we ASSUME there
+						# is data to read and read_message() can gracefully
+						# timeout if there really isn't data there.
+						$done_reading = $sel->can_read(0.01) ? 0 : 1;
+					}
+				};
+				if($@)
+				{
+					error "MessageSocketBase: Error in read message loop: $@";
 				}
 
 				#trace "MessageSocketBase: Exit bulk read loop\n";
 
-				$self->bulk_read_end_hook();
+				$self->bulk_read_end_hook() if $self->{in_bulk_read};
+				$self->{in_bulk_read} = 0;
 
 				# Restart tx loop if it dies
 				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
 				{
 					$self->start_tx_loop();
 				}
+
+				sleep 0.1;
 			}
 		
 			
@@ -358,7 +369,7 @@
 		{
 			if($self->{zero_counter} ++)
 			{
-				#trace "MessageSocketBase: Client sending 0's for data, disconnecting\n";
+				trace "MessageSocketBase: Client sending 0's for data, disconnecting\n";
 				return -1;
 			}
 
@@ -513,6 +524,12 @@
 			}
 		}
 		#print STDERR "Message: ".Dumper($hash);
+
+		if(!$self->{in_bulk_read})
+		{
+			$self->bulk_read_start_hook();
+			$self->{in_bulk_read} = 1;
+		}
 		
 		$self->dispatch_message($hash, $second_part);
 	}
