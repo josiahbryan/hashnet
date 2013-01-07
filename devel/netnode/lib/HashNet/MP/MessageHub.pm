@@ -197,7 +197,7 @@
 		my $config = {};
 		if(-f $config_file)
 		{
-			$config = YAML::Tiny::LoadFile($CONFIG_FILE);
+			$config = YAML::Tiny::LoadFile($config_file);
 		}
 		#print Dumper $config;
 		$self->{node_info} = $config->{node_info};
