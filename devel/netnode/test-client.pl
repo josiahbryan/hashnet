@@ -12,7 +12,7 @@ use Time::HiRes qw/time/;
 
 use IO::Socket;
 
-#$HashNet::Util::Logging::ANSI_ENABLED = 1;
+$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
 my @hosts = @ARGV;
 
@@ -59,6 +59,9 @@ if(!$ch)
 # 
 # });
 
+# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
+$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
+	
 #$ch->send_ping();
 #die "Test done";
 
@@ -66,30 +69,43 @@ if(!$ch)
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $msg_size = 1024 * 16;
-my $max_msgs = 64 * 16; #64 * 16;
+my $msg_size = 1024 * 16 * 2;
+my $max_msgs = 64 * 16 * 2;# * 16 * 16; #64 * 16;
 
-$ch->outgoing_queue->pause_update_saves;
 
+my $total_msgs = 0;
 my $count = 0;
-for my $x (1..$max_msgs)
+my $step_size = 256;
+
+#while($total_msgs < $max_msgs)
+$step_size = $max_msgs;
 {
-	#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
-	#my $msg = "Hello # $x to PID $$";
-	my $msg = "Msg $x";
-	my $att = '#' x $msg_size;
-	$count += length($msg) + $msg_size;
-	#next;
-	
-	if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
+	trace "$0: Calling pause_update_saves\n";
+	$ch->outgoing_queue->pause_update_saves;
+	for my $x (1..$step_size) #$max_msgs)
 	{
-		die "Unable to send message";
+		#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
+		#my $msg = "Hello # $x to PID $$";
+		my $msg = "Msg $x";
+		my $att = '#' x $msg_size;
+		$count += length($msg) + $msg_size;
+		#next;
+
+		if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
+		{
+			die "Unable to send message";
+		}
 	}
+	trace "$0: Calling resume_update_saves\n";
+	$ch->outgoing_queue->resume_update_saves;
+
+	$total_msgs += $step_size;
+
 }
 
-trace "$0: Enqueued $max_msgs messages\n";
+trace "$0: Enqueued $total_msgs messages\n";
 
-$ch->outgoing_queue->resume_update_saves;
+
 
 #sleep 2;
 

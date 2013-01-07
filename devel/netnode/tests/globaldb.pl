@@ -41,7 +41,7 @@ my $client_pid = fork;
 if(!$client_pid)
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep .1;
+	sleep 2.1;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;
@@ -80,10 +80,12 @@ if(!$client_pid)
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;
 	
 	my $node_info = {
-		uuid => '1509280a-5687-4a6b-acc8-bd58beaccbae',
+		uuid => '81cfb18e-0b9c-4b1f-b9f9-58be6ffa8731',
 		name => $0,
 		type => 'client',
 	};
+
+	sleep 2.1;
 
 	my $ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info);
 	
