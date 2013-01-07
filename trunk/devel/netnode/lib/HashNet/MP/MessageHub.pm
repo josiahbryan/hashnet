@@ -176,7 +176,7 @@
 			
 			foreach my $peer (@list)
 			{
-				next if !$peer || !$peer->{host};
+				next if !$peer || !$peer->host;
 				next if $peer->is_online;
 				
 				trace "MessageHub: Reconnect Check: Attempting to reconnect to remote hub '$peer->{host}'\n";
@@ -349,7 +349,7 @@
 		
 		foreach my $peer (@list)
 		{
-			next if !$peer || !$peer->{host};
+			next if !$peer || !$peer->host;
 			
 			trace "MessageHub: Connecting to remote hub '$peer->{host}'\n";
 			my $worker = $peer->open_connection($self->node_info);
@@ -697,7 +697,8 @@
 			my $queue = outgoing_queue();
 			my $rx_msg_uuid = $msg->{data}->{msg_uuid};
 			
-			$queue->begin_batch_update; # also locks the file
+			#$queue->begin_batch_update; # also locks the file
+			#$queue->lock_file;
 			eval {
 				my @queued = $queue->by_key(uuid => $rx_msg_uuid);
 				@queued = grep { $_->{to} eq $msg->{from} } @queued;
@@ -708,7 +709,8 @@
 	
 				$queue->del_batch(\@queued) if @queued;
 			};
-			$queue->end_batch_update; # also unlocks the file
+			#$queue->unlock_file;
+			#$queue->end_batch_update; # also unlocks the file
 		}
 
 		my @recip_list;

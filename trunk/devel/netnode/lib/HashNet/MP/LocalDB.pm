@@ -23,12 +23,15 @@ use common::sense;
 		my $file = shift || $DBFILE;
 		
 		#trace  "LocalDB: handle: Getting handle for '$file'\n";
-		
 		$ClassData->{$file} = { db_file => $file } if !$ClassData->{$file};
 		my $db_ctx = $ClassData->{$file};
 		
 		if(!$db_ctx->{db_handle})
 		{
+			# Call here instead of outside handle() at top of file
+			# so that caller has a chance to set $DBFILE 
+			cleanup_stale_locks($file);
+				
 			#trace  "LocalDB: handle($file): (re)opening file in pid $$\n";
 			$db_ctx->{db_handle} = HashNet::MP::SharedRef->new($db_ctx->{db_file});
  			warn "Error opening $db_ctx->{db_file}: $@ $!" if ($@ || $!) && !$db_ctx->{db_handle};
@@ -39,7 +42,7 @@ use common::sense;
 	sub dump_db
 	{
 		shift if $_[0] eq __PACKAGE__;
-		my $abs = shift;
+		my $abs = shift || $DBFILE;
 		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
 		$path = '.' if !$path;
 		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
@@ -48,6 +51,21 @@ use common::sense;
 		#use Data::Dumper;
 		#print STDERR "dump_db($abs = ($path|$file): ".Dumper(\@files);
 		unlink($_) foreach @files;
+	}
+	
+	sub cleanup_stale_locks
+	{
+		shift if $_[0] eq __PACKAGE__;
+		my $abs = shift || $DBFILE;
+		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
+		$path = '.' if !$path;
+		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
+		my @files = grep  { /^$file/ && /\.lock$/ && -f $_ } readdir(DIR);
+		closedir(DIR);
+		#use Data::Dumper;
+		print STDERR "cleanup_stale_locks($abs = ($path|$file): ".Dumper(\@files);
+		HashNet::MP::SharedRef->unlock_if_stale($_) foreach @files;
+		return @files;
 	}
 	
 	sub indexed_handle
