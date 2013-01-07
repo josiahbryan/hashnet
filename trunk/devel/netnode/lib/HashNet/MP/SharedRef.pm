@@ -216,7 +216,7 @@ use common::sense;
 			my $len = time - $t1;
 			$Counts{load_t} += $len;
 
-			debug "\t\t SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
+			#debug "\t\t SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
 
 			#logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
 		}
@@ -291,7 +291,7 @@ use common::sense;
 		my $len = time - $t1;
 		$Counts{store_t} += $len;
 
-		debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+		#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
 		#debug "\t\t".get_stack_trace(0);
 
 		# Store our cache size/time in memory, so if another fork changes

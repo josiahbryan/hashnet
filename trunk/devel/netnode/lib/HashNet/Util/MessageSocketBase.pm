@@ -1,4 +1,32 @@
 
+# Patch 'Socket' module - on at least one of my devel systems, when using Net::Server::* as a 'net_server',
+# the following error is output right when the connection starts and the process dies:
+#	Bad arg length for Socket::unpack_sockaddr_in, length is 28, should be 16 at /usr/lib/perl5/5.8.8/i386-linux-thread-multi/Socket.pm line 370.
+# By wrapping unpack_sockaddr_in(), I can trap the error and continue on.
+# The code below in sockaddr_in() is a direct copy-paste from Socket.pm, with only the the eval{} and die() calls added.
+{package Socket;
+	no warnings 'redefine'; # disable warning 'Subroutine sockaddr_in redefined at HashNet/StorageEngine/PeerServer.pm line ...'
+	use Carp qw/croak/;
+	
+	sub my_sockaddr_in 
+	{
+		if (@_ == 6 && !wantarray) { # perl5.001m compat; use this && die
+			my($af, $port, @quad) = @_;
+			warnings::warn "6-ARG sockaddr_in call is deprecated"
+			if warnings::enabled();
+			pack_sockaddr_in($port, inet_aton(join('.', @quad)));
+		} elsif (wantarray) {
+			croak "usage:   (port,iaddr) = sockaddr_in(sin_sv)" unless @_ == 1;
+			eval { unpack_sockaddr_in(@_); };
+			die $@ if $@ && $@ !~ /Bad arg length for Socket::unpack_sockaddr_in/;
+		} else {
+			croak "usage:   sin_sv = sockaddr_in(port,iaddr))" unless @_ == 2;
+			pack_sockaddr_in(@_);
+		}
+	}
+		
+};
+
 {package HashNet::Util::MessageSocketBase;
 
 	use common::sense;
@@ -20,7 +48,6 @@
 
 	sub DEBUG_RX { 1 }  # not used (commented out below)
 
-	
 	sub new
 	{
 		my $class = shift;
@@ -54,12 +81,12 @@
 			use Socket;
 			my $sock           = $self->{sock};
 			my $hersockaddr    = getpeername($sock);
-			my ($port, $iaddr) = sockaddr_in($hersockaddr);
+			my ($port, $iaddr) = Socket::my_sockaddr_in($hersockaddr);
 			my $herhostname    = gethostbyaddr($iaddr, AF_INET);
-			my $herstraddr     = inet_ntoa($iaddr);
+			#my $herstraddr     = inet_ntoa($iaddr);
 
 			$0 = "$0 [TX]";
-			trace "MessageSocketBase: Connected to $herstraddr ($herhostname) in PID $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
+			trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
 
 			#info "MessageSocketBase: Child $$ running\n";
 			$self->tx_loop();
@@ -100,10 +127,10 @@
 				my $hersockaddr    = getpeername($sock);
 				my ($port, $iaddr) = sockaddr_in($hersockaddr);
 				my $herhostname    = gethostbyaddr($iaddr, AF_INET);
-				my $herstraddr     = inet_ntoa($iaddr);
+				#my $herstraddr     = inet_ntoa($iaddr);
 
 				$0 = "$0 [Peer $herhostname]";
-				trace "MessageSocketBase: Connected to $herstraddr:$port ($herhostname) in PID $$ as '$0'\n";
+				trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0'\n";
 
 				#info "MessageSocketBase: Child $$ running\n";
 				$self->process_loop();

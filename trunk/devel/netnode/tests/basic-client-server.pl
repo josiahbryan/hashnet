@@ -25,7 +25,7 @@ HashNet::MP::LocalDB->dump_db($db_server_file);
 
 # Mute logging output
 $HashNet::Util::Logging::LEVEL = 0;
-#$HashNet::Util::Logging::ANSI_ENABLED = 1;
+$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my $pid = fork;
 if(!$pid)
@@ -123,14 +123,17 @@ else
 
 #sleep 60;
 
+
+done_testing();
+
+
+
 kill 15, $pid;
 unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
-
-
-done_testing();
-
 debug "$0: Done in $$, killed child $pid\n";
 
 
+END{ 
+}

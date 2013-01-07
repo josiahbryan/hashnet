@@ -53,7 +53,7 @@ package HashNet::MP::GlobalDB;
 		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
 		my $uuid = $sw ? $sw->uuid : $args{rx_uuid};
 		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
-		$sw_handle->fork_receiver(MSG_GLOBALDB_TR => sub
+		my $fork_pid = $sw_handle->fork_receiver(MSG_GLOBALDB_TR => sub
 			{
 				my $msg = shift;
 
@@ -63,6 +63,7 @@ package HashNet::MP::GlobalDB;
 			},
 			uuid => $uuid,
 			no_del => $sw ? 0 : 1);
+		$self->{rx_pid} = $fork_pid;
 
 		# Store the database version in case we need to check against future code feature changes
 		my $db_data_ver_file = $self->db_root . '/.db_ver';
@@ -75,6 +76,15 @@ package HashNet::MP::GlobalDB;
 	};
 
 	sub sw { shift->{sw} }
+	
+	sub DESTROY
+	{
+		my $self = shift;
+		if($self->{rx_pid})
+		{
+			kill 15, $self->{rx_pid};
+		}
+	}
 
 	
 	
