@@ -269,49 +269,55 @@
 		#trace "MessageHub: Config dump: ".Dumper($cfg);
 	}
 	
-	sub connect_remote_hubs
+	sub build_hub_list
 	{
 		my $self = shift;
 		my @list = HashNet::MP::PeerList->peers_by_type('hub');
 		
-		#if(!@list)
-		#{
-			my $seed_hub = $self->{config}->{seed_hubs} || $self->{config}->{seed_hub};
-			if($seed_hub)
+		my $seed_hub = $self->{config}->{seed_hubs} || $self->{config}->{seed_hub};
+		if($seed_hub)
+		{
+			my @hubs;
+			if($seed_hub =~ /,/)
 			{
-				my @hubs;
-				if($seed_hub =~ /,/)
-				{
-					@hubs = split /\s*,\s*/, $seed_hub;
-				}
-				else
-				{
-					@hubs = ( $seed_hub );
-				}
-
-				trace "MessageHub: \@hubs: (@hubs)\n";
-
-				my %peers_by_host = map { $_->{host} => 1 } @list;
-				@hubs = grep { $_ && !$peers_by_host{$_} } @hubs;
-
-				#trace "MessageHub: \@hubs2: (@hubs)\n";
-				
-				#my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
-				foreach my $hub (@hubs)
-				{
-					# Provide a hashref to get_peer... so it automatically updates $peer if $host is not correct
-					my $peer = HashNet::MP::PeerList->get_peer_by_host({host => $hub});
-					push @list, $peer unless $peers_by_host{$hub};
-
-					%peers_by_host = map { $_->{host} => 1 } @list;
-				}
-
-				#trace "MessageHub: \@peers: ".Dumper(\@peers);
-				
-				#push @list, @peers;
+				@hubs = split /\s*,\s*/, $seed_hub;
 			}
-		#}
+			else
+			{
+				@hubs = ( $seed_hub );
+			}
 
+			#trace "MessageHub: \@hubs: (@hubs)\n";
+
+			my %peers_by_host = map { $_->{host} => 1 } @list;
+			@hubs = grep { $_ && !$peers_by_host{$_} } @hubs;
+
+			#trace "MessageHub: \@hubs2: (@hubs)\n";
+			
+			#my @peers = map { HashNet::MP::PeerList->get_peer_by_host($_) } @hubs;
+			foreach my $hub (@hubs)
+			{
+				# Provide a hashref to get_peer... so it automatically updates $peer if $host is not correct
+				my $peer = HashNet::MP::PeerList->get_peer_by_host({host => $hub});
+				push @list, $peer unless $peers_by_host{$hub};
+
+				%peers_by_host = map { $_->{host} => 1 } @list;
+			}
+
+			#trace "MessageHub: \@peers: ".Dumper(\@peers);
+			
+			#push @list, @peers;
+		}
+		
+		return @list;
+	}
+	
+	sub connect_remote_hubs
+	{
+		my $self = shift;
+		
+		my @list = $self->build_hub_list();
+	
 		#trace "MessageHub: Final \@list: ".Dumper(\@list);
 		
 		foreach my $peer (@list)
@@ -625,6 +631,21 @@
 			sleep 0.25;
 		}
 	}
+	
+	sub check_route_hist
+	{
+		my $hist = shift;
+		my $to = shift;
+		return if !ref $hist;
+
+		my @hist = @{$hist || []};
+		foreach my $line (@hist)
+		{
+			return 1 if $line->{to} eq $to;
+		}
+		return 0;
+	}
+	
 
 	sub route_message
 	{
@@ -692,6 +713,7 @@
 			if(@find == 1)
 			{
 				@recip_list = shift @find;
+				trace "MessageHub: router_process_loop: I think '$to' is this peer: ".Dumper(\@recip_list);
 			}
 			else
 			{
@@ -710,6 +732,8 @@
 				# If not store-forward, then we only want to send to peers currently online
 				# since we dont want to store this message for any peers that are not currently
 				# connect to this hub
+				
+				trace "MessageHub: router_process_loop: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list, \@peers);
 			}
 		}
 
@@ -725,6 +749,15 @@
 
 		foreach my $peer (@recip_list)
 		{
+			next if !defined $peer->uuid;
+			
+			my $dest_uuid = $msg->{bcast} ? $peer->uuid : $msg->{to};
+# 			if(check_route_hist($msg->{hist}, $dest_uuid))
+# 			{
+# 				info "MessageHub: router_process_loop: NOT creating envelope to $dest_uuid, history says it was already sent there.\n"; #: ".Dumper($envelope);
+# 				next;
+# 			}
+			
 			my @args =
 			(
 				$msg->{data},
@@ -741,7 +774,7 @@
 				# got sent to the client because the hub didn't know where the client was
 				# connected - so we dont want the client to work with those messages.
 				#to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
-				to	=> $msg->{bcast} ? $peer->uuid : $msg->{to},
+				to	=> $dest_uuid,
 				from	=> $msg->{from},
 
 				bcast	=> $msg->{bcast},
@@ -752,7 +785,7 @@
 			);
 			my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
 			$self->outgoing_queue->add_row($new_env);
-			#debug "MessageHub: router_process_loop: Msg UUID $msg->{uuid} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+			#debug "MessageHub: router_process_loop: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
 		}
 	}
 };

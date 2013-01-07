@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+	#!/usr/bin/perl -w
 
 use lib 'lib';
 
@@ -56,6 +56,14 @@ if(!$ch)
 
 print "Pinging HashNet network via $ENV{REMOTE_ADDR} (takes approx 10 sec)\n";
 
+$ch->sw->fork_receiver('MSG_PONG' => sub
+{
+	my $msg = shift;
+
+	print " * Received PONG from '$msg->{data}->{node_info}->{name}'...\n";
+},
+uuid => $ch->sw->uuid, no_del => 1);
+	
 my @results = $ch->send_ping(undef, 10.);
 
 my %nodes = map { $_->{node_info}->{uuid} => $_->{node_info} } @results;
@@ -63,7 +71,10 @@ my %nodes = map { $_->{node_info}->{uuid} => $_->{node_info} } @results;
 # Add our own node_info to hash
 $nodes{$node_info->{uuid}} = $node_info;
 
-print "\n\n";
+print "\n";
+print "Received ".scalar(@results)." results:\n".
+      "-----------------------------------------------\n\n";
+
 foreach my $res (@results)
 {
 	my $delta = $res->{time};
