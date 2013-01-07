@@ -37,7 +37,7 @@ if(!$pid)
 else
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep .1;
+	sleep 2.1;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file;
@@ -88,14 +88,14 @@ else
 	$ch->stop();
 }
 
+done_testing();
+
+#END {
 kill 15, $pid;
 unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
-
-done_testing();
-
 debug "$0: Done in $$, killed child $pid\n";
-
+#}
 

@@ -39,7 +39,7 @@ if(!$pid)
 else
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep 1.1;
+	sleep 2.1;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file;

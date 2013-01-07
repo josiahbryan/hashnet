@@ -18,7 +18,8 @@ use common::sense;
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::SNTP;
-	
+
+	use Geo::IP; # for Geolocating our WAN address
 	use UUID::Generator::PurePerl; # for use in gen_node_info
 	
 	sub MSG_NODE_INFO	{ 'MSG_NODE_INFO' }
@@ -36,6 +37,51 @@ use common::sense;
 	# Used to index the SocketWorkers for the running app
 	our $STARTUP_PID = $$;
 
+	my @IP_LIST_CACHE;
+	sub my_ip_list
+	{
+		return @IP_LIST_CACHE if @IP_LIST_CACHE;
+
+		# Based on code from http://www.perlmonks.org/?node_id=53660
+		my $interface;
+		my %ifs;
+
+		foreach ( qx{ (LC_ALL=C /sbin/ifconfig -a 2>&1) } )
+		{
+			$interface = $1 if /^(\S+?):?\s/;
+			next unless defined $interface;
+			$ifs{$interface}->{state} = uc($1) if /\b(up|down)\b/i;
+			# NOTE Yes, I know - need to find a way to make compat with IPv6
+			$ifs{$interface}->{ip}    = $1     if /inet\D+(\d+\.\d+\.\d+\.\d+)/i;
+		}
+
+		# Skip bridges because even though they are not technically the localhost interface,
+		# if we have the same bridge ip on multiple machines (such as two machines that have
+		# xen dom0 or VirtualBox installed), resp_reg_ip would change the bridgeip to localhost
+		# since the same ip appears in both lists. (See resp_reg_ip())
+		unless(`which brctl 2>&1` =~ /no brctl/)
+		{
+			foreach ( qx{ brctl show } )
+			{
+				$interface = $1 if /^(\S+?)\s/;
+				next unless defined $interface && $interface ne 'bridge'; # first line is 'bridge name ...';
+				delete $ifs{$interface};
+			}
+		}
+
+		@IP_LIST_CACHE = ();
+		foreach my $if (keys %ifs)
+		{
+			next if !defined $ifs{$if} || $ifs{$if}->{state} ne 'UP';
+			my $ip = $ifs{$if}->{ip} || '';
+
+			push @IP_LIST_CACHE, $ip if $ip;
+		}
+
+		return grep { $_ ne '127.0.0.1' } @IP_LIST_CACHE;
+	}
+
+		
 	# Simple utility method to auto-generate the node_info structure based on $0
 	my $UUID_GEN = UUID::Generator::PurePerl->new(); 
 	sub gen_node_info
@@ -198,7 +244,217 @@ use common::sense;
 		$self->send_message({ msg => MSG_INTERNAL_ERROR, error => $error, bad_msg => $bad_msg });
 	}
 
-	sub node_info { shift->{node_info} }
+	sub node_info
+	{
+		my $self = shift;
+		$self->check_node_info(shift);
+		return $self->{node_info};
+	}
+
+	sub check_node_info
+	{
+		my $self = shift;
+		my $force = shift || 0;
+
+		return if !$force && $self->{_node_info_audited};
+		$self->{_node_info_audited} = 1;
+
+		$self->{node_info} ||= {};
+
+		#logmsg "TRACE", "PeerServer: Auditing node_info() for name, UUID, and IP info\n";
+
+		my $inf = $self->{node_info};
+
+		$self->update_node_info($inf);
+
+		$inf->{type} = 'client';
+
+		#logmsg "INFO", "PeerServer: Node info audit done.\n";
+	}
+
+	sub update_node_info
+	{
+
+		# Fields:
+		# - Host Name
+		# - WAN IP
+		# - Geo locate
+		# - LAN IPs
+		# - MAC(s)?
+		# - Host UUID
+		# - OS Info
+
+				
+		my $self = shift;
+		my $inf = shift;
+
+		my $changed = 0;
+
+		my $set = sub
+		{
+			my ($k,$v) = @_;
+			$inf->{$k} = $v;
+			$changed = 1;
+		};
+
+		if(!$inf->{name})
+		{
+			my $name = `hostname`;
+			$name =~ s/[\r\n]//g;
+			$set->('name', $name);
+		}
+
+		if(!$inf->{uuid})
+		{
+			my $uuid = UUID::Generator::PurePerl->new->generate_v1->as_string();
+			$set->('uuid', $uuid);
+		}
+
+# 		if(($inf->{port}||0) != $self->peer_port())
+# 		{
+# 			$set->('port', $self->peer_port());
+# 		}
+
+		{
+			my $uptime = `uptime`;
+			$uptime =~ s/(^\s+|\s+$|[\r\n])//g;
+			$set->('uptime', $uptime);
+		}
+
+		#$set->('hashnet_ver', $HashNet::StorageEngine::VERSION)
+		#	if ($inf->{hasnet_ver} || 0) != $HashNet::StorageEngine::VERSION;
+
+
+		#if(!$inf->{wan_ip})
+		# Check WAN IP every time in case it changes
+		{
+			my $external_ip;
+
+# 			my $external_ip = `lynx -dump "http://checkip.dyndns.org"`;
+# 			$external_ip =~ s/.*?([\d\.]+).*/$1/;
+# 			$external_ip =~ s/(^\s+|\s+$)//g;
+#
+			#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
+			$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
+			if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+				$external_ip = $1;
+			}
+
+			$external_ip = '' if !$external_ip;
+
+			$set->('wan_ip', $external_ip)
+				if ($inf->{wan_ip}||'') ne $external_ip;
+		}
+
+		# TODO: Geolocate IP
+		# If we have the geoIP db on this machine, then geo using Geo::IP,
+		# otherwise, post a message and see if another peer can answer for us
+		# https://www.google.com/search?sourceid=chrome&ie=UTF-8&q=perl+geo+locate+ip#hl=en&pwst=1&sa=X&ei=RP88UObrJsnJ0QHjl4DgCA&ved=0CB0QvwUoAQ&q=perl+geolocate+ip&spell=1&bav=on.2,or.r_gc.r_pw.r_qf.&fp=5b96907402d9468b&biw=1223&bih=510
+		# http://www.drdobbs.com/web-development/geolocation-in-perl/184416182
+		# http://search.cpan.org/~borisz/Geo-IP-1.40/lib/Geo/IP.pm
+		# http://www.maxmind.com/app/geolite
+		if(!defined $inf->{geo_info_auto})
+		{
+			$inf->{geo_info_auto} = 1;
+		}
+		$inf->{geo_info_auto} += 0; # force-cast to number
+
+		if($inf->{geo_info_auto} &&
+		   $inf->{wan_ip})
+		{
+			my @files = ('/var/lib/hashnet/GeoLiteCity.dat','/usr/local/share/GeoIP/GeoLiteCity.dat','/tmp/GeoLiteCity.dat');
+
+			my $ip_data_file = undef;
+			foreach my $file (@files)
+			{
+				if(-f $file)
+				{
+					$ip_data_file = $file;
+					#logmsg "TRACE", "PeerServer: Using geolocation datafile '$file'\n";
+				}
+			}
+
+			if(!$ip_data_file)
+			{
+				my $url = 'http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz';
+				my $dest = '/tmp/GeoLiteCity.dat';
+				logmsg "INFO", "PeerServer: Downloading geolocation datafile from $url\n";
+				system("wget -q -O - $url > $dest.gz");
+				logmsg "INFO", "PeerServer: 'gunzip'ing $dest.gz\n";
+				system("gunzip $dest");
+				$ip_data_file = $dest;
+
+				if(!-f $ip_data_file)
+				{
+					print STDERR "[ERROR] PeerServer: Error downloading or unzipping $dest - GeoLocating will not work.\n";
+				}
+			}
+
+			if(-f $ip_data_file)
+			{
+				my $gi = Geo::IP->open($ip_data_file, GEOIP_STANDARD);
+				my $record = $gi->record_by_addr($inf->{wan_ip});
+# 				my $geo_info = join(', ',
+# 					$record->country_code,
+# 					$record->country_code3,
+# 					$record->country_name,
+# 					$record->region,
+# 					$record->region_name,
+# 					$record->city,
+# 					$record->postal_code,
+# 					$record->latitude,
+# 					$record->longitude,
+# 					$record->time_zone,
+# 					$record->area_code,
+# 					$record->continent_code,
+# 					$record->metro_code);
+
+				eval {
+					my $geo_info = join(', ',
+						$record->city || '',
+						$record->region || '',
+						$record->country_code || '',
+						$record->latitude || '',
+						$record->longitude || '');
+
+					$set->('geo_info', $geo_info)
+						if ($inf->{geo_info}||'') ne $geo_info;
+				};
+				if($@)
+				{
+					logmsg "INFO", "Error updating geo_info for wan '$inf->{wan_ip}': $@";
+				}
+			}
+		}
+
+		{
+			my $ip_list = join(', ', grep { $_ ne '127.0.0.1' } $self->my_ip_list);
+			$set->('lan_ips', $ip_list)
+				if !$inf->{lan_ips} ne $ip_list;
+		}
+
+		if(!$inf->{distro})
+		{
+			my $distro = `lsb_release -d`;
+			$distro =~ s/^Description:\s*//g;
+			$distro =~ s/[\r\n]//g;
+			$distro =~ s/(^\s+|\s+$)//g;
+			$set->('distro', $distro);
+		}
+
+		if(!$inf->{os_info})
+		{
+			my $info = `uname -a`;
+			$info =~ s/[\r\n]//g;
+			$info =~ s/(^\s+|\s+$)//g;
+
+			$set->('os_info', $info);
+		}
+
+		undef $set;
+
+		return $changed;
+	}
 
 	sub create_envelope
 	{
