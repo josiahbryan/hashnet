@@ -307,7 +307,7 @@ use common::sense;
 	sub lock_file
 	{
 		my $self = shift;
-		my $time = shift || 60;
+		my $time = shift || 10;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
 		#print_stack_trace();
 		
@@ -354,6 +354,56 @@ use common::sense;
 		_unlock_file($self->file);
 		return 1;
 	}
+	
+	
+	sub unlock_if_stale
+	{
+		my $self = shift;
+		my $file = shift;
+		$file = $self->file if !$file && ref $self eq __PACKAGE__;
+		return -1 if !$file;
+		if(is_lock_stale($file))
+		{
+			my $lock_file = $file;
+			$lock_file .= '.lock' if $lock_file !~ /\.lock$/;
+			trace "SharedRef: unlock_if_stale: Found stale lock $lock_file, removing\n";
+			unlink($lock_file);
+			return 1;
+		}
+		return 0;
+	}
+	
+	sub is_lock_stale
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		
+		my $file = shift;
+		
+		$file .= '.lock' if $file !~ /\.lock$/;
+		my $fh;
+		return 0 if !-f $file;
+		if(!open($fh, "<$file"))
+		{
+			warn "is_lock_stale: Cannot read lockfile $file: $!";
+			return 0;
+		}
+		my $pid = <$fh>;
+		close($fh);
+		
+		$pid = int($pid);
+		
+		# kill 0 checks to see if its *possible* to send a signal to that process
+		# Therefore, if it rewturns false, we can assume to process that locked
+		# $file is gone away and we can say the lock is indeed stale
+		my $stale = 0;
+		if(!kill(0, $pid))
+		{
+			$stale = 1;
+		}
+		
+		trace "SharedRef: is_lock_stale: File: $file, Stale?  $stale\n";
+		return $stale;
+	}
 
 
 	sub _lock_file
@@ -372,6 +422,8 @@ use common::sense;
 		sleep $speed while time-$time < $max &&
 			!( $result = sysopen($fh, $file.'.lock', O_WRONLY|O_EXCL|O_CREAT));
 		#stdout::debug("Util: lock wait done on $file, result='$result'\n");
+		
+		print $fh $$, "\n";
 
 		#die "Can't open lockfile $file.lock: $!" if !$result;
 		if(!$result)
@@ -391,7 +443,7 @@ use common::sense;
 		#$file = abs_path($file);
 		#stdout::debug("Util: -UNlocking $file\n");
 		unlink($file.'.lock');
-	}	
+	}
 
 	# Determine if the state is dirty by checking the mtime AND the size -
 	# if either changed, assume state was updated by another process.
