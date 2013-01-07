@@ -163,16 +163,17 @@
 	{
 		my $self = shift;
 
-		if(ref($CONFIG_FILE) eq 'ARRAY')
+		my $config_file = $self->{opts}->{config_file} || $CONFIG_FILE; 
+		if(ref($config_file) eq 'ARRAY')
 		{
-			my @files = @$CONFIG_FILE;
+			my @files = @$config_file;
 			my $found = 0;
 			foreach my $file (@files)
 			{
 				if(-f $file)
 				{
 					#logmsg "DEBUG", "PeerServer: Using config file '$file'\n";
-					$CONFIG_FILE = $file;
+					$config_file = $file;
 					$found = 1;
 					last;
 				}
@@ -180,19 +181,21 @@
 
 			if(!$found)
 			{
-				my $file = shift @$CONFIG_FILE;
+				my $file = shift @$config_file;
 				logmsg "WARN", "PeerServer: No config file found, using default location '$file'\n";
-				$CONFIG_FILE = $file;
+				$config_file = $file;
 			}
 		}
 		else
 		{
 			#die Dumper $CONFIG_FILE;
 		}
+		
+		$self->{config_file} = $config_file;
 
 		#logmsg "DEBUG", "PeerServer: Loading config from $CONFIG_FILE\n";
 		my $config = {};
-		if(-f $CONFIG_FILE)
+		if(-f $config_file)
 		{
 			$config = YAML::Tiny::LoadFile($CONFIG_FILE);
 		}
@@ -216,8 +219,8 @@
 		};
 		#trace Dumper($self);
 		
-		logmsg "DEBUG", "PeerServer: Saving config to $CONFIG_FILE\n";
-		YAML::Tiny::DumpFile($CONFIG_FILE, $config);
+		logmsg "DEBUG", "PeerServer: Saving config to $self->{config_file}\n";
+		YAML::Tiny::DumpFile($self->{config_file}, $config);
 
 		return if ! $self->{node_info_changed_flag_file};
 
