@@ -3,7 +3,12 @@
 	use common::sense;
 
 	use base qw/HashNet::MP::SocketTerminator/;
-	
+
+	use YAML::Tiny; # for load_config/save_config
+	use UUID::Generator::PurePerl; # for node_info
+	use Geo::IP; # for Geolocating our WAN address
+
+
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::PeerList;
@@ -24,14 +29,58 @@
 
 	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
 
-	our $DEFAULT_CONFIG_FILE = [qw#hashnet-hub.conf /etc/hashnet-hub.conf#];
+	our $CONFIG_FILE = [qw#hashnet-hub.conf /etc/hashnet-hub.conf#];
 	our $DEFAULT_CONFIG =
 	{
 		port	 => 8031,
-		uuid	 => undef,
-		name	 => undef,
+		#uuid	 => undef,
+		#name	 => undef,
 		data_dir => '/var/lib/hashnet',
 	};
+
+	my @IP_LIST_CACHE;
+	sub my_ip_list
+	{
+		return @IP_LIST_CACHE if @IP_LIST_CACHE;
+
+		# Based on code from http://www.perlmonks.org/?node_id=53660
+		my $interface;
+		my %ifs;
+
+		foreach ( qx{ (LC_ALL=C /sbin/ifconfig -a 2>&1) } )
+		{
+			$interface = $1 if /^(\S+?):?\s/;
+			next unless defined $interface;
+			$ifs{$interface}->{state} = uc($1) if /\b(up|down)\b/i;
+			# NOTE Yes, I know - need to find a way to make compat with IPv6
+			$ifs{$interface}->{ip}    = $1     if /inet\D+(\d+\.\d+\.\d+\.\d+)/i;
+		}
+
+		# Skip bridges because even though they are not technically the localhost interface,
+		# if we have the same bridge ip on multiple machines (such as two machines that have
+		# xen dom0 or VirtualBox installed), resp_reg_ip would change the bridgeip to localhost
+		# since the same ip appears in both lists. (See resp_reg_ip())
+		unless(`which brctl 2>&1` =~ /no brctl/)
+		{
+			foreach ( qx{ brctl show } )
+			{
+				$interface = $1 if /^(\S+?)\s/;
+				next unless defined $interface && $interface ne 'bridge'; # first line is 'bridge name ...';
+				delete $ifs{$interface};
+			}
+		}
+
+		@IP_LIST_CACHE = ();
+		foreach my $if (keys %ifs)
+		{
+			next if !defined $ifs{$if} || $ifs{$if}->{state} ne 'UP';
+			my $ip = $ifs{$if}->{ip} || '';
+
+			push @IP_LIST_CACHE, $ip if $ip;
+		}
+
+		return grep { $_ ne '127.0.0.1' } @IP_LIST_CACHE;
+	}
 	
 	my $HUB_INST = undef;
 	sub inst
@@ -65,93 +114,12 @@
 		$self->start_server() if $opts{auto_start};
 	}
 	
-	sub read_config
-	{
-		my $self = shift;
-		my $config = $self->{opts}->{config_file} || $DEFAULT_CONFIG_FILE;
-		if(ref $config eq 'ARRAY')
-		{
-			my @list = @{$config || []};
-			undef $config;
-			foreach my $file (@list)
-			{
-				if(-f $file)
-				{
-					$config = $file;
-				}
-			}
-			if(!$config)
-			{
-				$self->setup_default_config;
-				return;
-				
-			}
-		}
-		
-		if(!-f $config)
-		{
-			$self->setup_default_config($config);
-		}
-		
-		open(FILE, "<$config") || die "MessageHub: Cannot read config '$config': $!";
-		trace "MessageHub: Reading config from '$config'\n";
-		
-		my @config;
-		push @config, $_ while $_ = <FILE>;
-		close(FILE);
-		
-		foreach my $line (@config)
-		{
-			$line =~ s/[\r\n]//g;
-			$line =~ s/#.*$//g;
-			next if !$line;
-			
-			my ($key, $value) = $line =~ /^\s*(.*?):\s*(.*)$/;
-			$self->{config}->{$key} = $value;
-		}
-		
-# 		use Data::Dumper;
-# 		print Dumper $self->{opts};
-		
-		$self->check_config_items();
-	}
-	
-	sub setup_default_config
-	{
-		my $self = shift;
-		my $file = shift || undef;
-		
-		$DEFAULT_CONFIG->{name} = `hostname`;
-		$DEFAULT_CONFIG->{name} =~ s/[\r\n]//g;
-
-		$DEFAULT_CONFIG->{uuid} = `uuidgen`;
-		$DEFAULT_CONFIG->{uuid} =~ s/[\r\n]//g;
-		
-		$DEFAULT_CONFIG->{data_dir} = $self->{data_dir} if $self->{data_dir};
-		
-		trace "MessageHub: read_config: Unable to find config, using default settings: ".Dumper($DEFAULT_CONFIG);
-		$self->{config} = $DEFAULT_CONFIG;
-		
-		$self->write_default_config($file);
-		
-		$self->check_config_items();
-	}
-	
-	sub write_default_config
-	{
-		my $self = shift;
-		my $file = shift || undef;
-		my $cfg = $self->{config};
-		my $file = $file ? $file : (ref $DEFAULT_CONFIG_FILE eq 'ARRAY' ? $DEFAULT_CONFIG_FILE->[0] : $DEFAULT_CONFIG_FILE);
-		open(FILE, ">$file") || die "MessageHub: write_default_config: Cannot write to $file: $!";
-		print FILE "$_: $cfg->{$_}\n" foreach keys %{$cfg || {}};
-		close(FILE);
-		trace "MessageHub: Wrote default configuration settings to $file\n";
-	}
 	
 	sub check_config_items
 	{
 		my $self = shift;
+
+		$self->{config} = {} if !$self->{config};
 		my $cfg = shift || $self->{config};
 
 		foreach my $key (keys %{$self->{opts} || {}})
@@ -160,8 +128,15 @@
 			trace "MessageHub: Config option overwritten by script code: '$key' => '$val'\n";
 			$cfg->{$key} = $val;
 		}
+
+		foreach my $key (keys %$DEFAULT_CONFIG)
+		{
+			$cfg->{$key} = $DEFAULT_CONFIG->{$key} if ! $cfg->{$key};
+		}
 		
 		mkpath($cfg->{data_dir}) if !-d $cfg->{data_dir};
+
+		$self->save_config;
 
 		#trace "MessageHub: Config dump: ".Dumper($cfg);
 	}
@@ -227,19 +202,286 @@
 			}
 		}
 	}
+
+
+	sub read_config
+	{
+		my $self = shift;
+
+		if(ref($CONFIG_FILE) eq 'ARRAY')
+		{
+			my @files = @$CONFIG_FILE;
+			my $found = 0;
+			foreach my $file (@files)
+			{
+				if(-f $file)
+				{
+					#logmsg "DEBUG", "PeerServer: Using config file '$file'\n";
+					$CONFIG_FILE = $file;
+					$found = 1;
+					last;
+				}
+			}
+
+			if(!$found)
+			{
+				my $file = shift @$CONFIG_FILE;
+				logmsg "WARN", "PeerServer: No config file found, using default location '$file'\n";
+				$CONFIG_FILE = $file;
+			}
+		}
+		else
+		{
+			#die Dumper $CONFIG_FILE;
+		}
+
+		#logmsg "DEBUG", "PeerServer: Loading config from $CONFIG_FILE\n";
+		my $config = {};
+		if(-f $CONFIG_FILE)
+		{
+			$config = YAML::Tiny::LoadFile($CONFIG_FILE);
+		}
+		#print Dumper $config;
+		$self->{node_info} = $config->{node_info};
+		#delete $config->{node_info};
+		
+		$self->{config}    = $config->{config};
+		
+		$self->check_node_info();
+		$self->check_config_items();
+	}
+
+	sub save_config
+	{
+		my $self = shift;
+		my $config =
+		{
+			node_info => $self->{node_info},
+			config => $self->{config},
+		};
+		#trace Dumper($self);
+		
+		logmsg "DEBUG", "PeerServer: Saving config to $CONFIG_FILE\n";
+		YAML::Tiny::DumpFile($CONFIG_FILE, $config);
+
+		return if ! $self->{node_info_changed_flag_file};
+
+		# The timer loop will check for the existance of this file and push the node info into the storage engine
+		#open(FILE,">$self->{node_info_changed_flag_file}") || warn "Unable to write to $self->{node_info_changed_flag_file}: $!";
+		#print FILE "1\n";
+		#close(FILE);
+	}
 	
 	sub node_info
 	{
 		my $self = shift;
+		my $force_check = shift || 0;
 
-		return $self->{node_info} if $self->{node_info};
-		return $self->{node_info} = {
-			host => $self->{config}->{host} || undef,
-			name => $self->{config}->{name},
-			uuid => $self->{config}->{uuid},
-			type => 'hub',
-		}
+# 		return $self->{node_info} if $self->{node_info};
+# 		return $self->{node_info} = {
+# 			host => $self->{config}->{host} || undef,
+# 			name => $self->{config}->{name},
+# 			uuid => $self->{config}->{uuid},
+# 			type => 'hub',
+# 		}
+
+		$self->check_node_info($force_check);
+
+		return $self->{node_info};
 	}
+
+	sub check_node_info
+	{
+		my $self = shift;
+		my $force = shift || 0;
+
+		return if !$force && $self->{_node_info_audited};
+		$self->{_node_info_audited} = 1;
+
+
+		# Fields:
+		# - Host Name
+		# - WAN IP
+		# - Geo locate
+		# - LAN IPs
+		# - MAC(s)?
+		# - Host UUID
+		# - OS Info
+
+		$self->{node_info} ||= {};
+
+		#logmsg "TRACE", "PeerServer: Auditing node_info() for name, UUID, and IP info\n";
+
+
+		my $changed = 0;
+		my $inf = $self->{node_info};
+		my $set = sub
+		{
+			my ($k,$v) = @_;
+			$inf->{$k} = $v;
+			$changed = 1;
+		};
+
+		if(!$inf->{name})
+		{
+			my $name = `hostname`;
+			$name =~ s/[\r\n]//g;
+			$set->('name', $name);
+		}
+
+		if(!$inf->{uuid})
+		{
+			my $uuid = UUID::Generator::PurePerl->new->generate_v1->as_string();
+			$set->('uuid', $uuid);
+		}
+
+# 		if(($inf->{port}||0) != $self->peer_port())
+# 		{
+# 			$set->('port', $self->peer_port());
+# 		}
+
+		{
+			my $uptime = `uptime`;
+			$uptime =~ s/[\r\n]//g;
+			$set->('uptime', $uptime);
+		}
+
+		#$set->('hashnet_ver', $HashNet::StorageEngine::VERSION)
+		#	if ($inf->{hasnet_ver} || 0) != $HashNet::StorageEngine::VERSION;
+
+
+		#if(!$inf->{wan_ip})
+		# Check WAN IP every time in case it changes
+		{
+			my $external_ip;
+
+# 			my $external_ip = `lynx -dump "http://checkip.dyndns.org"`;
+# 			$external_ip =~ s/.*?([\d\.]+).*/$1/;
+# 			$external_ip =~ s/(^\s+|\s+$)//g;
+#
+			#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
+			$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
+			if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+				$external_ip = $1;
+			}
+
+			$external_ip = '' if !$external_ip;
+
+			$set->('wan_ip', $external_ip)
+				if ($inf->{wan_ip}||'') ne $external_ip;
+		}
+
+		# TODO: Geolocate IP
+		# If we have the geoIP db on this machine, then geo using Geo::IP,
+		# otherwise, post a message and see if another peer can answer for us
+		# https://www.google.com/search?sourceid=chrome&ie=UTF-8&q=perl+geo+locate+ip#hl=en&pwst=1&sa=X&ei=RP88UObrJsnJ0QHjl4DgCA&ved=0CB0QvwUoAQ&q=perl+geolocate+ip&spell=1&bav=on.2,or.r_gc.r_pw.r_qf.&fp=5b96907402d9468b&biw=1223&bih=510
+		# http://www.drdobbs.com/web-development/geolocation-in-perl/184416182
+		# http://search.cpan.org/~borisz/Geo-IP-1.40/lib/Geo/IP.pm
+		# http://www.maxmind.com/app/geolite
+		if(!defined $inf->{geo_info_auto})
+		{
+			$inf->{geo_info_auto} = 1;
+		}
+		$inf->{geo_info_auto} += 0; # force-cast to number
+
+		if($inf->{geo_info_auto} &&
+		   $inf->{wan_ip})
+		{
+			my @files = ('/var/lib/hashnet/GeoLiteCity.dat','/usr/local/share/GeoIP/GeoLiteCity.dat','/tmp/GeoLiteCity.dat');
+
+			my $ip_data_file = undef;
+			foreach my $file (@files)
+			{
+				if(-f $file)
+				{
+					$ip_data_file = $file;
+					#logmsg "TRACE", "PeerServer: Using geolocation datafile '$file'\n";
+				}
+			}
+
+			if(!$ip_data_file)
+			{
+				my $url = 'http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz';
+				my $dest = '/tmp/GeoLiteCity.dat';
+				logmsg "INFO", "PeerServer: Downloading geolocation datafile from $url\n";
+				system("wget -q -O - $url > $dest.gz");
+				logmsg "INFO", "PeerServer: 'gunzip'ing $dest.gz\n";
+				system("gunzip $dest");
+				$ip_data_file = $dest;
+
+				if(!-f $ip_data_file)
+				{
+					print STDERR "[ERROR] PeerServer: Error downloading or unzipping $dest - GeoLocating will not work.\n";
+				}
+			}
+
+			if(-f $ip_data_file)
+			{
+				my $gi = Geo::IP->open($ip_data_file, GEOIP_STANDARD);
+				my $record = $gi->record_by_addr($inf->{wan_ip});
+# 				my $geo_info = join(', ',
+# 					$record->country_code,
+# 					$record->country_code3,
+# 					$record->country_name,
+# 					$record->region,
+# 					$record->region_name,
+# 					$record->city,
+# 					$record->postal_code,
+# 					$record->latitude,
+# 					$record->longitude,
+# 					$record->time_zone,
+# 					$record->area_code,
+# 					$record->continent_code,
+# 					$record->metro_code);
+
+				eval {
+					my $geo_info = join(', ',
+						$record->city || '',
+						$record->region || '',
+						$record->country_code || '',
+						$record->latitude || '',
+						$record->longitude || '');
+
+					$set->('geo_info', $geo_info)
+						if ($inf->{geo_info}||'') ne $geo_info;
+				};
+				if($@)
+				{
+					logmsg "INFO", "Error updating geo_info for wan '$inf->{wan_ip}': $@";
+				}
+			}
+		}
+
+		{
+			my $ip_list = join(', ', grep { $_ ne '127.0.0.1' } $self->my_ip_list);
+			$set->('lan_ips', $ip_list)
+				if !$inf->{lan_ips} ne $ip_list;
+		}
+
+		if(!$inf->{distro})
+		{
+			my $distro = `lsb_release -d`;
+			$distro =~ s/^Description:\s*//g;
+			$distro =~ s/[\r\n]//g;
+			$distro =~ s/(^\s+|\s+$)//g;
+			$set->('distro', $distro);
+		}
+
+		if(!$inf->{os_info})
+		{
+			my $info = `uname -a`;
+			$info =~ s/[\r\n]//g;
+			$info =~ s/(^\s+|\s+$)//g;
+
+			$set->('os_info', $info);
+		}
+
+		$self->save_config if $changed;
+		#logmsg "INFO", "PeerServer: Node info audit done.\n";
+
+		undef $set;
+	}
+
 	
 	sub start_server
 	{
