@@ -267,7 +267,7 @@ use common::sense;
 
 		$self->update_node_info($inf);
 
-		$inf->{type} = 'client';
+		$inf->{type} = 'client' unless $inf->{type} eq 'hub';
 
 		#logmsg "INFO", "PeerServer: Node info audit done.\n";
 	}
@@ -957,6 +957,11 @@ use common::sense;
 		return () if !$uuid;
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
+		
+		# Check envelope history on this side so as to not cause unecessary traffice
+		# if this envelope would just be rejected by the check_env_hist() above on the receiving side 
+		#@res = grep { !check_env_hist($_, $uuid) } @res;
+		
 		return @res;
 	}
 
@@ -1019,6 +1024,8 @@ use common::sense;
 			my $recipt_queue = ref $self ? outgoing_queue() : incoming_queue();
 
 			my %seen_msg_flag;
+			my $max_time = 60;
+			
 			while(1)
 			{
 				my @list = $queue->by_key(nxthop => $uuid, type => $msg_name);
@@ -1027,13 +1034,18 @@ use common::sense;
 				if($no_del)
 				{
 					my $seen_batch = 0;
-					foreach my $msg (@list)
+					@list = grep { ! $seen_msg_flag{$_->{uuid}} } @list;
+					$seen_msg_flag{$_->{uuid}} = time() foreach @list;
+					
+					# Simple kludge to keep %seen_msg_flag from growing too large.
+					# This is only risky if the messages are not removed from the 
+					# incoming queue within $max_time seconds by some other process.
+					# The only risk is that the message will appear as 'new' again.
+					foreach my $key (keys %seen_msg_flag)
 					{
-						$seen_batch = 1 if $seen_msg_flag{$msg->{uuid}};
+						delete $seen_msg_flag{$_}
+							if time() - $seen_msg_flag{$_} > $max_time;
 					}
-
-					next if $seen_batch;
-					%seen_msg_flag = map { $_->{uuid} => 1 } @list;
 				}
 
 				if(@list)
