@@ -374,6 +374,8 @@ use common::sense;
 				}
 			}
 
+			my $download_retried = 0;
+			RE_DOWNLOAD_DATAFILE:
 			if(!$ip_data_file)
 			{
 				my $url = 'http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz';
@@ -392,8 +394,8 @@ use common::sense;
 
 			if(-f $ip_data_file)
 			{
-				my $gi = Geo::IP->open($ip_data_file, GEOIP_STANDARD);
-				my $record = $gi->record_by_addr($inf->{wan_ip});
+				trace "SocketWorker: update_node_info(): Using \$ip_data_file: '$ip_data_file'\n";
+				
 # 				my $geo_info = join(', ',
 # 					$record->country_code,
 # 					$record->country_code3,
@@ -410,6 +412,8 @@ use common::sense;
 # 					$record->metro_code);
 
 				eval {
+					my $gi = Geo::IP->open($ip_data_file, GEOIP_STANDARD);
+					my $record = $gi->record_by_addr($inf->{wan_ip});
 					my $geo_info = join(', ',
 						$record->city || '',
 						$record->region || '',
@@ -420,9 +424,15 @@ use common::sense;
 					$set->('geo_info', $geo_info)
 						if ($inf->{geo_info}||'') ne $geo_info;
 				};
-				if($@)
+				if(my $err = $@)
 				{
+					die $@;
 					logmsg "INFO", "Error updating geo_info for wan '$inf->{wan_ip}': $@";
+					if($err =~ /is corrupt/ && !$download_retried)
+					{
+						$download_retried = 1;
+						goto RE_DOWNLOAD_DATAFILE;
+					}
 				}
 			}
 		}
@@ -1079,6 +1089,12 @@ use common::sense;
 				unless(kill 0, $parent_pid)
 				{
 					#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
+					last;
+				}
+				
+				if(ref $self && !$self->state_handle->{online})
+				{
+					error "SocketWorker: fork_receiver/$msg_name: SocketWorker dead or dieing, not waiting anymore\n";
 					last;
 				}
 				sleep $speed;

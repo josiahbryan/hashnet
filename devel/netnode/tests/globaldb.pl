@@ -13,6 +13,8 @@ use HashNet::MP::LocalDB;
 use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
 
+$SIG{CHLD} = 'IGNORE';
+
 my $test_port = 82814;
 my $test_srv_cfg = 'test-basic-server.conf';
 my $db_client_file1 = 'db.test-client1';
@@ -101,7 +103,7 @@ if(!$client_pid)
 	my $pid_t = $db->get('/test/server_pid');
 	is($pid_t, $server_pid, "Data retrieval");
 
-	$ch->stop();
+ 	$ch->stop();
 }
 
 
@@ -115,6 +117,8 @@ HashNet::MP::LocalDB->dump_db($db_server_file);
 
 done_testing();
 
-debug "$0: Done in $$, killed server $server_pid, child $client_pid\n";
+trace "$0: Done in $$, killed server $server_pid, child $client_pid\n";
+#kill 9, $$;
+#exit;
 
 
