@@ -22,8 +22,8 @@ HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
-$HashNet::Util::Logging::ANSI_ENABLED = 1;
+$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my $pid = fork;
 if(!$pid)
@@ -55,7 +55,7 @@ else
 	
 	$ch->wait_for_start;
 
-	my $num_msgs = 1000;
+	my $num_msgs = $HashNet::Util::Logging::LEVEL ? 1000 : 100;
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
 	$ch->sw->outgoing_queue->pause_update_saves;
