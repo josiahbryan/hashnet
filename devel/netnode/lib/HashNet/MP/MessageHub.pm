@@ -62,13 +62,186 @@
 		$self->read_config();
 		$self->connect_remote_hubs();
 
-		# Start GlobalDB running and listening for incoming updates
-		$self->{globaldb} = HashNet::MP::GlobalDB->new(rx_uuid => $self->node_info->{uuid});
+		$self->start_globaldb();
+		$self->start_timer_loop();
 		
 		$self->start_router() if $opts{auto_start};
 		$self->start_server() if $opts{auto_start};
 	}
 	
+	sub start_globaldb
+	{
+		my $self = shift;
+		# Start GlobalDB running and listening for incoming updates
+		$self->{globaldb} = HashNet::MP::GlobalDB->new(rx_uuid => $self->node_info->{uuid});
+	}
+	
+	sub start_timer_loop
+	{
+		my $self = shift;
+		
+		# Fork timer loop
+		my $kid = fork();
+		die "Fork failed" unless defined($kid);
+		if ($kid == 0)
+		{
+			$0 = "$0 [Timer Event Loop]";
+			
+			info "MessageHub: Timer Event Loop PID $$ running as '$0'\n";
+			RESTART_TIMER_LOOP:
+			eval
+			{
+				$self->timer_loop();
+			};
+			if($@)
+			{
+				error "MessageHub: timer_loop() crashed: $@";
+				goto RESTART_TIMER_LOOP;
+			}
+			info "Timer PID $$ complete, exiting\n";
+			exit 0;
+		}
+
+		# Parent continues here.
+		while ((my $k = waitpid(-1, WNOHANG)) > 0)
+		{
+			# $k is kid pid, or -1 if no such, or 0 if some running none dead
+			my $stat = $?;
+			debug "Reaped $k stat $stat\n";
+		}
+
+		$self->{timer_pid} = { pid => $kid, started_from => $$ };
+	}
+	
+	sub set_repeat_timeout($$)
+	{
+		my ($time, $code_sub) = @_;
+		my $timer_ref;
+		my $wrapper_sub; $wrapper_sub = sub {
+			
+			$code_sub->();
+			
+			undef $timer_ref;
+			# Yes, I know AE has an 'interval' property - but it does not seem to work,
+			# or at least I couldn't get it working. This does work though.
+			$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		};
+		
+		# Initial call starts the timer
+		#$wrapper_sub->();
+		
+		# Sometimes doesn't work...
+		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		
+		return $code_sub;
+	};
+	
+	sub set_timeout($$)
+	{
+		my ($time, $code_sub) = @_;
+		my $timer_ref;
+		my $wrapper_sub; $wrapper_sub = sub {
+			
+			$code_sub->();
+			
+			undef $timer_ref;
+			undef $wrapper_sub;
+		};
+		
+		$timer_ref = AnyEvent->timer (after => $time, cb => $wrapper_sub);
+		
+		return $code_sub;
+	}
+	
+	sub timer_loop
+	{
+		use AnyEvent;
+		use AnyEvent::Impl::Perl; # explicitly include this so it's included when we buildpacked.pl
+		use AnyEvent::Loop;
+		
+		# Every 15 minutes, update time via SNTP
+		set_repeat_timeout 60.0 * 15.0, sub
+		{
+			HashNet::Util::SNTP->sync_time();
+		};
+		
+# 		# NOTE DisabledForTesting
+# 		my $check_sub = set_repeat_timeout 60.0, sub
+# 		#my $check_sub = set_repeat_timeout 1.0, sub
+# 		#my $check_sub = sub
+# 		{
+# 			logmsg "INFO", "PeerServer: Checking status of peers\n";
+# 	
+# 			my @peers = @{ $engine->peers };
+# 			#@peers = (); # TODO JUST FOR DEBUGGING
+# 	
+# 			$self->engine->begin_batch_update();
+# 	
+# 			foreach my $peer (@peers)
+# 			{
+# 				$peer->load_changes();
+# 	
+# 				#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Locked, checking ...\n";
+# 	
+# 				# Make sure the peer is online, check latency, etc
+# 	
+# 				# NOTE DisabledForTesting
+# 				$peer->update_distance_metric();
+# 	
+# 				# Polling moved above
+# 				#$peer->poll();
+# 	
+# 				# NOTE DisabledForTesting
+# 				$peer->put_peer_stats(); #$engine);
+# 	
+# 				# NOTE DisabledForTesting
+# 				# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
+# 				#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
+# 				$self->update_software($peer);
+# 				#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
+# 			}
+# 	
+# 			# NOTE DisabledForTesting
+# 			{
+# 				my $inf  = $self->{node_info};
+# 				my $uuid = $inf->{uuid};
+# 				my $key_path = '/global/nodes/'. $uuid;
+# 	
+# 				if(-f $self->{node_info_changed_flag_file})
+# 				{
+# 					unlink $self->{node_info_changed_flag_file};
+# 					#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
+# 					foreach my $key (keys %$inf)
+# 					{
+# 						my $put_key = $key_path . '/' . $key;
+# 						my $val = $inf->{$key};
+# 						#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
+# 						$self->engine->put($put_key, $val);
+# 					}
+# 				}
+# 	
+# 				my $db = $engine->tx_db;
+# 				my $cur_tx_id = $db->length() -1;
+# 	
+# 				$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
+# 					if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
+# 			}
+# 	
+# 			$self->engine->end_batch_update();
+# 	
+# 			logmsg "INFO", "PeerServer: Peer check complete\n\n";
+# 		};
+# 	
+# 		$check_sub->();
+		
+		logmsg "TRACE", "MessageHub: Starting timer event loop...\n";
+	
+		# run the event loop, (should) never return
+		AnyEvent::Loop::run();
+		
+		# we're in a fork, so exit
+		exit(0);
+	}
 	
 	sub check_config_items
 	{
@@ -359,7 +532,7 @@
 			{
 				$0 = "$0 [Message Router]";
 				
-				info "Router PID $$ running as '$0'\n";
+				info "MessageHub: Router PID $$ running as '$0'\n";
 				RESTART_PROC_LOOP:
 				eval
 				{
@@ -370,7 +543,7 @@
 					error "MessageHub: router_process_loop() crashed: $@";
 					goto RESTART_PROC_LOOP;
 				}
-				info "Router PID $$ complete, exiting\n";
+				info "MessageHub: Router PID $$ complete, exiting\n";
 				exit 0;
 			}
 
@@ -395,11 +568,26 @@
 			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}->{pid}\n";
 			kill 15, $self->{router_pid}->{pid};
 		}
+		
+		
+	}
+	
+	sub stop_timer_loop
+	{
+		my $self = shift;
+		if($self->{timer_pid} &&
+		   $self->{timer_pid}->{started_from} == $$)
+		{
+			trace "MessageHub: stop_timer_loop(): Killing timer loop pid $self->{timer_pid}->{pid}\n";
+			kill 15, $self->{timer_pid}->{pid};
+		}
 	}
 	
 	sub DESTROY
 	{
-		shift->stop_router();
+		my $self = shift;
+		$self->stop_router();
+		$self->stop_timer_loop();
 	}
 	
 	sub router_process_loop
