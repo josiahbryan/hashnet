@@ -721,7 +721,7 @@ use common::sense;
 	{
 		my $self = shift;
 		trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
-		incoming_queue()->pause_update_saves;
+		incoming_queue()->begin_batch_update;
 		#trace "SocketWorker: bulk_read_start_hook() [done]\n"
 	}
 	
@@ -730,7 +730,7 @@ use common::sense;
 		my $self = shift;
 		trace "SocketWorker: bulk_read_end_hook() - queue size: ".incoming_queue()->size()."\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		#trace "SocketWorker: bulk_read_end_hook(): ".Dumper(incoming_queue());
-		incoming_queue()->resume_update_saves;
+		incoming_queue()->end_batch_update;
 	}
 
 	sub update_time_offset
@@ -1052,7 +1052,7 @@ use common::sense;
 				{
 					trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
 
-					$recipt_queue->pause_update_saves;
+					$recipt_queue->begin_batch_update;
 					foreach my $msg (@list)
 					{
 						$code_ref->($msg);
@@ -1085,7 +1085,7 @@ use common::sense;
 						$recipt_queue->add_row($new_env);
 					}
 
-					$recipt_queue->resume_update_saves;
+					$recipt_queue->end_batch_update;
 
 					#trace "SocketWorker: fork_receiver/$msg_name: Deleting batch: ".Dumper(\@list);
 

@@ -58,11 +58,11 @@ else
 	my $num_msgs = $HashNet::Util::Logging::LEVEL ? 1000 : 100;
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
-	$ch->sw->outgoing_queue->pause_update_saves;
+	$ch->sw->outgoing_queue->begin_batch_update;
 	$ch->send($_, bcast => 1, flush => 0) for 1..$num_msgs;
 
 	trace "$0: Unlock outgoing queue\n";
-	$ch->sw->outgoing_queue->resume_update_saves;
+	$ch->sw->outgoing_queue->end_batch_update;
 	#$ch->sw->outgoing_queue->unlock_file;
 	
 	$ch->wait_for_send;

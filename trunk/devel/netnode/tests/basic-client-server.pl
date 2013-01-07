@@ -59,7 +59,7 @@ else
 
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
-	$ch->sw->outgoing_queue->pause_update_saves;
+	$ch->sw->outgoing_queue->begin_batch_update;
 	
 	my $orig_data = "Hello to PID $$";
 	if(!$ch->send($orig_data, bcast => 1, flush => 0))
@@ -73,7 +73,7 @@ else
 	
 	#$ch->sw->outgoing_queue->unlock_file;
 	trace "$0: Unlock outgoing queue\n";
-	$ch->sw->outgoing_queue->resume_update_saves;
+	$ch->sw->outgoing_queue->end_batch_update;
 	
 	$ch->wait_for_send;
 	$ch->wait_for_receive;
