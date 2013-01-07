@@ -80,8 +80,8 @@ my $step_size = 256;
 #while($total_msgs < $max_msgs)
 $step_size = $max_msgs;
 {
-	trace "$0: Calling pause_update_saves\n";
-	$ch->outgoing_queue->pause_update_saves;
+	trace "$0: Calling begin_batch_update\n";
+	$ch->outgoing_queue->begin_batch_update;
 	for my $x (1..$step_size) #$max_msgs)
 	{
 		#if(!$ch->send("Hello # $x to PID $$", to => $ch->uuid, flush => 0))
@@ -96,8 +96,8 @@ $step_size = $max_msgs;
 			die "Unable to send message";
 		}
 	}
-	trace "$0: Calling resume_update_saves\n";
-	$ch->outgoing_queue->resume_update_saves;
+	trace "$0: Calling end_batch_update\n";
+	$ch->outgoing_queue->end_batch_update;
 
 	$total_msgs += $step_size;
 

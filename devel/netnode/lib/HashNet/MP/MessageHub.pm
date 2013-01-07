@@ -155,6 +155,8 @@
 	
 	sub timer_loop
 	{
+		my $self = shift;
+		
 		use AnyEvent;
 		use AnyEvent::Impl::Perl; # explicitly include this so it's included when we buildpacked.pl
 		use AnyEvent::Loop;
@@ -163,6 +165,31 @@
 		set_repeat_timeout 60.0 * 15.0, sub
 		{
 			HashNet::Util::SNTP->sync_time();
+		};
+		
+		# Every 5 seconds, try to reconnect to a hub that is offline
+		set_repeat_timeout 5.0, sub
+		{
+			my @list = $self->build_hub_list();
+		
+			#trace "MessageHub: Final \@list: ".Dumper(\@list);
+			
+			foreach my $peer (@list)
+			{
+				next if !$peer || !$peer->{host};
+				next if $peer->is_online;
+				
+				trace "MessageHub: Reconnect Check: Attempting to reconnect to remote hub '$peer->{host}'\n";
+				my $worker = $peer->open_connection($self->node_info);
+				if(!$worker)
+				{
+					error "MessageHub: Reconnect Check: Error reconnecting to hub '$peer->{host}'\n";
+				}
+				else
+				{
+					trace "MessageHub: Reconnect Check: Connection reestablished to hub '$peer->{host}'\n";
+				}
+			}
 		};
 		
 # 		# NOTE DisabledForTesting
@@ -615,7 +642,7 @@
 			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 
-			$self->outgoing_queue->pause_update_saves;
+			$self->outgoing_queue->begin_batch_update;
 			
 			foreach my $msg (@list)
 			{
@@ -626,7 +653,7 @@
 
 			#$self->incoming_queue->del_batch(\@list);
 			#$self->incoming_queue->unlock_file;
-			$self->outgoing_queue->resume_update_saves;
+			$self->outgoing_queue->end_batch_update;
 
 			sleep 0.25;
 		}
@@ -669,15 +696,19 @@
 
 			my $queue = outgoing_queue();
 			my $rx_msg_uuid = $msg->{data}->{msg_uuid};
-			my @queued = $queue->by_key(uuid => $rx_msg_uuid);
-			@queued = grep { $_->{to} eq $msg->{from} } @queued;
-
-			#trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
-
-			#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
-
-			$queue->del_batch(\@queued) if @queued;
-
+			
+			$queue->begin_batch_update; # also locks the file
+			eval {
+				my @queued = $queue->by_key(uuid => $rx_msg_uuid);
+				@queued = grep { $_->{to} eq $msg->{from} } @queued;
+	
+				#trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+	
+				#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
+	
+				$queue->del_batch(\@queued) if @queued;
+			};
+			$queue->end_batch_update; # also unlocks the file
 		}
 
 		my @recip_list;
@@ -713,7 +744,7 @@
 			if(@find == 1)
 			{
 				@recip_list = shift @find;
-				trace "MessageHub: router_process_loop: I think '$to' is this peer: ".Dumper(\@recip_list);
+				#trace "MessageHub: router_process_loop: I think '$to' is this peer: ".Dumper(\@recip_list);
 			}
 			else
 			{
@@ -733,7 +764,7 @@
 				# since we dont want to store this message for any peers that are not currently
 				# connect to this hub
 				
-				trace "MessageHub: router_process_loop: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list, \@peers);
+				#trace "MessageHub: router_process_loop: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list, \@peers);
 			}
 		}
 

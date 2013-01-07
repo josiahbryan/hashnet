@@ -1,4 +1,5 @@
 -Adapt MessageSocketBase to write attachments immediately to disk?
--MessageHub: Reconnect to other hubs if disconnected
--Test pings
--Add geo info
+#-MessageHub: Reconnect to other hubs if disconnected
+#-Test pings
+#-Add geo info
+-Add tests/ for Pings, Reconnect

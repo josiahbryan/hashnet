@@ -21,7 +21,20 @@
 	sub uuid { shift->{uuid} }
 	sub host { shift->{host} }
 	
-	sub is_online { shift->{online} }
+	sub is_online
+	{
+		my $self = shift;
+		$self->load_changes;
+		return $self->{online};
+	}
+	
+	sub load_changes
+	{
+		my $self = shift;
+		
+		my $data = HashNet::MP::PeerList->get_peer_data_by_uuid($self->uuid);
+		$self->merge_keys($data, 1); # 1 = dont re-update database because we just got $data from the DB!
+	}
 	
 	sub set_online
 	{
@@ -39,6 +52,7 @@
 	{
 		my $self = shift;
 		my $data = shift;
+		my $no_update = shift;
 		return undef if ref $data ne 'HASH';
 		
 		foreach my $key (keys %{$data ||{}})
@@ -48,7 +62,7 @@
 
 		#debug "Peer: merge_keys: Dump of self: ".Dumper($self);
 
-		HashNet::MP::PeerList->update_peer($self);
+		HashNet::MP::PeerList->update_peer($self) unless $no_update;
 		
 		return $self;
 	}

@@ -134,7 +134,7 @@ use common::sense;
 	sub lock   { shift->lock_file(@_) }
 	sub unlock { shift->unlock_file(@_) }
 
-	sub pause_update_saves
+	sub begin_batch_update
 	{
 		my $self = shift;
 		#$self->update_begin;
@@ -144,7 +144,7 @@ use common::sense;
 		$self->{_update_end_count_while_locked} = 0;
 	}
 
-	sub resume_update_saves
+	sub end_batch_update
 	{
 		my $self = shift;
 		$self->{_updates_paused} = 0;

@@ -37,13 +37,10 @@
 	sub hubs    { shift->peers_by_type('hub',    @_) }
 	sub clients { shift->peers_by_type('client', @_) }
 	
-
-	
-	sub get_peer_by_uuid
+	sub get_peer_data_by_uuid
 	{
-		my $class = shift;
-		my $node_info = shift;
-		my $uuid = ref $node_info eq 'HASH' ? $node_info->{uuid} : $node_info;
+		my $self = shift;
+		my $uuid = shift;
 		
 		return undef if !$uuid;
 
@@ -59,6 +56,19 @@
 			#if !$peer_data;
 			trace "PeerList: get_peer_by_uuid: uuid '$uuid' not found, new peer data inserted as id '$peer_data->{id}'\n";
 		}
+		
+		return $peer_data;
+	}
+
+	
+	sub get_peer_by_uuid
+	{
+		my $class = shift;
+		my $node_info = shift;
+		my $uuid = ref $node_info eq 'HASH' ? $node_info->{uuid} : $node_info;
+		
+		my $peer_data = $class->get_peer_data_by_uuid($uuid);
+		return undef if !$peer_data;
 
 		#trace "PeerList: get_peer_by_uuid: Peer data for '$uuid' before merge keys: ".Dumper($peer_data);
 		
