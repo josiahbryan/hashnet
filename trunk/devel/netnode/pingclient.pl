@@ -10,7 +10,7 @@ use Time::HiRes qw/time/;
 use Getopt::Std;
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my %opts;

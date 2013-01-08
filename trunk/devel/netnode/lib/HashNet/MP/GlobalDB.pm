@@ -21,17 +21,22 @@ package HashNet::MP::GlobalDB;
 
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
 
-	sub MSG_GLOBALDB_TR { 'MSG_GLOBALDB_TR' }
+	sub MSG_GLOBALDB_TR         { 'MSG_GLOBALDB_TR'         }
+	sub MSG_GLOBALDB_REV_QUERY  { 'MSG_GLOBALDB_REV_QUERY'  }
+	sub MSG_GLOBALDB_REV_REPLY  { 'MSG_GLOBALDB_REV_REPLY'  }
+	sub MSG_GLOBALDB_LOCK       { 'MSG_GLOBALDB_LOCK'       }
+	sub MSG_GLOBALDB_LOCK_REPLY { 'MSG_GLOBALDB_LOCK_REPLY' }
+	sub MSG_GLOBALDB_UNLOCK     { 'MSG_GLOBALDB_UNLOCK'     }
+	sub MSG_GLOBALDB_UNSTALE    { 'MSG_GLOBALDB_UNSTALE'    }
 
 #public:
 	sub new
 	{
 		my $class = shift;
 		#my $self = $class->SUPER::new();
-		my $self = bless {}, $class;
-
 		my %args = @_;
 
+		my $self = bless \%args, $class;
 
 		# Create our database root
 		$self->{db_root} = $args{db_root} || $DEFAULT_DB_ROOT;
@@ -39,43 +44,148 @@ package HashNet::MP::GlobalDB;
 
 		# Update the SocketWorker to register a new message handler
 		my $sw = $args{sw};
-		if(!$sw)
-		{
-			#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data";
-		}
-		else
+		if($sw)
 		{
 			$sw->wait_for_start;
 			$self->{sw} = $sw;
 		}
+		#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data" if !$sw;
 
+		$self->setup_message_listeners();
+
+		$self->check_db_ver();
+
+		return $self;
+	};
+
+	sub sw { shift->{sw} }
+	
+	sub setup_message_listeners
+	{
+		my $self = shift;
+		my $sw = $self->{sw};
+		
 		# rx_uuid can be given in args so GlobalDB can listen for incoming messages
 		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
-		my $uuid = $sw ? $sw->uuid : $args{rx_uuid};
+		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
 		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
-		my $fork_pid = $sw_handle->fork_receiver(MSG_GLOBALDB_TR => sub
+		
+		my $fork_pid = $sw_handle->fork_receiver(
+			messages => 
 			{
-				my $msg = shift;
-
-				trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
-				$self->_put_local_batch($msg->{data});
-				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+				MSG_GLOBALDB_TR => sub {
+					my $msg = shift;
+	
+					trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
+					$self->_put_local_batch($msg->{data});
+					trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+				},
+				
+				MSG_GLOBALDB_REV_QUERY => sub {
+					my $msg = shift;
+	
+					trace "GlobalDB: MSG_GLOBALDB_REV_QUERY\n";
+					my @rev = $self->db_rev;
+					#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+					
+					my @args =
+					(
+						{ rev => shift @rev,
+						  ts  => shift @rev },
+						type	=> MSG_GLOBALDB_REV_REPLY,
+						nxthop	=> $msg->{from},
+						curhop	=> $msg->{to},
+						to	=> $msg->{from},
+						from	=> $msg->{to},
+						bcast	=> 0,
+						sfwd	=> 1,
+					);
+					my $new_env = $sw_handle->create_envelope(@args);
+					$sw_handle->outgoing_queue->add_row($new_env);
+				},
+				
+				MSG_GLOBALDB_LOCK	=> sub {
+					my $msg = shift;
+	
+					trace "GlobalDB: MSG_GLOBALDB_LOCK\n";
+					
+					my $lock_key = undef;
+					
+					# TODO: Code this
+					# Pseudo code:
+					#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
+					#	- Wait for ...what? How do we know we've got the exclusive lock...?
+					#	- Queue reply back to the sender of $msg indicating got lock or no 
+				},
+				
+				MSG_GLOBALDB_UNLOCK	=> sub {
+					my $msg = shift;
+	
+					trace "GlobalDB: MSG_GLOBALDB_UNLOCK\n";
+					
+					my $lock_key = undef;
+					
+					# TODO: Code unlock
+				},
+				
+				MSG_GLOBALDB_UNSTALE	=> sub {
+					my $msg = shift;
+	
+					trace "GlobalDB: MSG_GLOBALDB_UNSTALE\n";
+					
+					my $lock_key = undef;
+					
+					# TODO: Code cleanup stale locks
+					
+				},
 			},
-			uuid => $uuid,
+				
+			uuid   => $uuid,
 			no_del => $sw ? 0 : 1);
-		$self->{rx_pid} = $fork_pid;
-
+			
+		$self->{rx_pid} = $fork_pid;	
+	}
+	
+	sub check_db_ver
+	{
+		my $self = shift;
+		
 		# Store the database version in case we need to check against future code feature changes
 		my $db_data_ver_file = $self->db_root . '/.db_ver';
 		my $db_ver = 0;
 		$db_ver = retrieve($db_data_ver_file)->{ver} if -f $db_data_ver_file;
 
 		nstore({ ver => $VERSION }, $db_data_ver_file) if $db_ver != $VERSION;
-
-		return $self;
-	};
-
-	sub sw { shift->{sw} }
+	}
+	
+	sub update_db_rev
+	{
+		my $self = shift;
+		
+		my $db_data_ts_file = $self->db_root . '/.db_rev';
+		HashNet::MP::SharedRef::_lock_file($db_data_ts_file);
+		
+		my $db_rev = 0;
+		$db_rev = retrieve($db_data_ts_file)->{rev} if -f $db_data_ts_file;
+		nstore({ ts => time(), rev => $db_rev + 1 }, $db_data_ts_file);
+		
+		HashNet::MP::SharedRef::_unlock_file($db_data_ts_file);
+	}
+	
+	sub db_rev
+	{
+		my $self = shift;
+		
+		my $db_data_ts_file = $self->db_root . '/.db_rev';
+		HashNet::MP::SharedRef::_lock_file($db_data_ts_file);
+		
+		my $db_data = { ts => 0, rev => 0 };
+		$db_data = retrieve($db_data_ts_file) if -f $db_data_ts_file;
+		
+		HashNet::MP::SharedRef::_unlock_file($db_data_ts_file);
+		
+		return wantarray ? ( $db_data->{rev} , $db_data->{ts} ) : $db_data->{rev};
+	}
 	
 	sub DESTROY
 	{
@@ -380,6 +490,8 @@ package HashNet::MP::GlobalDB;
 			mimetype	=> $mimetype,
 		};
 		nstore($data_ref, $key_file);
+		
+		$self->update_db_rev();
 
 		#trace "GlobalDB: _put_local(): key_file: $key_file\n";
 		#	unless $key =~ /^\/global\/nodes\//;
