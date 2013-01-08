@@ -2,7 +2,9 @@
 	
 	use common::sense;
 	use Data::Dumper;
+	use IO::Socket;
 
+	use HashNet::MP::SocketWorker;
 	use HashNet::Util::Logging;
 
 	sub from_hash
