@@ -1,4 +1,4 @@
-	#!/usr/bin/perl -w
+#!/usr/bin/perl -w
 
 use lib 'lib';
 
@@ -10,8 +10,8 @@ use Time::HiRes qw/time/;
 use Getopt::Std;
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
-#$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
+#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my %opts;
 getopts('?prsh:t:u:', \%opts);
@@ -39,7 +39,8 @@ if($opts{'?'}) # || !(scalar keys %opts))
 my $ping_uuid     = $opts{u} || shift @ARGV || undef;
 my $ping_max_time = $opts{t} || 7;
 my $complex_route = $opts{r} || 0;
-my $simple_route  = $opts{'s'} || 1;
+my $simple_route  = $opts{s} || 1;
+my $print_uuids   = $opts{p} || 0;
 
 my @hosts = split /,/, $opts{h};
 
@@ -59,8 +60,7 @@ $HashNet::MP::LocalDB::DBFILE = ".db.pingclient";
 
 my $ch;
 
-my $t_start = time;
-
+# Connect to a host to send the ping thru
 while(my $host = shift @hosts)
 {
 	$ch = HashNet::MP::ClientHandle->connect($host, $node_info);
@@ -71,13 +71,12 @@ while(my $host = shift @hosts)
 		last;
 	}
 }
-
 if(!$ch)
 {
 	die "Couldn't connect to any hosts (@hosts)";
 }
 
-
+# Print welcome message
 if(!$ping_uuid)
 {
 	print "Pinging HashNet network via $ENV{REMOTE_ADDR} (max $ping_max_time sec)\n";
@@ -87,18 +86,17 @@ else
 	print "Pinging HashNet node '$ping_uuid' (timeout $ping_max_time sec)\n";
 }
 
-$ch->sw->fork_receiver('MSG_PONG' => sub
-{
-	my $msg = shift;
-
-	print " * Received PONG from '$msg->{data}->{node_info}->{name}'...\n" unless $ping_uuid;
-},
-uuid => $ch->sw->uuid, no_del => 1);
+# This is simply a user niceity to let them know something is actually happening
+$ch->sw->fork_receiver('MSG_PONG' => sub {
+		print " * Received PONG from '$_[0]->{data}->{node_info}->{name}'...\n" unless $ping_uuid;
+	}, uuid => $ch->sw->uuid, no_del => 1);
 	
+# Do the real work
 my @results = $ch->send_ping($ping_uuid, $ping_max_time);
 
 #print STDERR Dumper(\@results);
 
+# Create a hash of node UUIDs to node_info hashes from @results
 my %nodes = map { $_->{node_info}->{uuid} => $_->{node_info} } @results;
 
 # Add our own node_info to hash
@@ -106,6 +104,11 @@ $nodes{$node_info->{uuid}} = $node_info;
 
 if($ping_uuid)
 {
+	# Even if we're pinging just a single UUID, all the hosts
+	# along the route will have an entry in @results -
+	# which is great for our %nodes hash for node_info, but 
+	# we dont want to print them all out, so grep out everything
+	# but the uuid we pinged
 	@results = grep { $_->{msg}->{from} eq $ping_uuid } @results;
 	if(!@results)
 	{
@@ -120,7 +123,6 @@ else
 	"-----------------------------------------------\n\n";
 }
 
-my $print_uuids = $opts{p};
 foreach my $res (@results)
 {
 	my $delta = $res->{time};
@@ -142,45 +144,35 @@ foreach my $res (@results)
 	my $ident = 0;
 
 	$hist[$#hist]->{last_item} = 1 if @hist;
-	my $last_to = undef;
+	
 	my $last_time = $start;
 	foreach my $item (@hist)
 	{
-		#next if defined $last_to && !$item->{last} && $item->{from} ne $last_to;
-		
 		my $time  = $item->{time};
-		my $uuid  = $item->{to};
-		my $uuid2 = $item->{from};
+		my $uuid1 = $item->{from};
+		my $uuid2 = $item->{to};
 		my $delta = $time - $last_time;
-		my $info  = $nodes{$uuid};
+		my $info  = $nodes{$uuid2};
 
-		#next if !$info;
-		my $key = $uuid2; #.$uuid;
-		my $ident = $ident{$key} || ++ $ident;
-		$ident{$key} = $ident;
-		my $prefix = "\t" x $ident;
 		
-		#print "$prefix -> " . ($info ? $info->{name} : ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> $uuid")." (".sprintf('%.03f', $delta)."s)\n";
 		if($complex_route)
 		{
-			print "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
-			print "$prefix -> ( " . $uuid2 . " -> " . $uuid ." )\n" if $print_uuids;
+			my $ident = $ident{$uuid1} || ++ $ident;
+			$ident{$uuid1} = $ident if !$ident{$uuid1};
+			my $prefix = "\t" x $ident;
+		
+			print "$prefix -> " . ($nodes{$uuid1} ? $nodes{$uuid1}->{name} : $uuid1) . " -> " . ($info ? $info->{name} : $uuid2)." (".sprintf('%.03f', $delta)."s)\n";
+			print "$prefix -> ( " . $uuid1 . " -> " . $uuid2 ." )\n" if $print_uuids;
 		}
 		else
 		{
-			my $string = ($info ? $info->{name} : $uuid);
-			my $time = " (".sprintf('%.03f', $delta)."s)";
-			
-			print $string.$time;
+			print $info ? $info->{name} : $uuid2;
+			print ' (', sprintf('%.03f', $delta), 's)';
 			print " -> " unless $item->{last_item};
-			#print " -> " unless $item->{last};
-			
 		}
-
-		$last_to = $uuid;
+		
 		$last_time = $time;
 	}
-
 	print "\n";
 	
 }

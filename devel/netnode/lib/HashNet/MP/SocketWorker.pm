@@ -553,6 +553,31 @@ use common::sense;
 
 		return $env;
 	}
+	
+	sub create_client_receipt
+	{
+		my $self = shift;
+		my $msg         = shift || {};
+		my $from_uuid   = shift || ref $self ? $self->uuid : undef;
+		my $nxthop_uuid = shift || ref $self ? $self->peer_uuid : undef;
+		my @args =
+		(
+			{
+				msg_uuid    => $msg->{uuid},
+				msg_hist    => $msg->{hist},
+				client_uuid => $from_uuid,
+			},
+			type	=> 'MSG_CLIENT_RECEIPT',
+			nxthop	=> $nxthop_uuid, 
+			curhop	=> $from_uuid,
+			from    => $from_uuid,
+			to	=> '*',
+			bcast	=> 1,
+			sfwd	=> 0,
+		);
+
+		return $self->create_envelope(@args);
+	}
 
 	sub check_env_hist
 	{
@@ -660,6 +685,7 @@ use common::sense;
 		if($msg_type eq MSG_ACK)
 		{
 			# Just ignore ACKs for now
+			return;
 		}
 		elsif($msg_type eq MSG_NODE_INFO)
 		{
@@ -1078,22 +1104,6 @@ use common::sense;
 					{
 						$code_ref->($msg);
 
-						my @args =
-						(
-							{
-								msg_uuid    => $msg->{uuid},
-								msg_hist    => $msg->{hist},
-								client_uuid => $uuid,
-							},
-							type	=> 'MSG_CLIENT_RECEIPT',
-							nxthop	=> ref $self ? $self->peer_uuid : $uuid, # See note below on 'cheating'
-							curhop	=> $uuid,
-							from    => $uuid,
-							to	=> '*',
-							bcast	=> 1,
-							sfwd	=> 0,
-						);
-
 						# We're cheating the system a bit if we don't have a $self ref -
 						# we assume that if no ref $self, we are running on a hub,
 						# so we dump the receipt into the *incoming* queue instead
@@ -1102,7 +1112,11 @@ use common::sense;
 						# so then the local hub picks up the receipt and routes it to
 						# all connected clients.
 
-						my $new_env = $self->create_envelope(@args);
+						my $new_env = $self->create_client_receipt($msg,
+							$uuid,
+							# See note above on 'cheating'
+							ref $self ? $self->peer_uuid : $uuid);
+							
 						$recipt_queue->add_row($new_env);
 					}
 
