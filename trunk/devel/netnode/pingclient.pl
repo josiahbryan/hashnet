@@ -14,7 +14,7 @@ $HashNet::Util::Logging::LEVEL = 0;
 #$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my %opts;
-getopts('?prh:t:u:', \%opts);
+getopts('?prsh:t:u:', \%opts);
 
 
 if($opts{'?'}) # || !(scalar keys %opts))
@@ -24,9 +24,10 @@ if($opts{'?'}) # || !(scalar keys %opts))
   Options:
     -?       - This message
     -h       - One or more HashNet hubs, CSV
-    -r	     - Turn OFF printing the route (on by default)
-    -p	     - Print UUIDs of all hosts below names (off by default)
-    -t 	     - Seconds to wait for a broadcast ping (no UUID)
+    -t	     - Seconds to wait for a broadcast ping (no UUID)
+    -s	     - Print simple route (on by default)
+    -r	     - Print complex route (off by default, overrides -s)
+    -p	     - Print UUIDs of all hosts below names (does nothing if no -r)
     -u UUID  [or]
     UUID     - Optional UUID of a host/client to ping
                If no UUID given, sends a broadcast ping
@@ -36,8 +37,9 @@ if($opts{'?'}) # || !(scalar keys %opts))
 }
 
 my $ping_uuid     = $opts{u} || shift @ARGV || undef;
-my $ping_max_time = $opts{t} || 10;
-my $no_route      = $opts{r} || 0;
+my $ping_max_time = $opts{t} || 7;
+my $complex_route = $opts{r} || 0;
+my $simple_route  = $opts{'s'} || 1;
 
 my @hosts = split /,/, $opts{h};
 
@@ -132,14 +134,14 @@ foreach my $res (@results)
 	#print "$res->{node_info}->{name} - ".sprintf('%.03f', $delta)." sec\n";
 	print sprintf('%.03f', $delta)." sec - $res->{node_info}->{name}\n";
 	
-	next if $no_route;
+	next if !$complex_route && !$simple_route;
 
-	#print "\t $0 -> ";
+	print "\t $0 -> " if $simple_route;
 
 	my %ident;
 	my $ident = 0;
 
-	$hist[$#hist]->{last} = 1 if @hist;
+	$hist[$#hist]->{last_item} = 1 if @hist;
 	my $last_to = undef;
 	my $last_time = $start;
 	foreach my $item (@hist)
@@ -159,9 +161,21 @@ foreach my $res (@results)
 		my $prefix = "\t" x $ident;
 		
 		#print "$prefix -> " . ($info ? $info->{name} : ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> $uuid")." (".sprintf('%.03f', $delta)."s)\n";
-		print "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
-		print "$prefix -> ( " . $uuid2 . " -> " . $uuid ." )\n" if $print_uuids;
-		#print " -> " unless $item->{last};
+		if($complex_route)
+		{
+			print "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
+			print "$prefix -> ( " . $uuid2 . " -> " . $uuid ." )\n" if $print_uuids;
+		}
+		else
+		{
+			my $string = ($info ? $info->{name} : $uuid);
+			my $time = " (".sprintf('%.03f', $delta)."s)";
+			
+			print $string.$time;
+			print " -> " unless $item->{last_item};
+			#print " -> " unless $item->{last};
+			
+		}
 
 		$last_to = $uuid;
 		$last_time = $time;
@@ -170,7 +184,7 @@ foreach my $res (@results)
 	print "\n";
 	
 }
-
+print "\n";
 
 HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);
 
