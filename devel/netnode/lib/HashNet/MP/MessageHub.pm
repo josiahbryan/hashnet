@@ -742,7 +742,7 @@
 			# Otherwise ...?
 			#	- Query connect hubs?
 			#	- Broadcast with a special flag to reply upon delivery...?
-			my @find = grep { $_->uuid eq $to } @peers;
+			my @find = grep { $_->is_online && $_->uuid eq $to } @peers;
 			if(@find == 1)
 			{
 				@recip_list = shift @find;
