@@ -46,11 +46,11 @@ use common::sense;
 		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
 		$path = '.' if !$path;
 		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
-		my @files = grep  { /^$file/ && -f $_ } readdir(DIR);
+		my @files = grep  { /^$file/ && -f "$path/$_" } readdir(DIR);
 		closedir(DIR);
 		#use Data::Dumper;
 		#print STDERR "dump_db($abs = ($path|$file): ".Dumper(\@files);
-		unlink($_) foreach @files;
+		unlink("$path/$_") foreach @files;
 	}
 	
 	sub cleanup_stale_locks
@@ -60,12 +60,13 @@ use common::sense;
 		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
 		$path = '.' if !$path;
 		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
-		my @files = grep  { /^$file/ && /\.lock$/ && -f $_ } readdir(DIR);
+		my @files = grep  { /^$file.*\.lock$/ } readdir(DIR);
 		closedir(DIR);
 		#use Data::Dumper;
-		print STDERR "cleanup_stale_locks($abs = ($path|$file): ".Dumper(\@files);
-		HashNet::MP::SharedRef->unlock_if_stale($_) foreach @files;
-		return @files;
+		#print STDERR "cleanup_stale_locks($abs = ($path|$file): ".Dumper(\@files);
+		my $count = 0;
+		HashNet::MP::SharedRef->unlock_if_stale("$path/$_") and $count ++ foreach @files;
+		return $count;
 	}
 	
 	sub indexed_handle

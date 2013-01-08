@@ -362,7 +362,7 @@ use common::sense;
 		my $file = shift;
 		$file = $self->file if !$file && ref $self eq __PACKAGE__;
 		return -1 if !$file;
-		if(is_lock_stale($file))
+		if($self->is_lock_stale($file))
 		{
 			my $lock_file = $file;
 			$lock_file .= '.lock' if $lock_file !~ /\.lock$/;
@@ -375,13 +375,20 @@ use common::sense;
 	
 	sub is_lock_stale
 	{
-		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
-		
+		my $self = shift;
 		my $file = shift;
+		
+		$file = $self->file if !$file && ref $self eq __PACKAGE__;
+		return -1 if !$file;
 		
 		$file .= '.lock' if $file !~ /\.lock$/;
 		my $fh;
-		return 0 if !-f $file;
+		if(!-f $file)
+		{
+			#trace "SharedRef: is_lock_stale: File: $file - not a valid file\n";
+			return 0;
+		}
+		
 		if(!open($fh, "<$file"))
 		{
 			warn "is_lock_stale: Cannot read lockfile $file: $!";
@@ -391,6 +398,7 @@ use common::sense;
 		close($fh);
 		
 		$pid = int($pid);
+		return 0 if !$pid;
 		
 		# kill 0 checks to see if its *possible* to send a signal to that process
 		# Therefore, if it rewturns false, we can assume to process that locked
@@ -401,7 +409,7 @@ use common::sense;
 			$stale = 1;
 		}
 		
-		trace "SharedRef: is_lock_stale: File: $file, Stale?  $stale\n";
+		#trace "SharedRef: is_lock_stale: File: $file, Stale?  $stale\n";
 		return $stale;
 	}
 
