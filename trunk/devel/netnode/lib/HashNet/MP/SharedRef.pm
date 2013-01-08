@@ -431,7 +431,7 @@ use common::sense;
 			!( $result = sysopen($fh, $file.'.lock', O_WRONLY|O_EXCL|O_CREAT));
 		#stdout::debug("Util: lock wait done on $file, result='$result'\n");
 		
-		print $fh $$, "\n";
+		print $fh $$, "\n" if $result;
 
 		#die "Can't open lockfile $file.lock: $!" if !$result;
 		if(!$result)

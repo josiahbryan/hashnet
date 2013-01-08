@@ -37,7 +37,7 @@ if(!$pid)
 else
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep 2.1;
+	sleep 1.1;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file;
@@ -48,7 +48,11 @@ else
 		type => 'client',
 	};
 
-	my $ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info);
+	my $ch;
+	my $start = time;
+	my $max_time = 60;
+	sleep 0.5 while time - $start < $max_time and
+	                !($ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info));
 
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
 	$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
