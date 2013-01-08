@@ -7,7 +7,8 @@
 	use YAML::Tiny; # for load_config/save_config
 	use UUID::Generator::PurePerl; # for node_info
 
-
+	our $VERSION = 0.0316;
+	
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::PeerList;
@@ -482,8 +483,8 @@
 
 		$changed = HashNet::MP::SocketWorker->update_node_info($inf);
 
-
-		$inf->{type} = 'hub';
+		$inf->{hub_ver} = $VERSION;
+		$inf->{type}    = 'hub';
 
 		$self->save_config if $changed;
 		#logmsg "INFO", "PeerServer: Node info audit done.\n";
@@ -651,20 +652,23 @@
 			
 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
 
-			$self->outgoing_queue->begin_batch_update;
-			
-			foreach my $msg (@list)
+			if(@list)
 			{
-				local *@;
-				eval { $self->route_message($msg); };
-				trace "MessageHub: Error in route_message(): $@" if $@;
+				$self->outgoing_queue->begin_batch_update;
+				
+				foreach my $msg (@list)
+				{
+					local *@;
+					eval { $self->route_message($msg); };
+					trace "MessageHub: Error in route_message(): $@" if $@;
+				}
+	
+				#$self->incoming_queue->del_batch(\@list);
+				#$self->incoming_queue->unlock_file;
+				$self->outgoing_queue->end_batch_update;
 			}
 
-			#$self->incoming_queue->del_batch(\@list);
-			#$self->incoming_queue->unlock_file;
-			$self->outgoing_queue->end_batch_update;
-
-			sleep 0.25;
+			sleep 0.1;
 		}
 	}
 	
@@ -689,7 +693,7 @@
 		my $msg = shift;
 		my $self_uuid  = $self->node_info->{uuid};
 		
-		debug "\n-------------\n";
+		debug "--------------------------------------------------------\n";
 		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
 		
 		if($msg->{type} eq MSG_CLIENT_RECEIPT)

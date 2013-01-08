@@ -132,21 +132,7 @@
 
 			foreach my $msg (@msgs)
 			{
-				my @args =
-				(
-					{
-						msg_uuid    => $msg->{uuid},
-						msg_hist    => $msg->{hist},
-						client_uuid => $self->uuid,
-					},
-					type	=> MSG_CLIENT_RECEIPT,
-					nxthop	=> $self->peer_uuid,
-					curhop	=> $self->uuid,
-					to	=> '*',
-					bcast	=> 1,
-					sfwd	=> 0,
-				);
-				my $new_env = $sw->create_envelope(@args);
+				my $new_env = $sw->create_client_receipt($msg);
 				#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 				$self->enqueue($new_env);
 			}
