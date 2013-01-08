@@ -334,6 +334,7 @@ use common::sense;
 # 			$external_ip =~ s/.*?([\d\.]+).*/$1/;
 # 			$external_ip =~ s/(^\s+|\s+$)//g;
 #
+			trace "SocketWorker: update_node_info(): Looking up WAN IP ...\n";
 			#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
 			$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
 			if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
@@ -341,6 +342,7 @@ use common::sense;
 			}
 
 			$external_ip = '' if !$external_ip;
+			trace "SocketWorker: update_node_info(): WAN IP is: '$external_ip'\n";
 
 			$set->('wan_ip', $external_ip)
 				if ($inf->{wan_ip}||'') ne $external_ip;
@@ -788,12 +790,20 @@ use common::sense;
 			my $time  = time;
 			while(time - $time < $max)
 			{
-				my $flag = defined ( $queue->by_key(to => $uuid, type => 'MSG_PONG') );
+				#my $flag = defined ( $queue->by_key(to => $uuid, type => 'MSG_PONG', from => $uuid_to) );
+				my $msg = $queue->by_key(to => $uuid, type => 'MSG_PONG', from => $uuid_to);
 				if(!$self->state_handle->{online})
 				{
 					error "SocketWorker: wait_for_receive; child thread gone away, not waiting anymore\n";
 					last;
 				}
+				
+				if(defined $msg)
+				{
+					#print STDERR "SocketWorkeR: wait for ping: got pong: ".Dumper($msg);
+				}
+				
+				my $flag = 1 if defined $msg;
 
 				#trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
 				last if $flag;
@@ -818,18 +828,29 @@ use common::sense;
 
 		my $final_rx_time = $self->sntp_time();
 
-		if(!$bcast)
-		{
-			return undef if !@return_list;
-			my $msg = shift @return_list;
-			my $pong_time = $msg->{data}->{pong_time};
-			my $delta = $pong_time - $start_time;
-			my $rx_delta = $final_rx_time - $start_time;
-			info "SocketWorker: Ping $uuid_to: ".sprintf('%.03f', $delta)." sec (total tx/rx time: ".sprintf('%.03f', $rx_delta)." sec)\n";
-			return $delta;
-		}
-		else
-		{
+# 		if(!$bcast)
+# 		{
+# 			return () if !@return_list;
+# 			my $msg = shift @return_list;
+# 			my $pong_time = $msg->{data}->{pong_time};
+# 			my $delta = $pong_time - $start_time;
+# 			my $rx_delta = $final_rx_time - $start_time;
+# 			info "SocketWorker: Ping $uuid_to: ".sprintf('%.03f', $delta)." sec (total tx/rx time: ".sprintf('%.03f', $rx_delta)." sec)\n";
+# 			#return $delta;
+# 			
+# 			my $out =
+# 			{
+# 				start_t   => $start_time,
+# 				msg       => $msg,
+# 				node_info => $msg->{data}->{node_info},
+# 				time      => $delta,
+# 				rx_delta  => $rx_delta,
+# 			};
+# 			
+# 			return ($out);
+# 		}
+# 		else
+# 		{
 			return () if !@return_list;
 
 			my $rx_delta = $final_rx_time - $start_time;
@@ -853,7 +874,7 @@ use common::sense;
 			}
 
 			return @output;
-		}
+#		}
 	}
 	
 
