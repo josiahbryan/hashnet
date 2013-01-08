@@ -3,3 +3,34 @@
 #-Test pings
 #-Add geo info
 -Add tests/ for Pings, Reconnect
+-GlobalDB: Add partial-key search
+-Idea: Add web interface (.cgi?) for:
+	-viewing queues (client/hub)
+	-adding/removing peers (hub)
+	-viewing peer status (hub)
+	-pinging network (hub/client)
+-Adapt sharedref and IndexedTable to use GlobalDB effictively
+	-Might need to subclass IndexedTable, say IndexedTable::GlobalDB, to properly use GlobalDB
+-Add a lock module to HashNet::MP for distributed locks
+	-To be used in GlobalDB to lock/unlock keys for batch updates
+-Add a GlobalDB 'queue vaccumme' process
+	-Sweep outgoing queue of offline peers every X minutes to compress multiple independent MSG_GLOBALDB_TR into a single GlobalDB TR update
+-Need some hook/some way for 'new peers' to a MessageHub/to the network to be able to get caught up-to-date with the state of GlobalDB
+	-Some sort of hook on 'new peer' in SocketWorker for GlobalDB to then queue up a big batch of the current state of the GlobalDB database?
+-Add a generic 'set_timeout*' API for use outside of the MessageHub timer loop which sets up its own AE loop
+	-For use by the GlobalDB vaccumme process
+-Idea: Concept of modules to plug into the MessageHub/SocketWorker framework?
+	-Right now, we have two 'modules' that intercept specific message types:
+		-MSG_CLIENT_RECEIPT (MessageHub)
+		-MSG_GLOBALDB_TR (GlobalDB)
+	-We already have fork_receiver - is that enough?
+	-What about GlobalLock? It will probably need it's own set of message types
+		-MSG_GLOCK_LOCK
+		-MSG_GLOCK_UNLOCK
+		-Some sort of facility to remove stale locks 
+			-By peer uuid?
+			-Should peers hold locks even if they are offline?
+				-Which begs the question - do we need some sort of facility to query if the peer is online somewhere on the network?
+					-Wouldn't MSG_PING do that? Just ping to that peers UUID and block till receive or timeout...?
+
+
