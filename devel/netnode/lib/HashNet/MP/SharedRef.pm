@@ -58,6 +58,15 @@ use common::sense;
 			return $self;
 		}
 	};
+	
+	# Shortcut, so users can do:
+	# HashNet::MP::LocalDB->handle("filename.dat")->indexed_handle("/test")
+	sub indexed_handle
+	{
+		my $self = shift;
+		my $path = shift;
+		return HashNet::MP::LocalDB->indexed_handle($path, $self);
+	}
 
 	sub _create_inst
 	{

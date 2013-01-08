@@ -623,6 +623,15 @@
 		$self->stop_timer_loop();
 	}
 	
+	sub route_table
+	{
+		my $self = shift;
+		return $self->{route_table} if defined $self->{route_table};
+		my $ref = HashNet::MP::LocalDB->indexed_handle('/hub/routing');
+		$self->{route_table} = $ref;
+		return $ref;
+	}
+	
 	sub router_process_loop
 	{
 		my $self = shift;
@@ -680,6 +689,9 @@
 		my $msg = shift;
 		my $self_uuid  = $self->node_info->{uuid};
 		
+		debug "\n-------------\n";
+		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
+		
 		if($msg->{type} eq MSG_CLIENT_RECEIPT)
 		{
 			# This is a receipt, saying the client picked up the message identified
@@ -703,7 +715,7 @@
 				my @queued = $queue->by_key(uuid => $rx_msg_uuid);
 				@queued = grep { $_->{to} eq $msg->{from} } @queued;
 	
-				#trace "MessageHub: router_process_loop: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+				trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
 	
 				#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
 	
@@ -711,6 +723,128 @@
 			};
 			#$queue->unlock_file;
 			#$queue->end_batch_update; # also unlocks the file
+		}
+		
+		if($msg->{hist})
+		{
+			trace "MessageHub: route_message: Processing history route for msg for {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+			
+			my @hist = @{$msg->{hist} || []};
+			my %ident;
+			my $ident = 0;
+			my %nodes;
+			$nodes{$self->node_info->{uuid}} = $self->node_info;
+			
+			#trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for msg {$rx_msg_uuid}, receipt id {$msg->{uuid}}\n"; #, lasthop $msg->{curhop}\n";
+			$hist[$#hist]->{last} = 1 if @hist;
+			my $last_to = undef;
+			my $last_time = time();
+			foreach my $item (@hist)
+			{
+				#next if defined $last_to && !$item->{last} && $item->{from} ne $last_to;
+				
+				my $time  = $item->{time};
+				my $uuid  = $item->{to};
+				my $uuid2 = $item->{from};
+				my $delta = $time - $last_time;
+				my $info  = $nodes{$uuid};
+		
+				#next if !$info;
+				my $key = $uuid2; #.$uuid;
+				my $ident = $ident{$key} || ++ $ident;
+				$ident{$key} = $ident;
+				my $prefix = "\t" x $ident;
+				
+				#print "$prefix -> " . ($info ? $info->{name} : ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> $uuid")." (".sprintf('%.03f', $delta)."s)\n";
+				trace "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
+				#print "$prefix -> ( " . $uuid2 . " -> " . $uuid ." )\n" if $print_uuids;
+				#print " -> " unless $item->{last};
+		
+				$last_to = $uuid;
+				$last_time = $time;
+			}
+			
+			if(@hist)
+			{
+				my $route_to = $hist[0]->{from};
+				my $route_from = $hist[$#hist]->{from}; # not 'to', because last @hist is 'to' this node
+				my $tbl = $self->route_table;
+				$tbl->begin_batch_update;
+				eval
+				{
+					my $route_row = $tbl->by_key('dest' => $route_to);
+					if(!$route_row)
+					{
+						if(@hist > 1)
+						{
+							$route_row = { dest => $route_to, nxthop => $route_from };
+							$tbl->add_row($route_row);
+							trace "MessageHub: route_message: [Route Table Update]: Added new route for '$route_to' to nxthop '$route_from'\n";
+						}
+						
+					}
+					elsif(@hist == 1)#$route_to eq $route_from)
+					{
+						# If only one row in hist, then it follows that
+						# the sender of this receipt is directly connected
+						# to this hub.
+						# Since it's directly connected to this hub,
+						# the route table does NOT need an entry,
+						# since the peer will be listed in the PeerList
+						# and if its online, then it will be found that way.
+						# If the peer is offline, even if in the PeerList,
+						# *then* the route table will be consulted. 
+						# Hopefully by then, the peer desired will have
+						# sent out a receipt that we've picked up here.
+						# Anyway, if directly connected, just remove
+						# $route_row
+						if($route_row)
+						{
+							$tbl->del_row($route_row);
+							trace "MessageHub: route_message: [Route Table Update]: Removed route for '$route_to' since it's directly connected now\n";
+						}
+					}
+					else
+					{
+						if($route_from ne $route_row->{nxthop})
+						{ 
+							$route_row->{nxthop} = $route_from;
+							$route_row->{count}  = 0;
+							trace "MessageHub: route_message: [Route Table Update]: Updated route for '$route_to' to nxthop '$route_from'\n";
+						}
+						else
+						{
+							trace "MessageHub: route_message: [Route Table Update]: Route for '$route_to' / nxthop '$route_from' is current, no update needed\n";
+						}
+						
+						$route_row->{timestamp} = time();
+						$route_row->{count} ++;
+						$tbl->update_row($route_row);
+					}
+				};
+				if($@)
+				{
+					error "MessageHub: route_message: Error updating route table: $@\n";
+					warn "Error updating route table: $@";
+				}
+				$tbl->end_batch_update;
+			}
+			
+			# TODO: Should we consider rewriting any envelopes in the outgoing queue that are for $route_to, with nxthop as $route_to, to have anxthop of $route_from, if @hist > 1?
+			# TODO: What happens if the route is stale?
+			# 	-eg: 
+			#	- Server A, Server B, and Client 1
+			#	- C1 connects to SA, then disconnects
+			#	- C1 connects to SB, sends receipt, SA picks up and routes msgs for C1 to SB
+			#	- C1 disconnects from SB
+			#	- Cx sends msg to C1 via SA
+			#	- SA routes to SB (last known)
+			#	- SB:
+			#		- Peer offline, so it doesnt go right to the peer
+			#		- Route table empty for C1 (since it was direct connect)
+			#		- Broadcast to all hubs, in this case SA
+			#		- SA:
+			#			- SA rejects msg because history shows it came thru here
 		}
 
 		my @recip_list;
@@ -746,27 +880,54 @@
 			if(@find == 1)
 			{
 				@recip_list = shift @find;
-				#trace "MessageHub: router_process_loop: I think '$to' is this peer: ".Dumper(\@recip_list);
+				#trace "MessageHub: route_message: I think '$to' is this peer: ".Dumper(\@recip_list);
 			}
 			else
 			{
-				# TODO:
-				# - Assume that when the final node gets the msg, it sends a non-sfwd reply back thru to the original sender
-				# - As that non-sfwd reply goes thru hubs, each hub stores what the LAST hop was for that msg so it knows
-				#   how best to get thru
-				# - Then when we get to this case again (non-directly-connect peer),
-				#   we grep our routing map for the hub from which we got a reply and try sending it there
-				#	- That word 'try' implies we followup to make sure the msg was delivered......
-
-				# Message not to a peer directly connected (e.g. to a client on another hub),
-				# so until we develop a routing table mechanism, we just broadcast to all connected peers that are hubs
-				@recip_list = grep { $_->type eq 'hub' } @peers;
-
-				# If not store-forward, then we only want to send to peers currently online
-				# since we dont want to store this message for any peers that are not currently
-				# connect to this hub
+				my $route_to = $to;
+				my $tbl   = $self->route_table;
+				my $route = $tbl->by_key('dest' => $route_to);
+				my ($uuid, $peer);
+				if(!$route)
+				{
+					trace "MessageHub: route_message: [route tbl check] No route exists for '$route_to'\n";
+				}
+				else
+				{
+					$uuid = $route->{nxthop};
+					$peer = HashNet::MP::PeerList->get_peer_by_uuid($uuid);
+					if(!$peer)
+					{
+						trace "MessageHub: route_message: [route tbl check] Found nxthop '$uuid' for '$route_to', but no entry in PeerList for that nxthop!\n";
+					}
+				}
 				
-				#trace "MessageHub: router_process_loop: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list, \@peers);
+				if($peer)
+				{
+					@recip_list = ($peer);
+					trace "MessageHub: route_message: [route tbl check] Found route to '$route_to', recip_list now: ".Dumper(\@recip_list);
+				}
+				else
+				{
+						
+					# TODO:
+					# - Assume that when the final node gets the msg, it sends a non-sfwd reply back thru to the original sender
+					# - As that non-sfwd reply goes thru hubs, each hub stores what the LAST hop was for that msg so it knows
+					#   how best to get thru
+					# - Then when we get to this case again (non-directly-connect peer),
+					#   we grep our routing map for the hub from which we got a reply and try sending it there
+					#	- That word 'try' implies we followup to make sure the msg was delivered......
+	
+					# Message not to a peer directly connected (e.g. to a client on another hub),
+					# so until we develop a routing table mechanism, we just broadcast to all connected peers that are hubs
+					@recip_list = grep { $_->type eq 'hub' } @peers;
+	
+					# If not store-forward, then we only want to send to peers currently online
+					# since we dont want to store this message for any peers that are not currently
+					# connect to this hub
+					
+					trace "MessageHub: route_message: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list);
+				}
 			}
 		}
 
@@ -775,7 +936,7 @@
 			@recip_list = grep { $_->{online} } @recip_list;
 		}
 
-		debug "MessageHub: router_process_loop: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
 			if @recip_list;
 
 		#debug Dumper $msg, \@peers;
@@ -787,7 +948,7 @@
 			my $dest_uuid = $msg->{bcast} ? $peer->uuid : $msg->{to};
 # 			if(check_route_hist($msg->{hist}, $dest_uuid))
 # 			{
-# 				info "MessageHub: router_process_loop: NOT creating envelope to $dest_uuid, history says it was already sent there.\n"; #: ".Dumper($envelope);
+# 				info "MessageHub: route_message: NOT creating envelope to $dest_uuid, history says it was already sent there.\n"; #: ".Dumper($envelope);
 # 				next;
 # 			}
 			
@@ -818,7 +979,7 @@
 			);
 			my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
 			$self->outgoing_queue->add_row($new_env);
-			#debug "MessageHub: router_process_loop: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+			#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
 		}
 	}
 };
