@@ -2,6 +2,14 @@
 #-MessageHub: Reconnect to other hubs if disconnected
 #-Test pings
 #-Add geo info
+
+**************
+-MAJOR PROBLEM:
+	-fork_receiver only works if noone else DELETES the messages!! Crikey...
+		-when used in a MessageHub, the router_process_loop() likely will delete the msgs from the queue before fork_receiver() sees them!
+		-How to fix? Need to think on this
+**************
+
 -Add tests/ for Pings, Reconnect
 -GlobalDB: Add partial-key search
 -Idea: Add web interface (.cgi?) for:
@@ -32,5 +40,3 @@
 			-Should peers hold locks even if they are offline?
 				-Which begs the question - do we need some sort of facility to query if the peer is online somewhere on the network?
 					-Wouldn't MSG_PING do that? Just ping to that peers UUID and block till receive or timeout...?
-
-

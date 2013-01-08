@@ -1037,9 +1037,18 @@ use common::sense;
 		my $msg_name = shift;
 		my $code_ref = shift;
 		my %opts     = @_;
-		my $speed    = $opts{speed} || 0.05;
+		my $speed    = $opts{speed} || 0.01;
 		my $uuid     = $opts{uuid};
 		my $no_del   = $opts{no_del} || 0;
+		
+		my @msg_names;
+		my %msg_subs;
+		if($msg_name eq 'messages')
+		{
+			%msg_subs = %{$code_ref || {}};
+			@msg_names = keys %msg_subs;
+			$msg_name = '('.join('|', @msg_names).')';
+		}
 		
 		if(!$uuid)
 		{
@@ -1075,7 +1084,7 @@ use common::sense;
 			
 			while(1)
 			{
-				my @list = $queue->by_key(nxthop => $uuid, type => $msg_name);
+				my @list = $queue->by_key(nxthop => $uuid, type => @msg_names ? \@msg_names : $msg_name);
 				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
 				if($no_del)
@@ -1102,7 +1111,19 @@ use common::sense;
 					$recipt_queue->begin_batch_update;
 					foreach my $msg (@list)
 					{
-						$code_ref->($msg);
+						local *@;
+						eval
+						{
+							if(@msg_names)
+							{
+								$msg_subs{$msg->{type}}->($msg);
+							}
+							else
+							{
+								$code_ref->($msg);
+							}
+						};
+						trace "SocketWorker: fork_receiver/$msg_name: Error processing msg $msg->{type} {$msg->{uuid}}: $@" if $@;
 
 						# We're cheating the system a bit if we don't have a $self ref -
 						# we assume that if no ref $self, we are running on a hub,

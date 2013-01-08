@@ -607,13 +607,35 @@ use common::sense;
 
 		#print STDERR __PACKAGE__.": by_key: key='$key', val='$val'\n";
 		#print_stack_trace() if !$val;
+		my $idx = $self->index;
+		
+		# Assume an arrayref for $val is a boolean OR list of values to search for in $key
+		if(ref $val eq 'ARRAY')
+		{
+			my %id_mashup;
+			foreach my $real_val (@$val)
+			{
+				next if !$idx->{$key};
+				next if !$idx->{$key}->{$real_val};
+				
+				# Get all the IDs that have $key/$real_val
+				my @keys = keys %{ $idx->{$key}->{$real_val} };
+				
+				# Put the IDs in the id_mashup hash because
+				# the hash will make sure each ID only occurs once in the result 
+				$id_mashup{$_} = 1 foreach @keys;
+			}
+			
+			# Return the final list of IDs
+			return keys %id_mashup;
+		}
 
 		# No values exist for this value for this key
-		return () if !$self->index->{$key};
-		return () if !$self->index->{$key}->{$val};
+		return () if !$idx->{$key};
+		return () if !$idx->{$key}->{$val};
 
 		# Grab the list of IDs that have this key/value
-		return keys %{ $self->index->{$key}->{$val} };
+		return keys %{ $idx->{$key}->{$val} };
 	}
 
 	sub _id_list_to_data

@@ -46,6 +46,9 @@ is($n_foo->{id}, $row3->{id}, "lookup by age 21");
 my @results = $table->by_key(age => 19);
 is(scalar @results, 2, "lookup by age 19 returns 2 results");
 
+my @results = $table->by_key(age => [19, 21]);
+is(scalar @results, 3, "lookup by age [19, 21] returns 3 results");
+
 #print Dumper $table;
 
 done_testing();
