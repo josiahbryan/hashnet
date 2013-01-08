@@ -14,12 +14,12 @@ $HashNet::Util::Logging::LEVEL = 0;
 #$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my %opts;
-getopts('?prh:t:', \%opts);
+getopts('?prh:t:u:', \%opts);
 
 
 if($opts{'?'}) # || !(scalar keys %opts))
 {
-	print qq{Usage: $0 [-?] [-h host(s)] [-t time] [uuid]
+	print qq{Usage: $0 [-?] [-h host(s)] [-t time] ([uuid] or [-u uuid])
 
   Options:
     -?       - This message
@@ -27,16 +27,17 @@ if($opts{'?'}) # || !(scalar keys %opts))
     -r	     - Turn OFF printing the route (on by default)
     -p	     - Print UUIDs of all hosts below names (off by default)
     -t 	     - Seconds to wait for a broadcast ping (no UUID)
-    uuid     - Optional UUID of a host/client to ping
+    -u UUID  [or]
+    UUID     - Optional UUID of a host/client to ping
                If no UUID given, sends a broadcast ping
 
 };
 	exit 0;
 }
 
-my $ping_uuid = shift @ARGV || undef;
+my $ping_uuid     = $opts{u} || shift @ARGV || undef;
 my $ping_max_time = $opts{t} || 10;
-my $no_route = $opts{r} || 0;
+my $no_route      = $opts{r} || 0;
 
 my @hosts = split /,/, $opts{h};
 
