@@ -635,7 +635,7 @@ use common::sense;
 					curhop	=> $self->uuid,
 					to	=> $envelope->{from},
 					bcast	=> 0,
-					sfwd	=> 1,
+					sfwd	=> 0,
 				);
 				my $new_env = $self->create_envelope(@args);
 				#trace "ClientHandle: incoming_messages: Created MSG_PONG for {$envelope->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
@@ -771,7 +771,7 @@ use common::sense;
 			curhop	=> $self->uuid,
 			to	=> $uuid_to || '*',
 			bcast	=> $bcast,
-			sfwd	=> 1,
+			sfwd	=> 0,
 		);
 		my $new_env = $self->create_envelope(@args);
 
