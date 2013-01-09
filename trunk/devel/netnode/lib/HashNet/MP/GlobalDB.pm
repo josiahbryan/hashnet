@@ -71,79 +71,79 @@ package HashNet::MP::GlobalDB;
 		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
 		
 		my $fork_pid = $sw_handle->fork_receiver(
-			messages => 
-			{
-				MSG_GLOBALDB_TR => sub {
-					my $msg = shift;
-	
-					trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
-					$self->_put_local_batch($msg->{data});
-					trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
-				},
-				
-				MSG_GLOBALDB_REV_QUERY => sub {
-					my $msg = shift;
-	
-					trace "GlobalDB: MSG_GLOBALDB_REV_QUERY\n";
-					my @rev = $self->db_rev;
-					#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
-					
-					my @args =
-					(
-						{ rev => shift @rev,
-						  ts  => shift @rev },
-						type	=> MSG_GLOBALDB_REV_REPLY,
-						nxthop	=> $msg->{from},
-						curhop	=> $msg->{to},
-						to	=> $msg->{from},
-						from	=> $msg->{to},
-						bcast	=> 0,
-						sfwd	=> 1,
-					);
-					my $new_env = $sw_handle->create_envelope(@args);
-					$sw_handle->outgoing_queue->add_row($new_env);
-				},
-				
-				MSG_GLOBALDB_LOCK	=> sub {
-					my $msg = shift;
-	
-					trace "GlobalDB: MSG_GLOBALDB_LOCK\n";
-					
-					my $lock_key = undef;
-					
-					# TODO: Code this
-					# Pseudo code:
-					#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
-					#	- Wait for ...what? How do we know we've got the exclusive lock...?
-					#	- Queue reply back to the sender of $msg indicating got lock or no 
-				},
-				
-				MSG_GLOBALDB_UNLOCK	=> sub {
-					my $msg = shift;
-	
-					trace "GlobalDB: MSG_GLOBALDB_UNLOCK\n";
-					
-					my $lock_key = undef;
-					
-					# TODO: Code unlock
-				},
-				
-				MSG_GLOBALDB_UNSTALE	=> sub {
-					my $msg = shift;
-	
-					trace "GlobalDB: MSG_GLOBALDB_UNSTALE\n";
-					
-					my $lock_key = undef;
-					
-					# TODO: Code cleanup stale locks
-					
-				},
-			},
-				
+
+			# needs UUID to generate MSG_CLIENT_RECEIPTS automatically
 			uuid   => $uuid,
-			no_del => $sw ? 0 : 1);
 			
-		$self->{rx_pid} = $fork_pid;	
+			MSG_GLOBALDB_TR => sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
+				$self->_put_local_batch($msg->{data});
+				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
+			},
+
+			MSG_GLOBALDB_REV_QUERY => sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_REV_QUERY\n";
+				my @rev = $self->db_rev;
+				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+
+				my @args =
+				(
+					{ rev => shift @rev,
+						ts  => shift @rev },
+					type	=> MSG_GLOBALDB_REV_REPLY,
+					nxthop	=> $msg->{from},
+					curhop	=> $msg->{to},
+					to	=> $msg->{from},
+					from	=> $msg->{to},
+					bcast	=> 0,
+					sfwd	=> 1,
+				);
+				my $new_env = $sw_handle->create_envelope(@args);
+				$sw_handle->outgoing_queue->add_row($new_env);
+			},
+
+			MSG_GLOBALDB_LOCK	=> sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_LOCK\n";
+
+				my $lock_key = undef;
+
+				# TODO: Code this
+				# Pseudo code:
+				#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
+				#	- Wait for ...what? How do we know we've got the exclusive lock...?
+				#	- Queue reply back to the sender of $msg indicating got lock or no
+			},
+
+			MSG_GLOBALDB_UNLOCK	=> sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_UNLOCK\n";
+
+				my $lock_key = undef;
+
+				# TODO: Code unlock
+			},
+
+			MSG_GLOBALDB_UNSTALE	=> sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_UNSTALE\n";
+
+				my $lock_key = undef;
+
+				# TODO: Code cleanup stale locks
+
+			},
+		);
+			
+		$self->{rx_pid} = { pid => $fork_pid, started_from => $$ };
 	}
 	
 	sub check_db_ver
@@ -190,9 +190,11 @@ package HashNet::MP::GlobalDB;
 	sub DESTROY
 	{
 		my $self = shift;
-		if($self->{rx_pid})
+		if($self->{rx_pid} &&
+		   $self->{rx_pid}->{started_from} == $$)
 		{
-			kill 15, $self->{rx_pid};
+			trace "GlobalDB: DESTROY: Killing rx_pid $self->{rx_pid}->{pid}\n";
+			kill 15, $self->{rx_pid}->{pid};
 		}
 	}
 

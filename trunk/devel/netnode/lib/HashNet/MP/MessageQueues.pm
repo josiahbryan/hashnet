@@ -5,7 +5,7 @@ use common::sense;
 	our @ISA = qw(Exporter);
 
 	# Exporting by default
-	our @EXPORT = qw(incoming_queue outgoing_queue msg_queuen pending_messages outgoing incoming);
+	our @EXPORT = qw(incoming_queue outgoing_queue msg_queue pending_messages outgoing incoming);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 
@@ -46,7 +46,7 @@ use common::sense;
 	sub pending_messages
 	{
 		shift if $_[0] eq __PACKAGE__;
-		return () if @_ < 2;
+		#return () if @_ < 2;
 		if(@_ == 2)
 		{
 			my ($queue_idx,$uuid) = @_;
@@ -61,13 +61,16 @@ use common::sense;
 		my %opts       = @_;
 		my $no_del     = $opts{no_del} || 0;
 
-		$queue_name = 'outgoing' if $queue_name eq 'out' || $queue_name eq 'tx';
-		$queue_name = 'incoming' if $queue_name eq 'in'  || $queue_name eq 'rx';
+		if(!ref $queue_name)
+		{
+			$queue_name = 'outgoing' if $queue_name eq 'out' || $queue_name eq 'tx';
+			$queue_name = 'incoming' if $queue_name eq 'in'  || $queue_name eq 'rx';
+		}
 
-		my $queue = msg_queue($queue_name);
+		my $queue = ref $queue_name ? $queue_name : msg_queue($queue_name);
 		$queue->lock_file;
 		
-		my @list  = $queue->by_key($idx_key => $uuid);
+		my @list  = $idx_key && $uuid ? $queue->by_key($idx_key => $uuid) : @{ $queue->list || [] };
 		#return () if !@list;
 		if(!@list)
 		{
@@ -78,7 +81,8 @@ use common::sense;
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
 		#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		#print STDERR Dumper(\@list) if @list;
+		#use Data::Dumper;
+		#print STDERR Dumper(\@list) if @list && ref $queue_name;
 		#print STDERR Dumper($self->peer);
 
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
