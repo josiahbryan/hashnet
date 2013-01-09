@@ -717,9 +717,11 @@
 			#$queue->lock_file;
 			eval {
 				my @queued = $queue->by_key(uuid => $rx_msg_uuid);
+				
+				# Dont delete broadcast messages with same uuid
 				@queued = grep { $_->{to} eq $msg->{from} } @queued;
 	
-				trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+				#trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
 	
 				#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
 	
@@ -731,7 +733,7 @@
 		
 		if($msg->{hist})
 		{
-			trace "MessageHub: route_message: Processing history route for msg for {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+			#trace "MessageHub: route_message: Processing history route for msg for {$msg->{uuid}}, lasthop $msg->{curhop}\n";
 			
 			my @hist = @{$msg->{hist} || []};
 			my %ident;
@@ -759,11 +761,8 @@
 				$ident{$key} = $ident;
 				my $prefix = "\t" x $ident;
 				
-				#print "$prefix -> " . ($info ? $info->{name} : ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> $uuid")." (".sprintf('%.03f', $delta)."s)\n";
-				trace "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
-				#print "$prefix -> ( " . $uuid2 . " -> " . $uuid ." )\n" if $print_uuids;
-				#print " -> " unless $item->{last};
-		
+				#trace "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
+				
 				$last_to = $uuid;
 				$last_time = $time;
 			}
@@ -783,7 +782,7 @@
 						{
 							$route_row = { dest => $route_to, nxthop => $route_from };
 							$tbl->add_row($route_row);
-							trace "MessageHub: route_message: [Route Table Update]: Added new route for '$route_to' to nxthop '$route_from'\n";
+							#trace "MessageHub: route_message: [Route Table Update]: Added new route for '$route_to' to nxthop '$route_from'\n";
 						}
 						
 					}
@@ -805,7 +804,7 @@
 						if($route_row)
 						{
 							$tbl->del_row($route_row);
-							trace "MessageHub: route_message: [Route Table Update]: Removed route for '$route_to' since it's directly connected now\n";
+							#trace "MessageHub: route_message: [Route Table Update]: Removed route for '$route_to' since it's directly connected now\n";
 						}
 					}
 					else
@@ -814,11 +813,11 @@
 						{ 
 							$route_row->{nxthop} = $route_from;
 							$route_row->{count}  = 0;
-							trace "MessageHub: route_message: [Route Table Update]: Updated route for '$route_to' to nxthop '$route_from'\n";
+							#trace "MessageHub: route_message: [Route Table Update]: Updated route for '$route_to' to nxthop '$route_from'\n";
 						}
 						else
 						{
-							trace "MessageHub: route_message: [Route Table Update]: Route for '$route_to' / nxthop '$route_from' is current, no update needed\n";
+							#trace "MessageHub: route_message: [Route Table Update]: Route for '$route_to' / nxthop '$route_from' is current, no update needed\n";
 						}
 						
 						$route_row->{timestamp} = time();
@@ -880,7 +879,14 @@
 			# Otherwise ...?
 			#	- Query connect hubs?
 			#	- Broadcast with a special flag to reply upon delivery...?
-			my @find = grep { $_->is_online && $_->uuid eq $to } @peers;
+			my @find = grep { $_->uuid eq $to } @peers;
+			
+			# We want to know if it was a direct connect even if its not online for the sake of routing, below
+			my $is_direct_connect = @find == 1 ? $find[0] : 0;
+			
+			#trace "MessageHub: route_message: [DC debug] \$is_direct_connect:'$is_direct_connect', to: '$to', \@find: ".Dumper(\@find), ", \@peers: ".Dumper(\@peers); 
+			@find = () if @find == 1 && !$find[0]->is_online; 
+			
 			if(@find == 1)
 			{
 				@recip_list = shift @find;
@@ -894,7 +900,15 @@
 				my ($uuid, $peer);
 				if(!$route)
 				{
-					trace "MessageHub: route_message: [route tbl check] No route exists for '$route_to'\n";
+					if($is_direct_connect)
+					{
+						trace "MessageHub: route_message: [route tbl check] No other route exists offline DC '$route_to', routing to local queue\n";
+						$peer = $is_direct_connect;
+					}
+					else
+					{
+						trace "MessageHub: route_message: [route tbl check] No route exists for '$route_to'\n";
+					}
 				}
 				else
 				{
@@ -909,7 +923,7 @@
 				if($peer)
 				{
 					@recip_list = ($peer);
-					trace "MessageHub: route_message: [route tbl check] Found route to '$route_to', recip_list now: ".Dumper(\@recip_list);
+					#trace "MessageHub: route_message: [route tbl check] Found route to '$route_to', recip_list now: ".Dumper(\@recip_list);
 				}
 				else
 				{
@@ -925,6 +939,19 @@
 					# Message not to a peer directly connected (e.g. to a client on another hub),
 					# so until we develop a routing table mechanism, we just broadcast to all connected peers that are hubs
 					@recip_list = grep { $_->type eq 'hub' } @peers;
+					
+					# Also add a recip entry for the dest itself because it's possible that destination uuid ($to)
+					# has not come online ANYWHERE on the network. If we did not do this (add $to to the recip list),
+					# then the message would be broadcast to all peers, all peers would have no idea where to find
+					# $to, and they would re-broadcast it - and since SocketWorker rejects incoming messages
+					# that have been here before, when the other peers broadcast back to this one,
+					# the message would get dropped - basically, the message would evaporate.
+					# This line here (adding $to to @recip_list) protects against that message evaporation by 
+					# putting the message in our outgoing queue directly to $to incase $to happens to connect
+					# to this hub. If $to connects to another hub and picks up the message there, a MSG_CLIENT_RECEIPT
+					# (should) get broadcast, and we'll pick that up (above), and erase the message from our
+					# outgoing queue so it doesnt just take up space. 
+					push @recip_list, HashNet::MP::PeerList->get_peer_by_uuid($to);
 	
 					# If not store-forward, then we only want to send to peers currently online
 					# since we dont want to store this message for any peers that are not currently
