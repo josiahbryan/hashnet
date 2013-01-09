@@ -559,8 +559,10 @@ use common::sense;
 	{
 		my $self = shift;
 		my $msg         = shift || {};
-		my $from_uuid   = shift || ref $self ? $self->uuid : undef;
-		my $nxthop_uuid = shift || ref $self ? $self->peer_uuid : undef;
+		my $from_uuid   = shift;
+		my $nxthop_uuid = shift;
+		$from_uuid   = $self->uuid      if !$from_uuid   && ref $self;
+		$nxthop_uuid = $self->peer_uuid if !$nxthop_uuid && ref $self;
 		my @args =
 		(
 			{
@@ -577,6 +579,13 @@ use common::sense;
 			sfwd	=> 0,
 		);
 
+		if(!$nxthop_uuid)
+		{
+			error "SocketWorker: create_client_receipt: \$nxthop_uuid (third arg) is undef, not creating envelope.\n";
+			error "SocketWorker: create_client_receipt: called from: ".print_stack_trace();
+			return undef;
+		}
+		
 		return $self->create_envelope(@args);
 	}
 
@@ -1126,14 +1135,13 @@ use common::sense;
 		my %msg_subs = @_;
 
 		my $speed = 0.01;
-		$speed = $msg_subs{speed} and delete $msg_subs{speed} if $msg_subs{speed};
+		$speed = $msg_subs{speed} and delete $msg_subs{speed} if $msg_subs{speed} > 0; # speed of <0 still is boolean true, so eliminate <0 with >0
 
 		my $uuid = undef;
 		$uuid = $msg_subs{uuid}   and delete $msg_subs{uuid}  if $msg_subs{uuid};
 		
-		my @msg_names;
-		@msg_names = keys %msg_subs;
-		my $msg_name = @msg_names > 1 ? '('.join('|', @msg_names).')' : $msg_names[0];
+		my @msg_names = keys %msg_subs;
+		my $msg_name  = @msg_names > 1 ? '('.join('|', @msg_names).')' : $msg_names[0];
 
 		if(!$uuid)
 		{
@@ -1173,31 +1181,12 @@ use common::sense;
 			
 			while(1)
 			{
-				#my @list = $queue->by_key(nxthop => $uuid, type => @msg_names ? \@msg_names : $msg_name);
 				my @list = HashNet::MP::MessageQueues->pending_messages($queue);
 				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
-# 				if($no_del)
-# 				{
-# 					my $seen_batch = 0;
-# 					@list = grep { ! $seen_msg_flag{$_->{uuid}} } @list;
-# 					$seen_msg_flag{$_->{uuid}} = time() foreach @list;
-# 					
-# 					# Simple kludge to keep %seen_msg_flag from growing too large.
-# 					# This is only risky if the messages are not removed from the 
-# 					# incoming queue within $max_time seconds by some other process.
-# 					# The only risk is that the message will appear as 'new' again.
-# 					foreach my $key (keys %seen_msg_flag)
-# 					{
-# 						delete $seen_msg_flag{$_}
-# 							if time() - $seen_msg_flag{$_} > $max_time;
-# 					}
-# 				}
-
 				if(@list)
 				{
-					trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
-
+					#trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
 					$recipt_queue->begin_batch_update;
 					
 					foreach my $msg (@list)
@@ -1218,11 +1207,11 @@ use common::sense;
 						# all connected clients.
 						if($uuid)
 						{
-							my $new_env = $self->create_client_receipt($msg,
-								$uuid,
-								# See note above on 'cheating'
-								ref $self ? $self->peer_uuid : $uuid);
-
+							# See note above on 'cheating'
+							my $nxthop_uuid = ref $self ? $self->peer_uuid : $uuid;
+							
+							my $new_env = $self->create_client_receipt($msg, $uuid, $nxthop_uuid);
+							
 							$recipt_queue->add_row($new_env);
 						}
 					}
@@ -1242,20 +1231,20 @@ use common::sense;
 				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
 				unless(kill 0, $parent_pid)
 				{
-					error "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
+					#trace "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
 					last;
 				}
 				
 				if(ref $self && !$self->state_handle->{online})
 				{
-					error "SocketWorker: fork_receiver/$msg_name: SocketWorker dead or dieing, not waiting anymore\n";
+					#trace "SocketWorker: fork_receiver/$msg_name: SocketWorker dead or dieing, not waiting anymore\n";
 					last;
 				}
+				
 				sleep $speed;
 			}
 
-			error "SocketWorker: fork_receiver/$msg_name: Exiting fork_receiver() fork\n";
-
+			#trace "SocketWorker: fork_receiver/$msg_name: Exiting fork_receiver() fork\n";
 			exit 0;
 		}
 
