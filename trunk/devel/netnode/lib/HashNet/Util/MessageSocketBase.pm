@@ -330,8 +330,13 @@
 		my $self = shift;
 		my $sel = $self->{socket_select};
 		
+		#trace "MessageSocketBase: send_pending_messages(): Trying to lock outgoing queue...\n";
+		
 		if($self->outgoing_queue->lock_file)
 		{
+		
+			#trace "MessageSocketBase: send_pending_messages(): Lock acquired, checking for pending messages\n";
+			
 			my @messages = $self->pending_messages();
 			#trace "MessageSocketBase: \@messages: @messages\n";
 			my $msg_total = scalar @messages;

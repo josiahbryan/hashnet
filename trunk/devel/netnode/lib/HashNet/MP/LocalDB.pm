@@ -138,7 +138,11 @@ use common::sense;
 
 
 	sub shared_ref { shift->{shared_ref} }
-	sub data       { shift->shared_ref->{data} }
+	sub data       {
+		my $data = shift->shared_ref;
+		$data->{data} = {} if !$data->{data};
+		return $data->{data};
+	 }
 	sub index      {
 		my $data = shift->shared_ref;
 		$data->{idx} = {} if !$data->{idx};
@@ -272,6 +276,13 @@ use common::sense;
 		my $row = shift;
 		
 		return undef if ! defined $row;
+		
+		# Protection against idiot programmers (myself) trying to add a row twice - which messes up the index and del_row calls later
+		if($row->{id})
+		{
+			$self->update_row($row);
+			return $row;
+		}
 
 		$self->update_begin;
 		
@@ -282,6 +293,8 @@ use common::sense;
 		$self->_index_row($row);
 
 		$self->update_end;
+		
+		#trace "LocalDB: + add_row:    ".Dumper($row);
 		
 		return $row;
 	}
@@ -294,6 +307,9 @@ use common::sense;
 		return undef if ! defined $row;
 
 		$self->update_begin;
+		
+		#trace "LocalDB: update_row: $row\n";
+		#trace "LocalDB: = update_row: ".Dumper($row);
 
 		$self->data->{$row->{id}} = $row;
 
@@ -389,6 +405,8 @@ use common::sense;
 
 		$self->update_begin;
 		
+		#trace "LocalDB: del_batch: deleting batch: ".Dumper(\@rows);
+		
 		my $data  = $self->data;
 		my $index = $self->index;
 		my @keys  = $self->keys;
@@ -416,6 +434,7 @@ use common::sense;
 				delete $index->{$key}->{$val} if !scalar keys %{ $index->{$key}->{$val} };
 			}
 			
+			#trace "LocalDB: del_batch: deleting data row for id: $id\n";
 			delete $data->{$id};
 		}
 

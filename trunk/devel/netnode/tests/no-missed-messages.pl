@@ -70,7 +70,7 @@ else
 	#$ch->sw->outgoing_queue->unlock_file;
 	
 	$ch->wait_for_send;
-	$ch->wait_for_receive($num_msgs, $num_msgs); # 2nd arg is seconds, 1 sec per msg
+	$ch->wait_for_receive(msgs => $num_msgs, timeout => $num_msgs); # 2nd arg is seconds, 1 sec per msg
 
 	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
@@ -80,7 +80,8 @@ else
 		
 		@msgs = sort { $a->{data} <=> $b->{data} } @msgs;
 		my $msg = pop @msgs;
-		is($msg->{data},   $num_msgs, "Received proper data");
+		
+		is($msg->{data},    $num_msgs, "Received proper data");
 		is(scalar(@msgs)+1, $num_msgs, "Received correct numer of messages");
 	}
 	else
