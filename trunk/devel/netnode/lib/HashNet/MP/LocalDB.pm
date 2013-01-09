@@ -270,6 +270,8 @@ use common::sense;
 	{
 		my $self = shift;
 		my $row = shift;
+		
+		return undef if ! defined $row;
 
 		$self->update_begin;
 		
@@ -288,6 +290,8 @@ use common::sense;
 	{
 		my $self = shift;
 		my $row = shift;
+		
+		return undef if ! defined $row;
 
 		$self->update_begin;
 
@@ -312,6 +316,9 @@ use common::sense;
 	{
 		my $self = shift;
 		my $row  = shift;
+		
+		return undef if ! defined $row;
+		
 		my $id   = $row->{id};
 		return undef if !$id;
 
