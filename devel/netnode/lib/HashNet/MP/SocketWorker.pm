@@ -480,20 +480,27 @@ use common::sense;
 		@_ =  ( to => $_[0] ) if @_ == 1;
 		
 		my %opts = @_;
+		
+		#debug "SocketWorker: create_envelope: orig opts: ".Dumper(\%opts); 
+
+		if(!$opts{to} && $opts{nxthop})
+		{
+			$opts{to} = $opts{nxthop};
+		}
 
 		if(!$opts{to} && $self->peer_uuid)
 		{
 			$opts{to} = $self->peer_uuid;
 		}
-
+		
+		if(!$opts{nxthop} && $opts{to})
+		{
+			$opts{nxthop} = $opts{to};
+		}
+		
 		if(!$opts{nxthop} && $self->peer_uuid)
 		{
 			$opts{nxthop} = $self->peer_uuid;
-		}
-
-		if(!$opts{to} && $opts{nxthop})
-		{
-			$opts{to} = $opts{nxthop};
 		}
 
 		if(!$opts{to})
@@ -506,6 +513,11 @@ use common::sense;
 		if(!$opts{from})
 		{
 			$opts{from} = $self->uuid;
+		}
+		
+		if(!$opts{curhop} && $opts{from})
+		{
+			$opts{curhop} = $opts{from};
 		}
 
 		if(!$opts{curhop})
@@ -968,9 +980,18 @@ use common::sense;
 	sub wait_for_receive
 	{
 		my $self  = shift;
-		my $count = shift || 1;
-		my $max   = shift || 4;
-		my $speed = shift || 0.01;
+# 		my $count = shift || 1;
+# 		my $max   = shift || 4;
+# 		my $speed = shift || 0.01;
+		
+		@_ = ( count => $_[0] ) if @_ == 1;
+		my %opts  = @_;
+		
+		my $count = $opts{msgs}    || $opts{count} || 1;
+		my $max   = $opts{timeout} || $opts{max}   || 4;
+		my $speed = $opts{speed}   ||                 0.01;
+		my $type  = $opts{type}    ||                 undef;
+		
 		my $uuid  = $self->uuid;
 		#trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
@@ -987,7 +1008,15 @@ use common::sense;
 		#               and scalar ( $queue->all_by_key(to => $uuid) ) < $count;
 		while(time - $time < $max)
 		{
-			my $cnt = scalar ( $queue->all_by_key(to => $uuid) );
+			my $cnt = 0;
+			if($type)
+			{
+				$cnt = scalar ( $queue->all_by_key(to => $uuid, type => $type) );
+			}
+			else
+			{
+				$cnt = scalar ( $queue->all_by_key(to => $uuid) );
+			}
 			
 			unless(kill 0, $self->state_handle->{tx_loop_pid})
 			{
@@ -1023,11 +1052,15 @@ use common::sense;
 		#return () if !$self->peer;
 
  		my $uuid  = $self->peer_uuid; #$self->peer->uuid;
-		#trace "SocketWorker: pending_messages: uuid '$uuid'\n";
-		#trace Dumper $self->state_handle;
 		return () if !$uuid;
+		#trace "SocketWorker: pending_messages: uuid '$uuid' - querying...\n";
+		#trace Dumper $self->state_handle;
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
+		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(outgoing_queue());# if @res;
+		
+		# Somehow, empty hashes are getting into the outgoing queue...need to track down...
+		@res = grep { $_->{uuid} } @res;
 		
 		# Check envelope history on this side so as to not cause unecessary traffice
 		# if this envelope would just be rejected by the check_env_hist() above on the receiving side 

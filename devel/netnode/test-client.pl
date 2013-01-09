@@ -128,7 +128,7 @@ my $res = $ch->wait_for_send(300, 1);
 #sleep 30;
 
 trace "$0: Wait for receive\n";
-$res = $ch->wait_for_receive($max_msgs, 300, 1); # 300 sec
+$res = $ch->wait_for_receive(msgs => $max_msgs, timeout => 300, speed => 1);
 #trace "$0: Wait res: $res\n";
 
 sleep 1;

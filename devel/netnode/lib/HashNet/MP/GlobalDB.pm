@@ -10,10 +10,12 @@ package HashNet::MP::GlobalDB;
 	#use LWP::Simple qw/getstore/; # for clone database
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
 	use JSON::PP qw/encode_json decode_json/; # for stringify routine
+	use File::Slurp qw/:std/; # for cloning db
 	use UUID::Generator::PurePerl;
 	use HashNet::Util::Logging;
 	use HashNet::Util::SNTP;
 	use HashNet::Util::CleanRef;
+	
 
 	our $VERSION = 0.031;
 		
@@ -21,14 +23,15 @@ package HashNet::MP::GlobalDB;
 
 	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
 
-	sub MSG_GLOBALDB_TR         { 'MSG_GLOBALDB_TR'         }
-	sub MSG_GLOBALDB_REV_QUERY  { 'MSG_GLOBALDB_REV_QUERY'  }
-	sub MSG_GLOBALDB_REV_REPLY  { 'MSG_GLOBALDB_REV_REPLY'  }
-	sub MSG_GLOBALDB_BATCH_REQ  { 'MSG_GLOBALDB_BATCH_REQ'  }
-	sub MSG_GLOBALDB_LOCK       { 'MSG_GLOBALDB_LOCK'       }
-	sub MSG_GLOBALDB_LOCK_REPLY { 'MSG_GLOBALDB_LOCK_REPLY' }
-	sub MSG_GLOBALDB_UNLOCK     { 'MSG_GLOBALDB_UNLOCK'     }
-	sub MSG_GLOBALDB_UNSTALE    { 'MSG_GLOBALDB_UNSTALE'    }
+	sub MSG_GLOBALDB_TR          { 'MSG_GLOBALDB_TR'          }
+	sub MSG_GLOBALDB_REV_QUERY   { 'MSG_GLOBALDB_REV_QUERY'   }
+	sub MSG_GLOBALDB_REV_REPLY   { 'MSG_GLOBALDB_REV_REPLY'   }
+	sub MSG_GLOBALDB_BATCH_REQ   { 'MSG_GLOBALDB_BATCH_REQ'   }
+	sub MSG_GLOBALDB_BATCH_REPLY { 'MSG_GLOBALDB_BATCH_REPLY' }
+	sub MSG_GLOBALDB_LOCK        { 'MSG_GLOBALDB_LOCK'        }
+	sub MSG_GLOBALDB_LOCK_REPLY  { 'MSG_GLOBALDB_LOCK_REPLY'  }
+	sub MSG_GLOBALDB_UNLOCK      { 'MSG_GLOBALDB_UNLOCK'      }
+	sub MSG_GLOBALDB_UNSTALE     { 'MSG_GLOBALDB_UNSTALE'     }
 
 #public:
 	sub new
@@ -55,6 +58,8 @@ package HashNet::MP::GlobalDB;
 		$self->setup_message_listeners();
 
 		$self->check_db_ver();
+		
+		$self->check_db_rev();
 
 		return $self;
 	};
@@ -89,10 +94,46 @@ package HashNet::MP::GlobalDB;
 				my $msg = shift;
 
 				trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Received batch dump request\n";
-				#$self->_put_local_batch($msg->{data});
-				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
-				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
+				#trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Dump of request msg: ".Dumper($msg)."\n";
+				
+				my $file = $self->gen_db_archive;
+				my $buffer = read_file($file);
+				my $buf_len = length($buffer);
+				
+				my $env = $sw_handle->create_envelope($buf_len,
+					_att	=> $buffer,
+					type	=> MSG_GLOBALDB_BATCH_REPLY,
+					to	=> $msg->{from},
+					from	=> $msg->{to},
+				);
+				
+				#trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Enqueing new envelope: ".Dumper($env);
+				$sw_handle->outgoing_queue->add_row($env);
 			
+			},
+			
+			MSG_GLOBALDB_BATCH_REPLY => sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_BATCH_REPLY: Received batch database dump\n";
+				
+				my $buffer = $msg->{_att};
+				my $exp_len = $msg->{data};
+				my $buf_len = length($buffer);
+				
+				if($buf_len != $exp_len)
+				{
+					trace "GlobalDB: MSG_GLOBALDB_BATCH_REPLY: Error in dump file: received $buf_len bytes, epxected $exp_len bytes\n";
+				}
+				
+				
+				my $fh;
+				my $tmp_file = '/tmp/db.tar.gz';
+				open($fh, ">$tmp_file") || die "Can't write to $tmp_file: $!";
+				print $fh $buffer;
+				close($fh);
+				
+				$self->apply_db_archive($tmp_file);
 			},
 
 			MSG_GLOBALDB_REV_QUERY => sub {
@@ -105,14 +146,10 @@ package HashNet::MP::GlobalDB;
 				my @args =
 				(
 					{ rev => shift @rev,
-						ts  => shift @rev },
+					  ts  => shift @rev },
 					type	=> MSG_GLOBALDB_REV_REPLY,
-					nxthop	=> $msg->{from},
-					curhop	=> $msg->{to},
 					to	=> $msg->{from},
 					from	=> $msg->{to},
-					bcast	=> 0,
-					sfwd	=> 1,
 				);
 				my $new_env = $sw_handle->create_envelope(@args);
 				$sw_handle->outgoing_queue->add_row($new_env);
@@ -163,7 +200,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 
 		my $db_root = $self->db_root;
-		my $cmd = 'cd '.$db_root.'; tar -zcvf $OLDPWD/db.tar.gz; cd $OLDPWD';
+		my $cmd = 'cd '.$db_root.'; tar -zcvf $OLDPWD/db.tar.gz *; cd $OLDPWD';
 		trace "GlobalDB: gen_db_archive(): Running clone cmd: '$cmd'\n";
 		system($cmd);
 		
@@ -220,6 +257,51 @@ package HashNet::MP::GlobalDB;
 		$db_ver = retrieve($db_data_ver_file)->{ver} if -f $db_data_ver_file;
 
 		nstore({ ver => $VERSION }, $db_data_ver_file) if $db_ver != $VERSION;
+	}
+	
+	sub check_db_rev
+	{
+		my $self = shift;
+		if($self->db_rev() <= 0)
+		{
+			my $sw = $self->{sw};
+			trace "GlobalDB: check_db_rev: Batch update needed\n";
+			my $env;
+			if($sw)
+			{
+				trace "GlobalDB: check_db_rev: Connected as client to ".$sw->state_handle->{remote_node_info}->{name}.", sending batch request\n";
+				$env = $sw->create_envelope("Batch Request", type => MSG_GLOBALDB_BATCH_REQ);
+			}
+			else
+			{
+				# Must be in a MessageHub, find the first peer thats a hub and ask them
+				my @list = HashNet::MP::PeerList->peers_by_type('hub');
+				if(!@list)
+				{
+					trace "GlobalDB: check_db_rev: No hubs in database, cant get a batch update\n";	
+				}
+				else
+				{
+				
+					my $hub  = shift @list;
+					trace "GlobalDB: check_db_rev: Found hub in DB, '".$hub->{name}."', sending batch request\n";
+					my $uuid = $self->{rx_uuid};
+					$env = $sw->create_envelope("Batch Request",
+						type	=> MSG_GLOBALDB_BATCH_REQ,
+						to	=> $hub->uuid,
+						from	=> $uuid,
+					);
+				}
+				
+			}
+			
+			$sw->outgoing_queue->add_row($env) if $env;
+			
+			$sw->wait_for_send;
+			
+			# MSG_GLOBALDB_BATCH_REPLY is processed above
+			$sw->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_BATCH_REPLY);
+		}	
 	}
 	
 	sub update_db_rev

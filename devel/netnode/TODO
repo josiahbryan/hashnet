@@ -4,6 +4,7 @@
 #-Add geo info
 
 -Add tests/ for Pings, Reconnect
+-Add tests for globaldb: clone on rev 0
 -GlobalDB: Add partial-key search
 -Idea: Add web interface (.cgi?) for:
 	-viewing queues (client/hub)
