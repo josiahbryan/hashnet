@@ -275,6 +275,7 @@ use common::sense;
 	sub update_node_info
 	{
 
+		#trace "SocketWorker: update_node_info: stack: ".get_stack_trace();
 		# Fields:
 		# - Host Name
 		# - WAN IP
@@ -396,7 +397,7 @@ use common::sense;
 
 			if(-f $ip_data_file)
 			{
-				trace "SocketWorker: update_node_info(): Using \$ip_data_file: '$ip_data_file'\n";
+				#trace "SocketWorker: update_node_info(): Using \$ip_data_file: '$ip_data_file'\n";
 				
 # 				my $geo_info = join(', ',
 # 					$record->country_code,
@@ -724,6 +725,8 @@ use common::sense;
 			$self->state_handle->{online} = 1;
 			$self->state_update(0);
 
+			$self->_rx_copy_to_listen_queues($envelope);
+
 			#trace "SocketWorker: state_handle: ".Dumper($self);
 
 		}
@@ -738,6 +741,9 @@ use common::sense;
 				$envelope->{_att} = $second_part if defined $second_part;
 				$envelope->{_rx_time} = $self->sntp_time();
 				incoming_queue()->add_row($envelope);
+				
+				$self->_rx_copy_to_listen_queues($envelope);
+
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 				#print STDERR Dumper $envelope;
@@ -1031,34 +1037,114 @@ use common::sense;
 # 		$self->state_update(0);
 # 	}
 
-	sub fork_receiver
+
+
+	sub _rx_register_listener
 	{
 		my $self = shift;
 		my $msg_name = shift;
-		my $code_ref = shift;
-		my %opts     = @_;
-		my $speed    = $opts{speed} || 0.01;
-		my $uuid     = $opts{uuid};
-		my $no_del   = $opts{no_del} || 0;
-		
-		my @msg_names;
-		my %msg_subs;
-		if($msg_name eq 'messages')
+		my $pid = shift;
+		my $ref = HashNet::MP::LocalDB->handle();
+
+		# Prune old listener processes that may have gone away
+		my %pid_hash = %{ $ref->{socketworker}->{rx_listeners}->{$msg_name} || {} };
+		$self->_rx_validate_pid($msg_name, $_) foreach keys %pid_hash;
+
+		# Register the new $pid with $msg_name
+		$ref->update_begin;
+		$ref->{socketworker}->{rx_listeners}->{$msg_name}->{$pid} = 1;
+		$ref->update_end;
+	}
+
+	sub _rx_listen_queues_for_msg
+	{
+		my $self = shift;
+		my $msg_name = shift;
+
+		my $ref = HashNet::MP::LocalDB->handle();
+		$ref->load_changes;
+
+		my %pid_hash = %{ $ref->{socketworker}->{rx_listeners}->{$msg_name} || {} };
+		my @pids = keys %pid_hash;
+
+		# Only return queues for PIDs that are still alive (also prunes old PIDs)
+		my @valid_pids;
+		foreach my $pid (@pids)
 		{
-			%msg_subs = %{$code_ref || {}};
-			@msg_names = keys %msg_subs;
-			$msg_name = '('.join('|', @msg_names).')';
+			push @valid_pids, $pid if $self->_rx_validate_pid($msg_name, $pid);
 		}
 		
+		my @queues = map { msg_queue('listeners/'.$_) } @pids;
+		return @queues;
+	}
+
+	sub _rx_validate_pid
+	{
+		my ($self, $msg_name, $pid) = @_;
+		
+		# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
+		return 1 if kill 0, $pid;
+
+		$self->_rx_deregister_listener($msg_name, $pid);
+		return 0;
+	}
+
+	sub _rx_deregister_listener
+	{
+		my $self = shift;
+		my $msg_name = shift;
+		my $pid = shift;
+
+		my $ref = HashNet::MP::LocalDB->handle();
+		$ref->update_begin;
+
+		# $pid no longer valid, automatically de-register it
+		delete $ref->{socketworker}->{rx_listeners}->{$msg_name}->{$pid};
+
+		# Even if another process with the same PID registers, we dont want stale messages laying in the queue
+		# So we remove the old file.
+		my $queue = msg_queue('listeners/'.$pid);
+		unlink($queue->shared_ref->file);
+
+		$ref->update_end;
+	}
+
+	sub _rx_copy_to_listen_queues
+	{
+		my $self = shift;
+		my $msg = shift;
+
+		my @queues = $self->_rx_listen_queues_for_msg($msg->{type});
+		return if !@queues;
+
+		$_->add_row(clean_ref($msg)) foreach @queues;
+	}
+	
+	sub fork_receiver
+	{
+		my $self = shift;
+		my %msg_subs = @_;
+
+		my $speed = 0.01;
+		$speed = $msg_subs{speed} and delete $msg_subs{speed} if $msg_subs{speed};
+
+		my $uuid = undef;
+		$uuid = $msg_subs{uuid}   and delete $msg_subs{uuid}  if $msg_subs{uuid};
+		
+		my @msg_names;
+		@msg_names = keys %msg_subs;
+		my $msg_name = @msg_names > 1 ? '('.join('|', @msg_names).')' : $msg_names[0];
+
 		if(!$uuid)
 		{
 			if(!ref $self)
 			{
-				warn "SocketWorker::fork_receiver() called without a blessed ref, unable to find self-uuid automatically, not forking receiver for '$msg_name'";
-				return;
+				warn "SocketWorker::fork_receiver() called without a blessed ref, unable to find self-uuid automatically, unable to automatically generate client receipts for $msg_name";
 			}
-
-			$uuid = $self->uuid;
+			else
+			{
+				$uuid = $self->uuid;
+			}
 		}
 
 		# wiat_for_start because if we dont, then state_handle->{online} could still
@@ -1076,7 +1162,10 @@ use common::sense;
 			$0 = "$0 [SocketWorker:$msg_name]";
 			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
 
-			my $queue = incoming_queue();
+			$self->_rx_register_listener($_, $$) foreach @msg_names;
+
+			#my $queue = incoming_queue();
+			my $queue = msg_queue('listeners/'.$$);
 			my $recipt_queue = ref $self ? outgoing_queue() : incoming_queue();
 
 			my %seen_msg_flag;
@@ -1084,44 +1173,39 @@ use common::sense;
 			
 			while(1)
 			{
-				my @list = $queue->by_key(nxthop => $uuid, type => @msg_names ? \@msg_names : $msg_name);
+				#my @list = $queue->by_key(nxthop => $uuid, type => @msg_names ? \@msg_names : $msg_name);
+				my @list = HashNet::MP::MessageQueues->pending_messages($queue);
 				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
-				if($no_del)
-				{
-					my $seen_batch = 0;
-					@list = grep { ! $seen_msg_flag{$_->{uuid}} } @list;
-					$seen_msg_flag{$_->{uuid}} = time() foreach @list;
-					
-					# Simple kludge to keep %seen_msg_flag from growing too large.
-					# This is only risky if the messages are not removed from the 
-					# incoming queue within $max_time seconds by some other process.
-					# The only risk is that the message will appear as 'new' again.
-					foreach my $key (keys %seen_msg_flag)
-					{
-						delete $seen_msg_flag{$_}
-							if time() - $seen_msg_flag{$_} > $max_time;
-					}
-				}
+# 				if($no_del)
+# 				{
+# 					my $seen_batch = 0;
+# 					@list = grep { ! $seen_msg_flag{$_->{uuid}} } @list;
+# 					$seen_msg_flag{$_->{uuid}} = time() foreach @list;
+# 					
+# 					# Simple kludge to keep %seen_msg_flag from growing too large.
+# 					# This is only risky if the messages are not removed from the 
+# 					# incoming queue within $max_time seconds by some other process.
+# 					# The only risk is that the message will appear as 'new' again.
+# 					foreach my $key (keys %seen_msg_flag)
+# 					{
+# 						delete $seen_msg_flag{$_}
+# 							if time() - $seen_msg_flag{$_} > $max_time;
+# 					}
+# 				}
 
 				if(@list)
 				{
 					trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
 
 					$recipt_queue->begin_batch_update;
+					
 					foreach my $msg (@list)
 					{
 						local *@;
 						eval
 						{
-							if(@msg_names)
-							{
-								$msg_subs{$msg->{type}}->($msg);
-							}
-							else
-							{
-								$code_ref->($msg);
-							}
+							$msg_subs{$msg->{type}}->($msg);
 						};
 						trace "SocketWorker: fork_receiver/$msg_name: Error processing msg $msg->{type} {$msg->{uuid}}: $@" if $@;
 
@@ -1132,20 +1216,22 @@ use common::sense;
 						# instead of the uuid on the other end of the socket,
 						# so then the local hub picks up the receipt and routes it to
 						# all connected clients.
+						if($uuid)
+						{
+							my $new_env = $self->create_client_receipt($msg,
+								$uuid,
+								# See note above on 'cheating'
+								ref $self ? $self->peer_uuid : $uuid);
 
-						my $new_env = $self->create_client_receipt($msg,
-							$uuid,
-							# See note above on 'cheating'
-							ref $self ? $self->peer_uuid : $uuid);
-							
-						$recipt_queue->add_row($new_env);
+							$recipt_queue->add_row($new_env);
+						}
 					}
 
 					$recipt_queue->end_batch_update;
 
 					#trace "SocketWorker: fork_receiver/$msg_name: Deleting batch: ".Dumper(\@list);
 
-					$queue->del_batch(\@list) unless $no_del;
+					#$queue->del_batch(\@list) unless $no_del;
 
 					$self->wait_for_send if ref $self;
 					#error "SocketWorker: fork_receiver/$msg_name: !ref \$self, not waiting for send\n" if !ref $self;
@@ -1156,7 +1242,7 @@ use common::sense;
 				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
 				unless(kill 0, $parent_pid)
 				{
-					#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
+					error "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
 					last;
 				}
 				
@@ -1167,6 +1253,8 @@ use common::sense;
 				}
 				sleep $speed;
 			}
+
+			error "SocketWorker: fork_receiver/$msg_name: Exiting fork_receiver() fork\n";
 
 			exit 0;
 		}
