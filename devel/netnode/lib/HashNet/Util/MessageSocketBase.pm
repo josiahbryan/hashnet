@@ -84,9 +84,19 @@
 			my ($port, $iaddr) = Socket::my_sockaddr_in($hersockaddr);
 			my $herhostname    = gethostbyaddr($iaddr, AF_INET);
 			#my $herstraddr     = inet_ntoa($iaddr);
+			
+			$herhostname = $self->{peer_host} if !$herhostname && $self->{peer_host};
 
-			$0 = "$0 [TX]";
-			trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
+			if($herhostname)
+			{
+				$0 = "$0 [$herhostname] [TX]";
+				trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
+			}
+			else
+			{
+				$0 = "$0 [TX]";
+				trace "MessageSocketBase: Forked TX loop $$ as '$0' (parent PID $self->{tx_loop_parent_pid})\n";
+			}
 
 			#info "MessageSocketBase: Child $$ running\n";
 			$self->tx_loop();
@@ -110,6 +120,7 @@
 		my $self = shift;
 		if($self->{no_fork})
 		{
+			$0 = "$0 [RX]";
 			$self->process_loop();
 		}
 		else
@@ -128,9 +139,19 @@
 				my ($port, $iaddr) = sockaddr_in($hersockaddr);
 				my $herhostname    = gethostbyaddr($iaddr, AF_INET);
 				#my $herstraddr     = inet_ntoa($iaddr);
+				
+				$herhostname = $self->{peer_host} if !$herhostname && $self->{peer_host};
 
-				$0 = "$0 [Peer $herhostname]";
-				trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0'\n";
+				if($herhostname)
+				{
+					$0 = "$0 [$herhostname] [RX]";
+					trace "MessageSocketBase: Connected to $herhostname in PID $$ as '$0'\n";
+				}
+				else
+				{
+					$0 = "$0 [RX]";
+					trace "MessageSocketBase: Forked RX loop $$ as '$0'\n";
+				}
 
 				#info "MessageSocketBase: Child $$ running\n";
 				$self->process_loop();

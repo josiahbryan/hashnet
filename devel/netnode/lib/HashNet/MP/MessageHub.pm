@@ -510,7 +510,7 @@
 				#HashNet::MP::SocketWorker->new('-', 1); # '-' = stdin/out, 1 = no fork
 				my $old_proc_name = $0;
 
-				$0 = "$0 [Peer $ENV{REMOTE_ADDR}]";
+				$0 = "$0 [$ENV{REMOTE_ADDR}]";
 				trace "MessageHub::Server: Client connected, forked PID $$ as '$0'\n";
 				
 				HashNet::MP::SocketWorker->new(
