@@ -841,7 +841,7 @@ use common::sense;
 				my $msg = $queue->by_key(to => $uuid, type => 'MSG_PONG', from => $uuid_to);
 				if(!$self->state_handle->{online})
 				{
-					error "SocketWorker: wait_for_receive; child thread gone away, not waiting anymore\n";
+					error "SocketWorker: send_ping; child thread gone away, not waiting anymore\n";
 					last;
 				}
 				
@@ -972,7 +972,7 @@ use common::sense;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
 		my $uuid  = $self->uuid;
-		trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
+		#trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
 		
@@ -1002,7 +1002,7 @@ use common::sense;
 
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
 		my $res = scalar $queue->all_by_key(to => $uuid);
-		trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
+		#trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
 		return $res;

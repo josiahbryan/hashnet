@@ -60,7 +60,7 @@ if(!$ch)
 # });
 
 # We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
-$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
+#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
 #$ch->send_ping();
 #die "Test done";
@@ -69,8 +69,8 @@ $ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $msg_size = 1024 * 16;# * 2;
-my $max_msgs = 64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
+my $msg_size = 1024 * 1024 * 8; #16;# * 2;
+my $max_msgs = 8; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
 
 
 my $total_msgs = 0;

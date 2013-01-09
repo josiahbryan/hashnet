@@ -693,8 +693,8 @@
 		my $msg = shift;
 		my $self_uuid  = $self->node_info->{uuid};
 		
-		debug "--------------------------------------------------------\n";
-		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
+		#debug "--------------------------------------------------------\n";
+		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
 		
 		if($msg->{type} eq MSG_CLIENT_RECEIPT)
 		{
