@@ -24,6 +24,7 @@ package HashNet::MP::GlobalDB;
 	sub MSG_GLOBALDB_TR         { 'MSG_GLOBALDB_TR'         }
 	sub MSG_GLOBALDB_REV_QUERY  { 'MSG_GLOBALDB_REV_QUERY'  }
 	sub MSG_GLOBALDB_REV_REPLY  { 'MSG_GLOBALDB_REV_REPLY'  }
+	sub MSG_GLOBALDB_BATCH_REQ  { 'MSG_GLOBALDB_BATCH_REQ'  }
 	sub MSG_GLOBALDB_LOCK       { 'MSG_GLOBALDB_LOCK'       }
 	sub MSG_GLOBALDB_LOCK_REPLY { 'MSG_GLOBALDB_LOCK_REPLY' }
 	sub MSG_GLOBALDB_UNLOCK     { 'MSG_GLOBALDB_UNLOCK'     }
@@ -82,6 +83,16 @@ package HashNet::MP::GlobalDB;
 				$self->_put_local_batch($msg->{data});
 				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
 				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
+			},
+			
+			MSG_GLOBALDB_BATCH_REQ => sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Received batch dump request\n";
+				#$self->_put_local_batch($msg->{data});
+				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
+				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
+			
 			},
 
 			MSG_GLOBALDB_REV_QUERY => sub {
@@ -144,6 +155,59 @@ package HashNet::MP::GlobalDB;
 		);
 			
 		$self->{rx_pid} = { pid => $fork_pid, started_from => $$ };
+	}
+	
+	
+	sub gen_db_archive
+	{
+		my $self = shift;
+
+		my $db_root = $self->db_root;
+		my $cmd = 'cd '.$db_root.'; tar -zcvf $OLDPWD/db.tar.gz; cd $OLDPWD';
+		trace "GlobalDB: gen_db_archive(): Running clone cmd: '$cmd'\n";
+		system($cmd);
+		
+ 		my $out_file = 'db.tar.gz'; # in current directory
+		return $out_file;
+		
+# 		if(!-f $out_file || !open(F, "<$out_file"))
+# 		{
+# 			#print "Content-Type: text/plain\r\n\r\nUnable to read bin_file or no bin_file defined\n";
+# 			die 'Error: Cant Find '.$out_file.':  '.$out_file;
+# 			return;
+# 		}
+# 
+# 		logmsg "TRACE", "GlobalDB: gen_db_archive(): Serving $out_file\n";
+# 
+# 		my @buffer;
+# 		push @buffer, $_ while $_ = <F>;
+# 		close(F);
+# 
+# 		http_respond($res, 'application/octet-stream', join('', @buffer));
+	}
+	
+	sub apply_db_archive
+	{
+		my $self = shift;
+		#my $peer = shift;
+		#my $upgrade_url = $peer->url . '/clone_db';
+		#my $tmp_file = '/tmp/hashnet-db-clone.tar.gz';
+		
+		my $tmp_file = shift;
+
+		#logmsg "INFO", "StorageEngine: clone_database(): Downloading database tar from $upgrade_url to $tmp_file\n";
+
+		#getstore($upgrade_url, $tmp_file);
+
+		#logmsg "INFO", "GlobalDB: apply_db_archive(): Download finished.\n";
+
+		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file";
+
+		trace "StorageEngine: apply_db_archive(): Decompressing: '$decomp_cmd'\n";
+
+		system($decomp_cmd);
+
+		return 1;
 	}
 	
 	sub check_db_ver
