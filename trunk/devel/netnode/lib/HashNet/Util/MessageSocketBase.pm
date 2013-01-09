@@ -239,6 +239,8 @@
 		my $sel = IO::Select->new();
 		$sel->add($sock);
 		
+		$self->process_loop_start_hook();
+		
 
 		Restart_Process_Loop:
 
@@ -264,7 +266,7 @@
 						#last PROCESS_LOOP if $ret < 0;
 						if($ret < 0)
 						{
-							$self->bulk_read_end_hook();
+							$self->bulk_read_end_hook() if $self->{in_bulk_read};
 							last PROCESS_LOOP;
 						}
 
@@ -711,6 +713,7 @@
 
 	sub bulk_read_start_hook {}
 	sub bulk_read_end_hook {}
+	sub process_loop_start_hook {}
 	
 	# NOTE: Can override in subclasses
 	sub connect_handler

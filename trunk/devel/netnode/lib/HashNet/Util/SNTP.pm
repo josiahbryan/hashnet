@@ -350,7 +350,7 @@ use Time::HiRes qw(time);
 		}
 		else
 		{
-			logmsg 'WARN', "SNTP: Unable to set local system clock, not running as root\n";
+			logmsg 'WARN', "SNTP: Unable to set local system clock, not running as root\n" if int($off) != 0;
 		}
 		
 	} # end sub correct_localclock

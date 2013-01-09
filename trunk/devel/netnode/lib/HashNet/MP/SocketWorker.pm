@@ -231,7 +231,8 @@ use common::sense;
 # 		my @fork_pids = @{ $self->{receiver_forks} || [] };
 # 		kill 15, $_ foreach @fork_pids;
 
-		#trace "SocketWorker: Shutting down\n";
+		#trace "SocketWorker: DESTROY: Shutting down\n";
+		#trace "SocketWorker: DESTROY: Callstack: ".get_stack_trace();
 	}
 
 	sub bad_message_handler
@@ -634,6 +635,14 @@ use common::sense;
 		$self->state_update(0);
 	}
 	
+	sub process_loop_start_hook
+	{
+		my $self = shift;
+		$self->state_update(1);
+		$self->state_handle->{tx_loop_pid} = $$;
+		$self->state_update(0);
+	}
+	
 	sub dispatch_message
 	{
 		my $self = shift;
@@ -702,10 +711,6 @@ use common::sense;
 			my $node_info = $envelope->{data};
 			info "SocketWorker: dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
 
-			$self->state_update(1);
-			$self->state_handle->{remote_node_info} = $node_info;
-			$self->state_update(0);
-			
 			my $peer;
 			if(!$self->{peer} &&
 			    $self->{peer_host})
@@ -731,6 +736,7 @@ use common::sense;
 			#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 
 			$self->state_update(1);
+			$self->state_handle->{remote_node_info} = $node_info;
 			$self->state_handle->{online} = 1;
 			$self->state_update(0);
 
@@ -763,7 +769,7 @@ use common::sense;
 	sub bulk_read_start_hook
 	{
 		my $self = shift;
-		trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
+		#trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		incoming_queue()->begin_batch_update;
 		#trace "SocketWorker: bulk_read_start_hook() [done]\n"
 	}
@@ -771,7 +777,7 @@ use common::sense;
 	sub bulk_read_end_hook
 	{
 		my $self = shift;
-		trace "SocketWorker: bulk_read_end_hook() - queue size: ".incoming_queue()->size()."\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
+		#trace "SocketWorker: bulk_read_end_hook() - queue size: ".incoming_queue()->size()."\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
 		#trace "SocketWorker: bulk_read_end_hook(): ".Dumper(incoming_queue());
 		incoming_queue()->end_batch_update;
 	}
@@ -966,9 +972,11 @@ use common::sense;
 		my $max   = shift || 4;
 		my $speed = shift || 0.01;
 		my $uuid  = $self->uuid;
-		#trace "ClientHandle: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
+		trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
+		
+		$self->wait_for_start; # if $self->state_handle->{online} == 0.5;
 
 # 		sleep $speed while time - $time < $max
 # 		             and !$queue->has_external_changes;  # check has_external_changes first to prevent having to re-load data every time if nothing changed
@@ -980,9 +988,10 @@ use common::sense;
 		while(time - $time < $max)
 		{
 			my $cnt = scalar ( $queue->all_by_key(to => $uuid) );
-			if(!$self->state_handle->{online})
+			
+			unless(kill 0, $self->state_handle->{tx_loop_pid})
 			{
-				error "SocketWorker: wait_for_receive; SocketWorker dead or dieing, not waiting anymore\n";
+				error "SocketWorker: wait_for_receive: SocketWorker tx loop PID ".$self->state_handle->{tx_loop_pid}." gone away, not waiting anymore\n";
 				return $cnt;
 			}
 
@@ -993,9 +1002,9 @@ use common::sense;
 
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
 		my $res = scalar $queue->all_by_key(to => $uuid);
-		#trace "ClientHandle: wait_for_receive: Exit, res: $res\n";
+		trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
-		#trace "ClientHandle: wait_for_receive: All messages received.\n" if $res;
+		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
 		return $res;
 	}
 
