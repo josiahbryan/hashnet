@@ -335,6 +335,7 @@ use Time::HiRes qw(time);
 	{
 		# set the unix clock to the nearest second
 		my $off = shift;
+		
 		$off = sprintf("%.f", $off);
 		#print "\nSet local system clock: ($off seconds) ";
 		
@@ -344,8 +345,8 @@ use Time::HiRes qw(time);
 		my $username = getpwuid( $< );
 		if($username eq 'root')
 		{
-			info "SNTP: Set local system clock: ($off seconds) ",
-				`date --set=\'$off seconds\'`;
+			my $new_time = `date --set=\'$off seconds\'`;
+			info "SNTP: Set local system clock: ($off seconds) ", $new_time if int($off) != 0;
 		}
 		else
 		{
@@ -369,7 +370,7 @@ use Time::HiRes qw(time);
 		}
 			
 		#print "Connecting to $server\n";
-		info "SNTP: Connecting to NTP source '$server'...\n";
+		#info "SNTP: Connecting to NTP source '$server'...\n";
 		
 		$ntp_msg = get_ntp_time;
 		if(!defined $ntp_msg)
@@ -401,7 +402,7 @@ use Time::HiRes qw(time);
 		
 		# the final result: the difference report
 		#print "Clock Difference       : $off sec off between $server and local";
-		info "SNTP: Clock Difference: $off sec off between $server and local\n";
+		info "SNTP: Clock Difference: $off sec off between $server and local\n" if int(abs($off)) > 0;
 		
 		#if (abs($off) > 11000) {print " <-- check this !";}
 		#print "\n";
