@@ -5,13 +5,16 @@ use lib 'lib';
 use HashNet::MP::GlobalDB;
 use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
+use Getopt::Std;
 
-my $key = @ARGV ? shift @ARGV : 'test';
-my $logging = @ARGV ? shift @ARGV : 0;
-$logging = 99 if $logging;
+my %opts;
+getopts('lh:k:', \%opts);
 
-my $ch  = HashNet::MP::ClientHandle->setup(log_level => $logging);
-#my $ch  = HashNet::MP::ClientHandle->setup();
+my $key = $opts{k} ? $opts{k} : (@ARGV ? shift @ARGV : 'test');
+my $logging = $opts{l} ? 99 :0;
+my $hosts = [ split /,/, ($opts{h} || 'localhost:8031') ];
+
+my $ch  = HashNet::MP::ClientHandle->setup(hosts => $hosts, log_level => $logging);
 my $eng = HashNet::MP::GlobalDB->new($ch);
 
 #trace "$0: Waiting a second for any messages to come in\n";
