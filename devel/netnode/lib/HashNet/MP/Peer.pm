@@ -88,7 +88,7 @@
 						PeerPort  => $port);
 		if(!$handle)
 		{
-			warn "MessageHub: _get_socket: Can't connect to port $port on $host: $!";
+			error "Peer: _open_socket: Can't connect to port $port on $host: $!";
 			return undef;
 		}
 		
@@ -113,7 +113,7 @@
 		}
 		else
 		{
-			warn "Peer: open_connection: Cannot connect to '$self->{host}'\n";
+			#warn "Peer: open_connection: Cannot connect to '$self->{host}'\n";
 			return undef;
 		}
 	}

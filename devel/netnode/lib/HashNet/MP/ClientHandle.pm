@@ -118,8 +118,6 @@
 	{
 		my $self = shift;
 
-		$self->outgoing_queue->begin_batch_update;
-
 		# Check 'to' and not 'nxthop' because msgs could reach us
 		# that are not broadcast and not to us - they just
 		# got sent to our socket because the hub didn't know where the client was
@@ -129,6 +127,8 @@
 		if($self->{send_receipts})
 		{
 			my $sw = $self->sw;
+			
+			$self->outgoing_queue->begin_batch_update;
 
 			foreach my $msg (@msgs)
 			{
