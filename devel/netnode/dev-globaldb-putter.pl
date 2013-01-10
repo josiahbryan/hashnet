@@ -7,12 +7,19 @@ use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
 use File::Slurp qw/:std/;
 
-my $ch  = HashNet::MP::ClientHandle->setup();
+use Getopt::Std;
+
+my %opts;
+getopts('lh:k:', \%opts);
+
+my $key = $opts{k} ? $opts{k} : (@ARGV ? shift @ARGV : 'test');
+my $val = $opts{v} ? $opts{v} : (@ARGV ? shift @ARGV : undef);
+my $logging = $opts{l} ? 99 :0;
+my $hosts = [ split /,/, ($opts{h} || 'localhost:8031') ];
+
+my $ch  = HashNet::MP::ClientHandle->setup(hosts => $hosts, log_level => $logging);
 my $eng = HashNet::MP::GlobalDB->new($ch);
 
-my ($key, $val) = @ARGV == 2 ? @ARGV : ();
-
-$key ||= 'test';
 if(!defined $val)
 {
 	$val = `date`;
