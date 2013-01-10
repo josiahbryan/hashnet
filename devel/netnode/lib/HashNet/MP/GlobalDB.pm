@@ -77,6 +77,16 @@ package HashNet::MP::GlobalDB;
 
 		return $mimetype;
 	}
+	
+	sub is_printable
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		return undef if !defined $value;
+		return 0 if ref $value;
+		return 0 if $value =~ /[^[:print:]]/;
+		return 1;
+	}
 
 	sub printable_value
 	{
@@ -149,6 +159,17 @@ package HashNet::MP::GlobalDB;
 		$self->check_db_ver();
 		
 		$self->check_db_rev();
+		
+		if($sw)
+		{
+			my $queue = $sw->incoming_queue;
+			my $size = $queue->size;
+			trace "GlobalDB: Yielding to $sw to process any incoming message before continuing ($size pending messages)...\n";
+			#trace "GlobalDB: Queue: ".Dumper($queue) if $size > 0;
+			# TODO: Somehow we need to make sure we get any pending _TRs from the SW...
+			sleep 1 if $size > 0;
+			trace "GlobalDB: Yielding from $sw done\n";
+		}
 
 		return $self;
 	};
@@ -571,7 +592,11 @@ package HashNet::MP::GlobalDB;
 
 		$key = '/'.$key if $key !~ /^\//;
 
-		trace "GlobalDB: put(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		#trace "GlobalDB: put(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "GlobalDB: put(): '", elide_string($key), "' => ",
+			(defined $val ? elide_string(printable_value($val)) : '(undef)'),
+			"\n";
+
 
 		if($self->{_batch_update})
 		{
@@ -767,30 +792,40 @@ package HashNet::MP::GlobalDB;
 		}
 
 		$key = '/'.$key if $key !~ /^\//;
-
-# 		my $tr = HashNet::GlobalDB::TransactionRecord->new('MODE_KV', $key, undef, 'TYPE_READ');
-# 		push @{$self->{txqueue}}, $tr;
-
+		
 		# TODO Update timestamp fo $key in cache for aging purposes
 		#logmsg "TRACE", "get($key): Checking {cache} for $key\n";
 		#return $self->{cache}->{$key} if defined $self->{cache}->{$key};
 
 		my $key_path = $self->{db_root} . $key;
 		my $key_file = $key_path . '/data';
-
-		my $key_data = {};
-		my $val = undef;
-		if(-f $key_file && (stat($key_file))[7] > 0)
+		my $key_data = undef;
+		
+		# Lock data queue so we know that the fork_listener() process is not in the middle of processing while we're trying to get()
+		my $sw = $self->{sw};
+		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+		my $queue = $sw_handle->rx_listen_queue($self->{rx_pid}->{pid});
+		
+		trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
+		$queue->lock_file();
+		eval
 		{
-			$key_data = $self->_retrieve($key_file);
-			if(defined $key_data)
+			if(-f $key_file && (stat($key_file))[7] > 0)
 			{
-				return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+				$key_data = $self->_retrieve($key_file);
+				if(!defined $key_data)
+				{
+					logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+				}
 			}
-			else
-			{
-				logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
-			}
+		};
+		error "GlobalDB: get(): Error while trying to retrieve '$key': $@" if $@;
+		trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+		$queue->unlock_file();
+		
+		if(defined $key_data)
+		{
+			return wantarray ? %{$key_data || {}} : $key_data->{data};
 		}
 		
 		my $req_uuid = shift;
@@ -811,12 +846,12 @@ package HashNet::MP::GlobalDB;
 		my $dbh = $self->{_localdbh};
 		if(!$dbh)
 		{
-			$dbh = $self->{globaldb_data} = HashNet::LocalDB->handle();
+			$dbh = $self->{globaldb_data} = HashNet::MP::LocalDB->handle();
 			if(!$dbh->{globaldb_data})
 			{
-				$dbh->begin_batch_update;
+				$dbh->update_begin;
 				$dbh->{globaldb_data} = {};
-				$dbh->end_batch_update;
+				$dbh->update_end;
 			}
 		}
 		
@@ -827,9 +862,9 @@ package HashNet::MP::GlobalDB;
 			return wantarray ? () : undef;
 		}
 		
-		$dbh->begin_batch_udate;
+		$dbh->update_begin;
 		$dbh->{globaldb_data}->{$req_uuid} = 1;
-		$dbh->end_batch_update;
+		$dbh->update_end;
 
 		my $sw = $self->{sw};
 		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
@@ -848,7 +883,8 @@ package HashNet::MP::GlobalDB;
 		{
 			foreach my $hub (@list)
 			{
-				next if !$hub->is_online;
+				next if !$hub->is_online || 
+				         $hub->uuid eq $self->{rx_uuid}; # only will be true if we are running inside a MessageHub instance
 				
 				trace "GlobalDB: get(): Trying '".$hub->{name}."', sending batch request\n";
 				my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
@@ -862,16 +898,18 @@ package HashNet::MP::GlobalDB;
 				$sw_handle->outgoing_queue->add_row($env);
 				
 				# MSG_GLOBALDB_BATCH_REPLY is processed above
-				if($sw->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_GET_REPLY))
+				if($sw_handle->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_GET_REPLY))
 				{
 					my $queue = $sw_handle->incoming_queue();
 					my @messages;
 					$queue->begin_batch_update;
 					eval
 					{
-						@messages = $queue->by_key(to => $uuid, type => MSG_GLOBALDB_GET_REPLY);
-						$queue->dele_batch(\@messages);
+						my @tmp = $queue->by_key(to => $uuid, type => MSG_GLOBALDB_GET_REPLY);
+						@messages = map { clean_ref($_) } grep { defined $_ } @tmp;
+						$queue->del_batch(\@tmp);
 					};
+					error "GlobalDB: get(): Error getting data from incoming message queue: $@" if $@;
 					$queue->end_batch_update;
 					
 					if(@messages > 1)
@@ -897,9 +935,9 @@ package HashNet::MP::GlobalDB;
 			
 		}
 		
-		$dbh->begin_batch_udate;
+		$dbh->update_begin;
  		delete $dbh->{globaldb_data}->{$req_uuid};
- 		$dbh->end_batch_udate;
+ 		$dbh->update_end;
  		
  		
 		if(!$found_data)

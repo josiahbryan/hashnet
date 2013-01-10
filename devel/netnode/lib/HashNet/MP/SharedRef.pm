@@ -285,6 +285,15 @@ use common::sense;
 		}
 		return $$dat;
 	}
+	
+	sub delete_file
+	{
+		my $self = shift;
+		my $file = $self->file;
+		my $count_file = "$file.counter";
+		unlink($file);
+		unlink($count_file);
+	}
 
 	sub save_data
 	{
@@ -406,7 +415,7 @@ use common::sense;
 		if(!open($fh, "<$file"))
 		{
 			warn "is_lock_stale: Cannot read lockfile $file: $!";
-			return 0;
+			return 1;
 		}
 		my $pid = <$fh>;
 		close($fh);
@@ -506,6 +515,7 @@ use common::sense;
 		return 0;
 	}
 
+	sub begin_update { shift->update_begin(@_) }
 	sub update_begin
 	{
 		my $self = shift;
@@ -531,6 +541,7 @@ use common::sense;
 		return 1;
 	}
 
+	sub end_update { shift->update_end(@_) }
 	sub update_end
 	{
 		my $self = shift;
