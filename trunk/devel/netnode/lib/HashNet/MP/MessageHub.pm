@@ -685,88 +685,47 @@
 		}
 		return 0;
 	}
-	
 
-	sub route_message
+	sub update_routing_table
 	{
 		my $self = shift;
 		my $msg = shift;
-		my $self_uuid  = $self->node_info->{uuid};
-		
-		#debug "--------------------------------------------------------\n";
-		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
-		
-		if($msg->{type} eq MSG_CLIENT_RECEIPT)
-		{
-			# This is a receipt, saying the client picked up the message identified
-			# by $msg->{data}->{msg_uuid}.
-			#
-			# This receipt is useful to us because we want to remove any messages
-			# stored for offline clients (offline to us) that received the message
-			# we have stored by connecting to another hub
-			#
-			# That way, when they connect back to us, they dont get deluged with a
-			# backlog of messages that we have stored which they already received
-			# elsewhere.
-			#
-
-			my $queue = outgoing_queue();
-			my $rx_msg_uuid = $msg->{data}->{msg_uuid};
-			
-			#$queue->begin_batch_update; # also locks the file
-			#$queue->lock_file;
-			eval {
-				my @queued = $queue->by_key(uuid => $rx_msg_uuid);
-				
-				# Dont delete broadcast messages with same uuid
-				@queued = grep { $_->{to} eq $msg->{from} } @queued;
-	
-				#trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
-	
-				#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
-	
-				$queue->del_batch(\@queued) if @queued;
-			};
-			#$queue->unlock_file;
-			#$queue->end_batch_update; # also unlocks the file
-		}
-		
 		if($msg->{hist})
 		{
-			#trace "MessageHub: route_message: Processing history route for msg for {$msg->{uuid}}, lasthop $msg->{curhop}\n";
-			
+			#trace "MessageHub: update_routing_table: Processing history route for msg for {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+
 			my @hist = @{$msg->{hist} || []};
 			my %ident;
 			my $ident = 0;
 			my %nodes;
 			$nodes{$self->node_info->{uuid}} = $self->node_info;
-			
-			#trace "MessageHub: route_message: Received MSG_CLIENT_RECEIPT for msg {$rx_msg_uuid}, receipt id {$msg->{uuid}}\n"; #, lasthop $msg->{curhop}\n";
+
+			#trace "MessageHub: update_routing_table: Received MSG_CLIENT_RECEIPT for msg {$rx_msg_uuid}, receipt id {$msg->{uuid}}\n"; #, lasthop $msg->{curhop}\n";
 			$hist[$#hist]->{last} = 1 if @hist;
 			my $last_to = undef;
 			my $last_time = time();
 			foreach my $item (@hist)
 			{
 				#next if defined $last_to && !$item->{last} && $item->{from} ne $last_to;
-				
+
 				my $time  = $item->{time};
 				my $uuid  = $item->{to};
 				my $uuid2 = $item->{from};
 				my $delta = $time - $last_time;
 				my $info  = $nodes{$uuid};
-		
+
 				#next if !$info;
 				my $key = $uuid2; #.$uuid;
 				my $ident = $ident{$key} || ++ $ident;
 				$ident{$key} = $ident;
 				my $prefix = "\t" x $ident;
-				
+
 				#trace "$prefix -> " . ($nodes{$uuid2} ? $nodes{$uuid2}->{name} : $uuid2) . " -> " . ($info ? $info->{name} : $uuid)." (".sprintf('%.03f', $delta)."s)\n";
-				
+
 				$last_to = $uuid;
 				$last_time = $time;
 			}
-			
+
 			if(@hist)
 			{
 				my $route_to = $hist[0]->{from};
@@ -782,9 +741,12 @@
 						{
 							$route_row = { dest => $route_to, nxthop => $route_from };
 							$tbl->add_row($route_row);
-							#trace "MessageHub: route_message: [Route Table Update]: Added new route for '$route_to' to nxthop '$route_from'\n";
+
+							$self->reroute_queued_messages($route_row);
+
+							#trace "MessageHub: update_routing_table: [Route Table Update]: Added new route for '$route_to' to nxthop '$route_from'\n";
 						}
-						
+
 					}
 					elsif(@hist == 1)#$route_to eq $route_from)
 					{
@@ -796,7 +758,7 @@
 						# since the peer will be listed in the PeerList
 						# and if its online, then it will be found that way.
 						# If the peer is offline, even if in the PeerList,
-						# *then* the route table will be consulted. 
+						# *then* the route table will be consulted.
 						# Hopefully by then, the peer desired will have
 						# sent out a receipt that we've picked up here.
 						# Anyway, if directly connected, just remove
@@ -804,22 +766,24 @@
 						if($route_row)
 						{
 							$tbl->del_row($route_row);
-							#trace "MessageHub: route_message: [Route Table Update]: Removed route for '$route_to' since it's directly connected now\n";
+							#trace "MessageHub: update_routing_table: [Route Table Update]: Removed route for '$route_to' since it's directly connected now\n";
 						}
 					}
 					else
 					{
 						if($route_from ne $route_row->{nxthop})
-						{ 
+						{
 							$route_row->{nxthop} = $route_from;
 							$route_row->{count}  = 0;
-							#trace "MessageHub: route_message: [Route Table Update]: Updated route for '$route_to' to nxthop '$route_from'\n";
+
+							$self->reroute_queued_messages($route_row);
+							#trace "MessageHub: update_routing_table: [Route Table Update]: Updated route for '$route_to' to nxthop '$route_from'\n";
 						}
 						else
 						{
-							#trace "MessageHub: route_message: [Route Table Update]: Route for '$route_to' / nxthop '$route_from' is current, no update needed\n";
+							#trace "MessageHub: update_routing_table: [Route Table Update]: Route for '$route_to' / nxthop '$route_from' is current, no update needed\n";
 						}
-						
+
 						$route_row->{timestamp} = time();
 						$route_row->{count} ++;
 						$tbl->update_row($route_row);
@@ -827,15 +791,15 @@
 				};
 				if($@)
 				{
-					error "MessageHub: route_message: Error updating route table: $@\n";
+					error "MessageHub: update_routing_table: Error updating route table: $@\n";
 					warn "Error updating route table: $@";
 				}
 				$tbl->end_batch_update;
 			}
-			
+
 			# TODO: Should we consider rewriting any envelopes in the outgoing queue that are for $route_to, with nxthop as $route_to, to have anxthop of $route_from, if @hist > 1?
 			# TODO: What happens if the route is stale?
-			# 	-eg: 
+			# 	-eg:
 			#	- Server A, Server B, and Client 1
 			#	- C1 connects to SA, then disconnects
 			#	- C1 connects to SB, sends receipt, SA picks up and routes msgs for C1 to SB
@@ -849,6 +813,87 @@
 			#		- SA:
 			#			- SA rejects msg because history shows it came thru here
 		}
+	}
+
+	sub process_client_receipt
+	{
+		my $self = shift;
+		my $msg = shift;
+		
+		# This is a receipt, saying the client picked up the message identified
+		# by $msg->{data}->{msg_uuid}.
+		#
+		# This receipt is useful to us because we want to remove any messages
+		# stored for offline clients (offline to us) that received the message
+		# we have stored by connecting to another hub
+		#
+		# That way, when they connect back to us, they dont get deluged with a
+		# backlog of messages that we have stored which they already received
+		# elsewhere.
+		#
+
+		my $queue = outgoing_queue();
+		my $rx_msg_uuid = $msg->{data}->{msg_uuid};
+
+		#$queue->begin_batch_update; # also locks the file
+		#$queue->lock_file;
+		eval {
+			my @queued = $queue->by_key(uuid => $rx_msg_uuid);
+
+			# Dont delete broadcast messages with same uuid
+			@queued = grep { $_->{to} eq $msg->{from} } @queued;
+
+			#trace "MessageHub: process_client_receipt: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+
+			#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
+
+			$queue->del_batch(\@queued) if @queued;
+		};
+		#$queue->unlock_file;
+		#$queue->end_batch_update; # also unlocks the file
+	}
+
+	sub reroute_queued_messages#($route_row)
+	{
+		my $self = shift;
+		my $route = shift;
+		my $queue  = outgoing_queue();
+		my $dest   = $route->{dest};
+		my $nxthop = $route->{nxthop};
+		my @queued = $queue->by_key( to => $dest );
+
+		$queue->begin_batch_update;
+		local *@;
+		eval
+		{
+			foreach my $msg (@queued)
+			{
+				if($msg->{nxthop} ne $nxthop &&
+				   $msg->{nxthop} ne $dest)
+				{
+					$msg->{nxthop} = $nxthop;
+					$queue->update_row($msg);
+				}
+			}
+		};
+		error "MessageHub: reroute_queued_messages: Error rerouting: $@" if $@;
+		$queue->end_batch_update;
+	}
+
+
+	sub route_message
+	{
+		my $self = shift;
+		my $msg = shift;
+		my $self_uuid  = $self->node_info->{uuid};
+		
+		#debug "--------------------------------------------------------\n";
+		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Starting processing\n"; 
+		
+		$self->update_routing_table($msg);
+		
+		$self->process_client_receipt($msg)
+			if $msg->{type} eq MSG_CLIENT_RECEIPT;
 
 		my @recip_list;
 
@@ -856,7 +901,6 @@
 		#debug "MessageHub: remote_nodes: ".Dumper(\@remote_nodes);
 
 		my $last_hop_uuid = $msg->{curhop};
-
 
 		if($msg->{type} eq MSG_CLIENT_RECEIPT)
 		{
@@ -927,17 +971,7 @@
 				}
 				else
 				{
-						
-					# TODO:
-					# - Assume that when the final node gets the msg, it sends a non-sfwd reply back thru to the original sender
-					# - As that non-sfwd reply goes thru hubs, each hub stores what the LAST hop was for that msg so it knows
-					#   how best to get thru
-					# - Then when we get to this case again (non-directly-connect peer),
-					#   we grep our routing map for the hub from which we got a reply and try sending it there
-					#	- That word 'try' implies we followup to make sure the msg was delivered......
-	
-					# Message not to a peer directly connected (e.g. to a client on another hub),
-					# so until we develop a routing table mechanism, we just broadcast to all connected peers that are hubs
+					# No route existed for the destination, so broadcast it to all hubs to allow them to check their routes and direct-connect clients
 					@recip_list = grep { $_->type eq 'hub' } @peers;
 					
 					# Also add a recip entry for the dest itself because it's possible that destination uuid ($to)
@@ -953,15 +987,14 @@
 					# outgoing queue so it doesnt just take up space. 
 					push @recip_list, HashNet::MP::PeerList->get_peer_by_uuid($to);
 	
-					# If not store-forward, then we only want to send to peers currently online
-					# since we dont want to store this message for any peers that are not currently
-					# connect to this hub
-					
 					trace "MessageHub: route_message: Didn't know where '$to' was, so sending to all these places: ".Dumper(\@recip_list);
 				}
 			}
 		}
 
+		# If not store-forward, then we only want to send to peers currently online
+		# since we dont want to store this message for any peers that are not currently
+		# connect to this hub
 		if(!$msg->{sfwd})
 		{
 			@recip_list = grep { $_->{online} } @recip_list;
