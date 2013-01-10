@@ -115,19 +115,9 @@ package HashNet::MP::GlobalDB;
 	{
 		my $class = shift;
 		#my $self = $class->SUPER::new();
-		if(@_ == 1)
-		{
-			my $arg = $_[0];
-			if(UNIVERSAL::isa($arg, 'HashNet::MP::SocketWorker'))
-			{
-				@_ = (sw => $arg);
-			}
-			elsif(UNIVERSAL::isa($arg, 'HashNet::MP::ClientHandle'))
-			{
-				@_ = (sw => $arg->sw);
-			}
-		}
-		
+
+		@_ = (ch => shift) if @_ == 1;
+
 		my %args = @_;
 		
 		my $self = bless \%args, $class;
@@ -142,15 +132,12 @@ package HashNet::MP::GlobalDB;
 		}
 		mkpath($self->{db_root}) if !-d $self->{db_root};
 
-		# Cheap alias for lazy programmers (me!)
-		$args{sw} = $args{ch}->sw if $args{ch} && !$args{sw};
-		
 		# Update the SocketWorker to register a new message handler
-		my $sw = $args{sw};
-		if($sw)
+		my $ch = $args{ch} || $args{client_handle};
+		if($ch)
 		{
-			$sw->wait_for_start;
-			$self->{sw} = $sw;
+			$ch->wait_for_start;
+			$self->{ch} = $ch;
 		}
 		#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data" if !$sw;
 
@@ -160,31 +147,41 @@ package HashNet::MP::GlobalDB;
 		
 		$self->check_db_rev();
 		
-		if($sw)
+		if($ch)
 		{
-			my $queue = $sw->incoming_queue;
+			my $queue = $ch->incoming_queue;
 			my $size = $queue->size;
-			trace "GlobalDB: Yielding to $sw to process any incoming message before continuing ($size pending messages)...\n";
+			trace "GlobalDB: Yielding to $ch to process any incoming message before continuing ($size pending messages)...\n";
 			#trace "GlobalDB: Queue: ".Dumper($queue) if $size > 0;
 			# TODO: Somehow we need to make sure we get any pending _TRs from the SW...
 			sleep 1 if $size > 0;
-			trace "GlobalDB: Yielding from $sw done\n";
+			trace "GlobalDB: Yielding from $ch done\n";
 		}
 
 		return $self;
 	};
 
-	sub sw { shift->{sw} }
+	sub client_handle { shift->{ch} }
+	sub sw            {
+		my $self = shift;
+		my $ch   = $self->client_handle;
+		return $ch ? $ch->sw : undef;
+	}
+	sub sw_handle     {
+		my $self = shift;
+		my $sw   = $self->sw;
+		return $sw ? $sw : 'HashNet::MP::SocketWorker';
+	}
 	
 	sub setup_message_listeners
 	{
 		my $self = shift;
-		my $sw = $self->{sw};
+		my $sw = $self->sw;
+		my $sw_handle = $self->sw_handle;
 		
 		# rx_uuid can be given in args so GlobalDB can listen for incoming messages
 		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
 		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
-		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
 		
 		my $fork_pid = $sw_handle->fork_receiver(
 
@@ -430,8 +427,8 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 		if($self->db_rev() <= 0)
 		{
-			my $sw = $self->{sw};
-			my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+			my $sw = $self->sw;
+			my $sw_handle = $self->sw_handle;
 			
 			trace "GlobalDB: check_db_rev: Batch update needed\n";
 			my $env;
@@ -625,7 +622,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 		my $tr = shift;
 
-		my $sw = $self->{sw};
+		my $sw = $self->sw;
 		if(!$sw)
 		{
 			warn "GlobalDB: No SocketWorker given, cannot upload data off this node";
@@ -802,8 +799,8 @@ package HashNet::MP::GlobalDB;
 		my $key_data = undef;
 		
 		# Lock data queue so we know that the fork_listener() process is not in the middle of processing while we're trying to get()
-		my $sw = $self->{sw};
-		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+		my $sw = $self->sw;
+		my $sw_handle = $self->sw_handle;
 		my $queue = $sw_handle->rx_listen_queue($self->{rx_pid}->{pid});
 		
 		trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
@@ -866,8 +863,8 @@ package HashNet::MP::GlobalDB;
 		$dbh->{globaldb_data}->{$req_uuid} = 1;
 		$dbh->update_end;
 
-		my $sw = $self->{sw};
-		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+		my $sw = $self->sw;
+		my $sw_handle = $self->sw_handle;
 		
 		trace "GlobalDB: get(): Checking hubs for '$key'\n";
 		
