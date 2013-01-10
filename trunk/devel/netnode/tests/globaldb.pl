@@ -25,9 +25,17 @@ HashNet::MP::LocalDB->dump_db($db_client_file1);
 HashNet::MP::LocalDB->dump_db($db_client_file2);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
+HashNet::MP::GlobalDB->delete_disk_cache($db_client_file1);
+HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
+HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
+
 # Mute logging output
 $HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
+
+# The tests use this shared ref to sync testing
+my $lock_ref = HashNet::MP::SharedRef->new();
+
 
 my $server_pid = fork;
 if(!$server_pid)
@@ -43,6 +51,8 @@ if(!$server_pid)
 my $client_pid = fork;
 if(!$client_pid)
 {
+	$lock_ref->lock_file;
+	
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
 	sleep 1.1;
 	#print STDERR "# Proceeding with test...\n";
@@ -63,17 +73,19 @@ if(!$client_pid)
 	
 	# Since the server config is empty, wait for the other client to connect and register as a new client, so
 	# that when the GlobalDB broadcasts its TR, the server knows to send it to the other client
-	trace "$0: Sleep 1 in client 1\n\n\n\n"; 
-	sleep 1;
+	#trace "$0: Sleep 1 in client 1\n\n\n\n"; 
+	#sleep 1;
 	
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
 	#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
-	my $db = HashNet::MP::GlobalDB->new(sw => $ch->sw);
+	my $db = HashNet::MP::GlobalDB->new($ch);
 
+	trace "$0: Client: putting /test/server_pid => $server_pid\n"; 
 	$db->put('/test/server_pid' => $server_pid);
+	trace "$0: Client put done, exiting\n";
 
-	$ch->stop();
+	$lock_ref->unlock_file;
 	
 	exit;
 }
@@ -81,7 +93,7 @@ if(!$client_pid)
 
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep .1;
+	#sleep .1;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;
@@ -92,8 +104,7 @@ if(!$client_pid)
 		type => 'client',
 	};
 
-	trace "$0: Sleep 2.1 in test fork\n\n\n\n";
-	sleep 2.1;
+	$lock_ref->lock_file;
 
 	my $ch;
 	my $start = time;
@@ -101,19 +112,13 @@ if(!$client_pid)
 	sleep 0.5 while time - $start < $max_time and
 	                !($ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info));
 
-	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
-	#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
+	my $db = HashNet::MP::GlobalDB->new($ch);
 	
-	my $db = HashNet::MP::GlobalDB->new(sw => $ch->sw);
-	
-	# Wait for the client fork to have time to send the message
-	trace "$0: Sleep 3 in test fork\n\n\n\n";
-	sleep 3;
-
 	my $pid_t = $db->get('/test/server_pid');
 	is($pid_t, $server_pid, "Data retrieval");
-
- 	$ch->stop();
+	
+	$lock_ref->unlock_file;
+	$lock_ref->delete_file;
 }
 
 
@@ -123,6 +128,10 @@ unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file1);
 HashNet::MP::LocalDB->dump_db($db_client_file2);
 HashNet::MP::LocalDB->dump_db($db_server_file);
+
+HashNet::MP::GlobalDB->delete_disk_cache($db_client_file1);
+HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
+HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
 
 done_testing();
 
