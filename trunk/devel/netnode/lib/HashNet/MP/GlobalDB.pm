@@ -19,33 +19,122 @@ package HashNet::MP::GlobalDB;
 
 	our $VERSION = 0.031;
 		
-	my $ug = UUID::Generator::PurePerl->new();
+	my $UUID_GEN = UUID::Generator::PurePerl->new();
 
-	our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
+	#our $DEFAULT_DB_ROOT   = '/var/lib/hashnet/db';
 
 	sub MSG_GLOBALDB_TR          { 'MSG_GLOBALDB_TR'          }
+	sub MSG_GLOBALDB_GET_QUERY   { 'MSG_GLOBALDB_GET_QUERY'   }
+	sub MSG_GLOBALDB_GET_REPLY   { 'MSG_GLOBALDB_GET_REPLY'   }
 	sub MSG_GLOBALDB_REV_QUERY   { 'MSG_GLOBALDB_REV_QUERY'   }
 	sub MSG_GLOBALDB_REV_REPLY   { 'MSG_GLOBALDB_REV_REPLY'   }
-	sub MSG_GLOBALDB_BATCH_REQ   { 'MSG_GLOBALDB_BATCH_REQ'   }
+	sub MSG_GLOBALDB_BATCH_GET   { 'MSG_GLOBALDB_BATCH_GET'   }
 	sub MSG_GLOBALDB_BATCH_REPLY { 'MSG_GLOBALDB_BATCH_REPLY' }
 	sub MSG_GLOBALDB_LOCK        { 'MSG_GLOBALDB_LOCK'        }
 	sub MSG_GLOBALDB_LOCK_REPLY  { 'MSG_GLOBALDB_LOCK_REPLY'  }
 	sub MSG_GLOBALDB_UNLOCK      { 'MSG_GLOBALDB_UNLOCK'      }
 	sub MSG_GLOBALDB_UNSTALE     { 'MSG_GLOBALDB_UNSTALE'     }
 
+	sub elide_string
+	{
+		my $string = shift;
+		my $max_len = shift || 50;
+
+		my $len = length($string);
+		if($len > $max_len)
+		{
+			my $elide = '...';
+			my $buff  = ($max_len - length($elide)) / 2;
+			my $b1    = substr($string,      0, $buff);
+			my $b2    = substr($string, -$buff, $buff);
+			$string   = "${b1}...${b2}";
+		}
+		return $string;
+
+	}
+
+	sub discover_mimetype
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+
+		# Write the data to a tempfile
+		my ($fh, $filename) = tempfile();
+		print $fh $value;
+		close($fh);
+
+		# Use 'file' to deduct the mimetype of the data contained therein
+		#$mimetype = `file -b --mime-type $filename`;
+		#$mimetype =~ s/[\r\n]//g;
+
+		# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
+		# because older versions of `file' don't recognize --mime-type
+		my $mimetype = `file -b -i $filename`;
+		$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
+
+		# Remove the temp file so we dont leave data laying around
+		unlink($filename);
+
+		return $mimetype;
+	}
+
+	sub printable_value
+	{
+		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
+		my $value = shift;
+		return undef if !defined $value;
+
+		if(ref($value))
+		{
+			return encode_json(clean_ref($value));
+		}
+		elsif($value =~ /[^[:print:]]/)
+		{
+			# contains unprintable characters
+			my $mimetype = discover_mimetype($value);
+			return "($mimetype, ".length($value)." bytes)";
+		}
+		else
+		{
+			return "'$value'";
+		}
+	}
+	
 #public:
 	sub new
 	{
 		my $class = shift;
 		#my $self = $class->SUPER::new();
+		if(@_ == 1)
+		{
+			my $arg = $_[0];
+			if(UNIVERSAL::isa($arg, 'HashNet::MP::SocketWorker'))
+			{
+				@_ = (sw => $arg);
+			}
+			elsif(UNIVERSAL::isa($arg, 'HashNet::MP::ClientHandle'))
+			{
+				@_ = (sw => $arg->sw);
+			}
+		}
+		
 		my %args = @_;
-
+		
 		my $self = bless \%args, $class;
 
 		# Create our database root
-		$self->{db_root} = $args{db_root} || $DEFAULT_DB_ROOT;
+		$self->{db_root} = $args{db_root};# || $DEFAULT_DB_ROOT;
+		if(!$self->{db_root})
+		{
+			my $local_db = $HashNet::MP::LocalDB::DBFILE;
+			$local_db .= '.data';
+			$self->{db_root} = $local_db;
+		}
 		mkpath($self->{db_root}) if !-d $self->{db_root};
 
+		# Cheap alias for lazy programmers (me!)
+		$args{sw} = $args{ch}->sw if $args{ch} && !$args{sw};
+		
 		# Update the SocketWorker to register a new message handler
 		my $sw = $args{sw};
 		if($sw)
@@ -81,20 +170,57 @@ package HashNet::MP::GlobalDB;
 			# needs UUID to generate MSG_CLIENT_RECEIPTS automatically
 			uuid   => $uuid,
 			
+			# Used by both clients and servers to update their local disk caches
 			MSG_GLOBALDB_TR => sub {
 				my $msg = shift;
 
 				trace "GlobalDB: MSG_GLOBALDB_TR: Received new batch of data\n";
-				$self->_put_local_batch($msg->{data});
+				$self->_put_local_batch($msg->{data}, 1);
 				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
 				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
 			},
 			
-			MSG_GLOBALDB_BATCH_REQ => sub {
+			# Hubs reply to client
+			MSG_GLOBALDB_GET_QUERY => sub {
 				my $msg = shift;
 
-				trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Received batch dump request\n";
-				#trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Dump of request msg: ".Dumper($msg)."\n";
+				my $key = $msg->{data}->{key};
+				my $req_uuid = $msg->{data}->{req_uuid};
+				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Received get req for key '$key', request UUID {$req_uuid}\n";
+				
+				my @result = $self->get($key, $req_uuid);
+				my $data = 0;
+				if(@result)
+				{
+					my %hash = @result;
+					$data = 
+					{
+						key       => $key,
+						val       => $hash{data},
+						edit_num  => $hash{edit_num},
+						timestamp => $hash{timestamp},
+					};
+				}
+				
+				my $new_env = $sw_handle->create_envelope(
+					$data,
+					type	=> MSG_GLOBALDB_GET_REPLY,
+					to	=> $msg->{from},
+					from	=> $msg->{to},
+				);
+				$sw_handle->outgoing_queue->add_row($new_env);
+	
+				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Reply with data '$data' for key '$key'\n";
+				#trace "GlobalDB: _push_tr: new_env dump: ".Dumper($new_env,$self->sw->outgoing_queue);
+				$sw_handle->wait_for_send(4, 0.1, $msg->{to}); # Make sure the data gets off this node
+			},
+			
+			# Server side only, clients never would get this
+			MSG_GLOBALDB_BATCH_GET => sub {
+				my $msg = shift;
+
+				trace "GlobalDB: MSG_GLOBALDB_BATCH_GET: Received batch dump request\n";
+				#trace "GlobalDB: MSG_GLOBALDB_BATCH_GET: Dump of request msg: ".Dumper($msg)."\n";
 				
 				my $file = $self->gen_db_archive;
 				my $buffer = read_file($file);
@@ -107,11 +233,12 @@ package HashNet::MP::GlobalDB;
 					from	=> $msg->{to},
 				);
 				
-				#trace "GlobalDB: MSG_GLOBALDB_BATCH_REQ: Enqueing new envelope: ".Dumper($env);
+				#trace "GlobalDB: MSG_GLOBALDB_BATCH_GET: Enqueing new envelope: ".Dumper($env);
 				$sw_handle->outgoing_queue->add_row($env);
 			
 			},
 			
+			# Client or server use
 			MSG_GLOBALDB_BATCH_REPLY => sub {
 				my $msg = shift;
 
@@ -136,6 +263,7 @@ package HashNet::MP::GlobalDB;
 				$self->apply_db_archive($tmp_file);
 			},
 
+			# Not used yet...
 			MSG_GLOBALDB_REV_QUERY => sub {
 				my $msg = shift;
 
@@ -155,6 +283,7 @@ package HashNet::MP::GlobalDB;
 				$sw_handle->outgoing_queue->add_row($new_env);
 			},
 
+			# Still TODO
 			MSG_GLOBALDB_LOCK	=> sub {
 				my $msg = shift;
 
@@ -167,6 +296,22 @@ package HashNet::MP::GlobalDB;
 				#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
 				#	- Wait for ...what? How do we know we've got the exclusive lock...?
 				#	- Queue reply back to the sender of $msg indicating got lock or no
+				
+				
+				# Theory for lock:
+				#	- Only hubs (servers) will get this msg
+				#	- Server will load its own list of hubs
+				#	- Server sends out its own lock request to all its known hubs
+				#	- Other hubs recursively send out locko requests
+				#	- Only when server has responses to all its requests (fail, acquire, timeout) does it respond to its request
+				#	- This implies server (this routine) must wait (using wait_for_receive with appros args) and block b
+				#		- **OR** Instead of wait_for_receive, add a MSG_.._LOCK_REPLY hook that checks a counter using a sharedref,
+				#			and when all hubs respond, then that hook sends reply - that way, dont have to block
+				
+				# Msg: MSG_GLOBALDB_LOCK_REPLY
+				#	Data: { result => X } where X is one of ('FAIL', 'LOCKED', 'TIMEOUT')
+				
+				
 			},
 
 			MSG_GLOBALDB_UNLOCK	=> sub {
@@ -272,7 +417,7 @@ package HashNet::MP::GlobalDB;
 			if($sw)
 			{
 				trace "GlobalDB: check_db_rev: Connected as client to ".$sw->state_handle->{remote_node_info}->{name}.", sending batch request\n";
-				$env = $sw->create_envelope("Batch Request", type => MSG_GLOBALDB_BATCH_REQ);
+				$env = $sw->create_envelope("Batch Request", type => MSG_GLOBALDB_BATCH_GET);
 			}
 			else
 			{
@@ -289,7 +434,7 @@ package HashNet::MP::GlobalDB;
 					trace "GlobalDB: check_db_rev: Found hub in DB, '".$hub->{name}."', sending batch request\n";
 					my $uuid = $self->{rx_uuid};
 					$env = $sw_handle->create_envelope("Batch Request",
-						type	=> MSG_GLOBALDB_BATCH_REQ,
+						type	=> MSG_GLOBALDB_BATCH_GET,
 						to	=> $hub->uuid,
 						from	=> $uuid,
 					);
@@ -348,33 +493,7 @@ package HashNet::MP::GlobalDB;
 			kill 15, $self->{rx_pid}->{pid};
 		}
 	}
-
 	
-	
-# 	sub clone_database
-# 	{
-# 		my $self = shift;
-# 		my $peer = shift;
-# 
-# 		my $upgrade_url = $peer->url . '/clone_db';
-# 
-# 		my $tmp_file = '/tmp/hashnet-db-clone.tar.gz';
-# 
-# 		logmsg "INFO", "GlobalDB: clone_database(): Downloading database tar from $upgrade_url to $tmp_file\n";
-# 
-# 		getstore($upgrade_url, $tmp_file);
-# 
-# 		logmsg "INFO", "GlobalDB: clone_database(): Download finished.\n";
-# 
-# 		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file";
-# 
-# 		trace "GlobalDB: clone_database(): Decompressing: '$decomp_cmd'\n";
-# 
-# 		system($decomp_cmd);
-# 
-# 		return 1;
-# 	}
-
 	sub db_root { shift->{db_root} }
 
 	sub begin_batch_update
@@ -417,6 +536,8 @@ package HashNet::MP::GlobalDB;
 	{
 		my $self = shift;
 		my @batch  = @{ shift || {} };
+		my $dont_inc_editnum = shift || 0;
+		
 		if(!@batch)
 		{
 			logmsg "INFO", "GlobalDB: _put_local_batch(): No entries in batch list, nothing updated.\n";
@@ -425,32 +546,13 @@ package HashNet::MP::GlobalDB;
 
 		foreach my $item (@batch)
 		{
-			my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num});
+			my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num}, $dont_inc_editnum);
 			# Store timestamp/edit_num back into the ref inside @batch so that
 			# when we upload the @batch in end_batch_update to via SocketWorker,
 			# the ts/edit# is captured and sent out
 			$item->{timestamp} = $data_ref->{timestamp};
 			$item->{edit_num}  = $data_ref->{edit_num};
 		}
-	}
-
-
-	sub elide_string
-	{
-		my $string = shift;
-		my $max_len = shift || 50;
-
-		my $len = length($string);
-		if($len > $max_len)
-		{
-			my $elide = '...';
-			my $buff  = ($max_len - length($elide)) / 2;
-			my $b1    = substr($string,      0, $buff);
-			my $b2    = substr($string, -$buff, $buff);
-			$string   = "${b1}...${b2}";
-		}
-		return $string;
-
 	}
 
 	sub put
@@ -525,60 +627,14 @@ package HashNet::MP::GlobalDB;
 		}
 	}
 
-	sub discover_mimetype
-	{
-		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
-		my $value = shift;
-
-		# Write the data to a tempfile
-		my ($fh, $filename) = tempfile();
-		print $fh $value;
-		close($fh);
-
-		# Use 'file' to deduct the mimetype of the data contained therein
-		#$mimetype = `file -b --mime-type $filename`;
-		#$mimetype =~ s/[\r\n]//g;
-
-		# Use -i instead of --mime-type and parse off any extrenuous encoding info (below)
-		# because older versions of `file' don't recognize --mime-type
-		my $mimetype = `file -b -i $filename`;
-		$mimetype =~ s/^([^\s;]+)([;\s].*)?[\r\n]*$/$1/g;
-
-		# Remove the temp file so we dont leave data laying around
-		unlink($filename);
-
-		return $mimetype;
-	}
-
-	sub printable_value
-	{
-		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;
-		my $value = shift;
-		return undef if !defined $value;
-
-		if(ref($value))
-		{
-			return encode_json(clean_ref($value));
-		}
-		elsif($value =~ /[^[:print:]]/)
-		{
-			# contains unprintable characters
-			my $mimetype = discover_mimetype($value);
-			return "($mimetype, ".length($value)." bytes)";
-		}
-		else
-		{
-			return "'$value'";
-		}
-	}
-
 	sub _put_local
 	{
 		my $self = shift;
 		my $key = shift;
 		my $val = shift;
-		my $check_timestamp = shift || undef;
-		my $check_edit_num  = shift || undef;
+		my $check_timestamp  = shift || undef;
+		my $check_edit_num   = shift || undef;
+		my $dont_inc_editnum = shift || 0;
 
 		return if ! defined $key;
 
@@ -621,7 +677,14 @@ package HashNet::MP::GlobalDB;
 # 			}
 		}
 
-		$edit_num ++;
+		if($dont_inc_editnum && $check_edit_num)
+		{
+			$edit_num = $check_edit_num;
+		}
+		else
+		{
+			$edit_num ++ unless $dont_inc_editnum;
+		}
 
 		my $mimetype = 'text/plain';
 		#if(defined $val && $val =~ /([^\t\n\x20-x7e])/)
@@ -695,28 +758,6 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 		my $key = shift;
 
-# 		my $req_uuid = shift;
-# 		if(!$req_uuid)
-# 		{
-# 			$req_uuid = $ug->generate_v1->as_string();
-# 			#logmsg "TRACE", "GlobalDB: get(): Generating new UUID $req_uuid for request for '$key'\n";
-# 		}
-# 
-# 		# Prevents looping
-# 		# The 'only' way this could happen is if the $key is not on this peer and we have to check
-# 		# with a peer of our own, who in turn checks back with us. The idea is that the originating
-# 		# peer would create the $req_uuid (e.g. just call get($key)) and when we pass this off
-# 		# to another peer, we pass along the $req_uuid for calls to their storage engine, so their
-# 		# get internally looks like get($key,$req_uuid) (our req_uuid) - so when *they* ask *us*,
-# 		# they give us *our* req_uuid - and we say we've already seen it so just return undef
-# 		# without checking (since we already know we dont have $key since we asked them in the first place!)
-# 		if($self->{get_seen}->{$req_uuid})
-# 		{
-# 			logmsg "TRACE", "GlobalDB: get(): Already seen uuid $req_uuid\n";
-# 			return wantarray ? () : undef;
-# 		}
-# 		$self->{get_seen}->{$req_uuid} = 1;
-
 		$key = sanatize_key($key);
 
 		if(!$key && $@)
@@ -748,54 +789,131 @@ package HashNet::MP::GlobalDB;
 			}
 			else
 			{
-				logmsg "WARN", "GlobalDB: _retrieve(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+				logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
 			}
 		}
+		
+		my $req_uuid = shift;
+		if(!$req_uuid)
+		{
+			$req_uuid = $UUID_GEN->generate_v1->as_string();
+			#logmsg "TRACE", "GlobalDB: get(): Generating new UUID $req_uuid for request for '$key'\n";
+		}
 
-# 		my $peer_server = HashNet::GlobalDB::PeerServer->active_server;
-# 
-# 		my $checked_peers_count = 0;
-# 		PEER: foreach my $p (@{$self->{peers}})
-# 		{
-# 			next if $p->host_down;
-# 
-# 			$checked_peers_count ++;
-# 
-# 			if(defined $peer_server &&
-# 				   $peer_server->is_this_peer($p->url))
-# 			{
-# 				logmsg "TRACE", "GlobalDB: get(): Not checking ", $p->url, " for $key - it's our local peer and local server is active.\n";
-# 				next;
-# 			}
-# 
-# 			if(defined ($val = $p->pull($key, $req_uuid)))
-# 			{
-# 				logmsg "TRACE", "GlobalDB: get(): Pulled $key from peer $p->{url}\n";
-# 
-# 				# TODO Revisit this - since we're putting an item without sending out a new TR, and since
-# 				# _put_local incs the edit_num, we probably will have a newer edit_num than our peers - at least for a short while...
-# 				$self->_put_local($key, $val);
-# 				last;
-# 			}
-# 		}
-# 
-# 		if($checked_peers_count <= 0)
-# 		{
-# 			logmsg "TRACE", "GlobalDB: get(): No peers available to check for missing key: $key\n";
-# 			$@ = "No peers to check for missing key '$key'";
-# 			return wantarray ? () : undef;
-# 		}
-# 
-# 		#delete $self->{get_seen}->{$req_uuid};
-# 
-# 		#return wantarray ? ( data => $val, timestamp => time() ) : $val;
-# 
-# 		# Retrieve the key data directly instead of just using the $val so we can return the $key_data if requested
-# 		$key_data = $self->_retrieve($key_file);
-# 		if(defined $key_data)
-# 		{
-# 			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
-# 		}
+		# Prevents looping
+		# The 'only' way this could happen is if the $key is not on this peer and we have to check
+		# with a peer of our own, who in turn checks back with us. The idea is that the originating
+		# peer would create the $req_uuid (e.g. just call get($key)) and when we pass this off
+		# to another peer, we pass along the $req_uuid for calls to their storage engine, so their
+		# get internally looks like get($key,$req_uuid) (our req_uuid) - so when *they* ask *us*,
+		# they give us *our* req_uuid - and we say we've already seen it so just return undef
+		# without checking (since we already know we dont have $key since we asked them in the first place!)
+		my $dbh = $self->{_localdbh};
+		if(!$dbh)
+		{
+			$dbh = $self->{globaldb_data} = HashNet::LocalDB->handle();
+			if(!$dbh->{globaldb_data})
+			{
+				$dbh->begin_batch_update;
+				$dbh->{globaldb_data} = {};
+				$dbh->end_batch_update;
+			}
+		}
+		
+		$dbh->load_changes;
+		if($dbh->{globaldb_data}->{$req_uuid})
+		{
+			logmsg "TRACE", "GlobalDB: get(): Already seen uuid $req_uuid\n";
+			return wantarray ? () : undef;
+		}
+		
+		$dbh->begin_batch_udate;
+		$dbh->{globaldb_data}->{$req_uuid} = 1;
+		$dbh->end_batch_update;
+
+		my $sw = $self->{sw};
+		my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+		
+		trace "GlobalDB: get(): Checking hubs for '$key'\n";
+		
+		my $found_data = 0;
+		
+		# Must be in a MessageHub, find the first peer thats a hub and ask them
+		my @list = HashNet::MP::PeerList->peers_by_type('hub');
+		if(!@list)
+		{
+			trace "GlobalDB: get(): No hubs in database, cant get '$key'\n";	
+		}
+		else
+		{
+			foreach my $hub (@list)
+			{
+				next if !$hub->is_online;
+				
+				trace "GlobalDB: get(): Trying '".$hub->{name}."', sending batch request\n";
+				my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
+				
+				my $env = $sw_handle->create_envelope(
+					{ key => $key, req_uuid => $req_uuid },
+					type	=> MSG_GLOBALDB_GET_QUERY,
+					to	=> $hub->uuid,
+					from	=> $uuid,
+				);
+				$sw_handle->outgoing_queue->add_row($env);
+				
+				# MSG_GLOBALDB_BATCH_REPLY is processed above
+				if($sw->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_GET_REPLY))
+				{
+					my $queue = $sw_handle->incoming_queue();
+					my @messages;
+					$queue->begin_batch_update;
+					eval
+					{
+						@messages = $queue->by_key(to => $uuid, type => MSG_GLOBALDB_GET_REPLY);
+						$queue->dele_batch(\@messages);
+					};
+					$queue->end_batch_update;
+					
+					if(@messages > 1)
+					{
+						error "GlobalDB: get(): More than one 'MSG_GLOBALDB_GET_REPLY' received, only using first: ".Dumper(\@messages); 
+					}
+					
+					my $msg = @messages;
+					if($msg->{data})
+					{
+						trace "GlobalDB: get(): Hub '".$hub->{name}."' successfully provided data for '$key'\n";
+						$self->_put_local_batch($msg->{data}, 1);
+					}
+					else
+					{
+						trace "GlobalDB: get(): Hub '".$hub->{name}."' replied FALSE for '$key'\n";
+					}
+					
+					$found_data = 1;
+					last;
+				}
+			}
+			
+		}
+		
+		$dbh->begin_batch_udate;
+ 		delete $dbh->{globaldb_data}->{$req_uuid};
+ 		$dbh->end_batch_udate;
+ 		
+ 		
+		if(!$found_data)
+		{
+			error "GlobalDB: get(): Could not get '$key' from any hub, returning\n";
+			return wantarray ? () : undef;
+		}
+ 		
+		# Retrieve the key data directly instead of just using the $val so we can return the $key_data if requested
+		$key_data = $self->_retrieve($key_file);
+		if(defined $key_data)
+		{
+			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+		}
 
 		return wantarray ? () : undef;
 	}

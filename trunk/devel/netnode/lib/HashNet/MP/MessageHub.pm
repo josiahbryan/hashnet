@@ -168,8 +168,8 @@
 			HashNet::Util::SNTP->sync_time();
 		};
 		
-		# Every 5 seconds, try to reconnect to a hub that is offline
-		set_repeat_timeout 5.0, sub
+		# Every X seconds, try to reconnect to a hub that is offline
+		set_repeat_timeout 60.0, sub
 		{
 			my @list = $self->build_hub_list();
 		

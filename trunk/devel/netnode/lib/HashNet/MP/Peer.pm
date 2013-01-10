@@ -88,7 +88,7 @@
 						PeerPort  => $port);
 		if(!$handle)
 		{
-			error "Peer: _open_socket: Can't connect to port $port on $host: $!";
+			error "Peer: _open_socket: Can't connect to port $port on $host: $!\n";
 			return undef;
 		}
 		
