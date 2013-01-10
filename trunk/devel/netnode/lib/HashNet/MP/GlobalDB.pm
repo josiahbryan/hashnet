@@ -12,6 +12,7 @@ package HashNet::MP::GlobalDB;
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
 	use File::Path; # for remove_Tree
 	use JSON::PP qw/encode_json decode_json/; # for stringify routine
+	use POSIX; # for O_EXCL, etc for sysopen() in get()
 	use UUID::Generator::PurePerl;
 	use HashNet::Util::Logging;
 	use HashNet::Util::SNTP;
@@ -31,10 +32,10 @@ package HashNet::MP::GlobalDB;
 	sub MSG_GLOBALDB_REV_REPLY   { 'MSG_GLOBALDB_REV_REPLY'   }
 	sub MSG_GLOBALDB_BATCH_GET   { 'MSG_GLOBALDB_BATCH_GET'   }
 	sub MSG_GLOBALDB_BATCH_REPLY { 'MSG_GLOBALDB_BATCH_REPLY' }
-	sub MSG_GLOBALDB_LOCK        { 'MSG_GLOBALDB_LOCK'        }
-	sub MSG_GLOBALDB_LOCK_REPLY  { 'MSG_GLOBALDB_LOCK_REPLY'  }
-	sub MSG_GLOBALDB_UNLOCK      { 'MSG_GLOBALDB_UNLOCK'      }
-	sub MSG_GLOBALDB_UNSTALE     { 'MSG_GLOBALDB_UNSTALE'     }
+# 	sub MSG_GLOBALDB_LOCK        { 'MSG_GLOBALDB_LOCK'        }
+# 	sub MSG_GLOBALDB_LOCK_REPLY  { 'MSG_GLOBALDB_LOCK_REPLY'  }
+# 	sub MSG_GLOBALDB_UNLOCK      { 'MSG_GLOBALDB_UNLOCK'      }
+# 	sub MSG_GLOBALDB_UNSTALE     { 'MSG_GLOBALDB_UNSTALE'     }
 
 	sub elide_string
 	{
@@ -231,13 +232,20 @@ package HashNet::MP::GlobalDB;
 			MSG_GLOBALDB_GET_QUERY => sub {
 				my $msg = shift;
 
-				my $key = $msg->{data}->{key};
+				my $key      = $msg->{data}->{key};
+				my $options  = $msg->{data}->{options};
 				my $req_uuid = $msg->{data}->{req_uuid};
 				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Received get req for key '$key', request UUID {$req_uuid}\n";
 				
-				my @result = $self->get($key, $req_uuid);
+				my @result;
+				local *@;
+				eval { @result = $self->get($key, %{$options || {}}); };
 				my $data = 0;
-				if(@result)
+				if($@)
+				{
+					$data = { error => $@ };
+				}
+				elsif(@result)
 				{
 					my %hash = @result;
 					$data = 
@@ -330,57 +338,200 @@ package HashNet::MP::GlobalDB;
 				$sw_handle->outgoing_queue->add_row($new_env);
 			},
 
-			# Still TODO
-			MSG_GLOBALDB_LOCK	=> sub {
-				my $msg = shift;
-
-				trace "GlobalDB: MSG_GLOBALDB_LOCK\n";
-
-				my $lock_key = undef;
-
-				# TODO: Code this
-				# Pseudo code:
-				#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
-				#	- Wait for ...what? How do we know we've got the exclusive lock...?
-				#	- Queue reply back to the sender of $msg indicating got lock or no
-				
-				
-				# Theory for lock:
-				#	- Only hubs (servers) will get this msg
-				#	- Server will load its own list of hubs
-				#	- Server sends out its own lock request to all its known hubs
-				#	- Other hubs recursively send out locko requests
-				#	- Only when server has responses to all its requests (fail, acquire, timeout) does it respond to its request
-				#	- This implies server (this routine) must wait (using wait_for_receive with appros args) and block b
-				#		- **OR** Instead of wait_for_receive, add a MSG_.._LOCK_REPLY hook that checks a counter using a sharedref,
-				#			and when all hubs respond, then that hook sends reply - that way, dont have to block
-				
-				# Msg: MSG_GLOBALDB_LOCK_REPLY
-				#	Data: { result => X } where X is one of ('FAIL', 'LOCKED', 'TIMEOUT')
-				
-				
-			},
-
-			MSG_GLOBALDB_UNLOCK	=> sub {
-				my $msg = shift;
-
-				trace "GlobalDB: MSG_GLOBALDB_UNLOCK\n";
-
-				my $lock_key = undef;
-
-				# TODO: Code unlock
-			},
-
-			MSG_GLOBALDB_UNSTALE	=> sub {
-				my $msg = shift;
-
-				trace "GlobalDB: MSG_GLOBALDB_UNSTALE\n";
-
-				my $lock_key = undef;
-
-				# TODO: Code cleanup stale locks
-
-			},
+# 			# Still TODO
+# 			MSG_GLOBALDB_LOCK	=> sub {
+# 				my $msg = shift;
+# 
+# 				trace "GlobalDB: MSG_GLOBALDB_LOCK\n";
+# 
+# 				my $msg_data = $msg->{data};
+# 				my $key      = $msg_data->{key};
+# 				my $req_uuid = $msg_data->{req_uuid};
+# 
+# 				# TODO: Code this
+# 				# Pseudo code:
+# 				#	- Queue broadcast to the rest of the network, asking for a lock on $lock_key, with data field indicating who sent it, so locking client ignores this _LOCK msg
+# 				#	- Wait for ...what? How do we know we've got the exclusive lock...?
+# 				#	- Queue reply back to the sender of $msg indicating got lock or no
+# 				
+# 				
+# 				# Theory for lock:
+# 				#	- Only hubs (servers) will get this msg
+# 				#	- Server will load its own list of hubs
+# 				#	- Server sends out its own lock request to all its known hubs
+# 				#	- Other hubs recursively send out locko requests
+# 				#	- Only when server has responses to all its requests (fail, acquire, timeout) does it respond to its request
+# 				#	- This implies server (this routine) must wait (using wait_for_receive with appros args) and block b
+# 				#		- **OR** Instead of wait_for_receive, add a MSG_.._LOCK_REPLY hook that checks a counter using a sharedref,
+# 				#			and when all hubs respond, then that hook sends reply - that way, dont have to block
+# 				
+# 				# Msg: MSG_GLOBALDB_LOCK_REPLY
+# 				#	Data: { result => X } where X is one of ('FAIL', 'LOCKED', 'TIMEOUT')
+# 				
+#  				my $error = 0;
+#  				
+# # 				# Must be in a MessageHub, find the first peer thats a hub and ask them
+# # 				my @list = HashNet::MP::PeerList->peers_by_type('hub');
+# # 				if(!@list)
+# # 				{
+# # 					trace "GlobalDB: MSG_GLOBALDB_LOCK: No hubs in database, trying locking key '$key' immediatly\n";	
+# # 				}
+# # 				else
+# # 				{
+# # 					foreach my $hub (@list)
+# # 					{
+# # 						next if !$hub->is_online ||
+# # 							 $hub->uuid eq $self->{rx_uuid} || # only will be true if we are running inside a MessageHub instance
+# # 							 $hub->uuid eq $msg->{from};
+# # 						
+# # 						trace "GlobalDB: MSG_GLOBALDB_LOCK: Trying '".$hub->{name}."', sending lock request\n";
+# # 						my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
+# # 						
+# # 						my $env = $sw_handle->create_envelope(
+# # 							$msg_data,
+# # 							type	=> MSG_GLOBALDB_LOCK,
+# # 							to	=> $hub->uuid,
+# # 							from	=> $uuid,
+# # 						);
+# # 						$sw_handle->outgoing_queue->add_row($env);
+# # 						
+# # 						if($sw_handle->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_LOCK_REPLY))
+# # 						{
+# # 							my $queue = $sw_handle->incoming_queue();
+# # 							my @messages;
+# # 							$queue->begin_batch_update;
+# # 							eval
+# # 							{
+# # 								my @tmp = $queue->by_key(to => $uuid, type => MSG_GLOBALDB_LOCK_REPLY);
+# # 								@messages = map { clean_ref($_) } grep { defined $_ } @tmp;
+# # 								$queue->del_batch(\@tmp);
+# # 							};
+# # 							error "GlobalDB: MSG_GLOBALDB_LOCK: Error getting data from incoming message queue: $@" if $@;
+# # 							$queue->end_batch_update;
+# # 							
+# # 							if(@messages > 1)
+# # 							{
+# # 								error "GlobalDB: MSG_GLOBALDB_LOCK: More than one 'MSG_GLOBALDB_LOCK_REPLY' received, only using first: ".Dumper(\@messages); 
+# # 							}
+# # 							
+# # 							my $msg = @messages;
+# # 							if($msg->{data} == 1)
+# # 							{
+# # 								trace "GlobalDB: MSG_GLOBALDB_LOCK: Hub '".$hub->{name}."' successfully locked '$key'\n";
+# # 							}
+# # 							elsif($msg->{data} == 0)
+# # 							{
+# # 								trace "GlobalDB: MSG_GLOBALDB_LOCK: Hub '".$hub->{name}."' FAILED to lock '$key'\n";
+# # 								$error = 1;
+# # 								last;
+# # 							}
+# # 							else
+# # 							{
+# # 								trace "GlobalDB: MSG_GLOBALDB_LOCK: Hub '".$hub->{name}."': Unknown response: '$msg->{data}'\n";
+# # 							}
+# # 						}
+# # 						else
+# # 						{
+# # 							trace "GlobalDB: MSG_GLOBALDB_LOCK: Hub '".$hub->{name}."' TIMED OUT or did not respond to lock for '$key'\n";
+# # 							$error = 1;
+# # 							last;
+# # 						}
+# # 					}
+# # 					
+# # 				}
+# 				
+# 				if(!$error)
+# 				{
+# 					# Store lock in database
+# 					my $hashref = undef;
+# 					my $time = time();
+# 					my $max = 60;
+# 					my $speed = 1;
+# 					my $lock_timeout = 1;
+# 					while( time - $time < $max )
+# 					{ 
+# 						eval { $hashref = $self->get($key.".lock", exclusive_create => 1); }
+# 						if($@)
+# 						{
+# 							$lock_timeout = 0;
+# 							last;
+# 						}
+# 						sleep $speed;
+# 					}
+# 					
+# 					if($lock_timeout)
+# 					{
+# 						$hashref = $self->get($key.".lock");
+# 						trace "GlobalDB: MSG_GLOBALDB_LOCK: Lock FAIL: Peer $hashref->{locking_name}{$hashref->{locking_uuid}} has $key locked\n";
+# 						$error = 1;
+# 					}
+# 					else
+# 					{
+# 						$self->put($key.".lock", { locking_uuid => $msg->{from}, lock_msg => $msg });
+# 					}
+# 				}
+# 				
+# 				if($error)
+# 				{
+# 					trace "GlobalDB: MSG_GLOBALDB_LOCK: One or more errors occurred while attempting to lock '$key', replying FAILURE to lock request\n";
+# 				}
+# 				else
+# 				{
+# 					trace "GlobalDB: MSG_GLOBALDB_LOCK: Successfully locked '$key', replying SUCCESS to lock request\n";
+# 				}
+# 				
+# 				my $env = $sw_handle->create_envelope(
+# 					$error ? 0 : 1,  # yes, just a single integer does work
+# 					type	=> MSG_GLOBALDB_LOCK_REPLY,
+# 					to	=> $msg->{from},
+# 					from	=> $msg->{to},
+# 				);
+# 				
+# 				#trace "GlobalDB: MSG_GLOBALDB_BATCH_GET: Enqueing new envelope: ".Dumper($env);
+# 				$sw_handle->outgoing_queue->add_row($env);
+# 				
+# 				$sw_handle->wait_for_send(4, 0.1, $msg->{to}); # Make sure the data gets off this node
+# 				
+# 			},
+# 
+# 			MSG_GLOBALDB_UNLOCK	=> sub {
+# 				my $msg = shift;
+# 
+# 				trace "GlobalDB: MSG_GLOBALDB_UNLOCK\n";
+# 
+# 				my $lock_key = $msg->{data};
+# 				$self->delete($lock_key.".lock");
+# 			},
+# 
+# 			MSG_GLOBALDB_UNSTALE	=> sub {
+# 				my $msg = shift;
+# 
+# 				my $key = $msg->{data};
+# 				my $lock_key = "$key.lock";
+# 
+# 				trace "GlobalDB: MSG_GLOBALDB_UNSTALE: '$key'\n";
+# 
+# 				my $hashref = $self->get($lock_key);
+# 				if($hashref)
+# 				{
+# 					my $uuid = $hashref->{locking_uuid};
+# 					# TODO: Check send_ping() to see if its compatible with being called from a message hub
+# 					my @results = $sw_handle->send_ping($uuid, $ping_max_time);
+# 					@results = grep { $_->{msg}->{from} eq $uuid } @results;
+# 					if(!@results)
+# 					{
+# 						trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is stale, removing\n";
+# 						# TODO: Do we need to do some sort of force-push_tr incase we're inside a batch...?
+# 						$self->delete($lock_key);
+# 					}
+# 					else
+# 					{
+# 						trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is NOT stale, locking UUID {$uuid} still alive\n";
+# 					}
+# 					
+# 				}
+# 
+# 			},
 		);
 			
 		$self->{rx_pid} = { pid => $fork_pid, started_from => $$ };
@@ -593,12 +744,19 @@ package HashNet::MP::GlobalDB;
 
 		foreach my $item (@batch)
 		{
-			my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num}, $dont_inc_editnum);
-			# Store timestamp/edit_num back into the ref inside @batch so that
-			# when we upload the @batch in end_batch_update to via SocketWorker,
-			# the ts/edit# is captured and sent out
-			$item->{timestamp} = $data_ref->{timestamp};
-			$item->{edit_num}  = $data_ref->{edit_num};
+			if($item->{_key_deleted})
+			{
+				$self->_delete_local($item->{key}, $item->{timestamp}, $item->{edit_num});
+			}
+			else
+			{
+				my $data_ref = $self->_put_local($item->{key}, $item->{val}, $item->{timestamp}, $item->{edit_num}, $dont_inc_editnum);
+				# Store timestamp/edit_num back into the ref inside @batch so that
+				# when we upload the @batch in end_batch_update to via SocketWorker,
+				# the ts/edit# is captured and sent out
+				$item->{timestamp} = $data_ref->{timestamp};
+				$item->{edit_num}  = $data_ref->{edit_num};
+			}
 		}
 	}
 
@@ -645,6 +803,105 @@ package HashNet::MP::GlobalDB;
 
 		return $key;
 	}
+	
+	sub delete
+	{
+		my $self = shift;
+		my $key = shift;
+		
+		$key = sanatize_key($key);
+
+		if(!$key && $@)
+		{
+			logmsg "ERROR", "GlobalDB: put(): $@";
+			return undef;
+		}
+
+		$key = '/'.$key if $key !~ /^\//;
+
+		#trace "GlobalDB: put(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "GlobalDB: delete(): '", elide_string($key), "'\n";
+
+		if($self->{_batch_update})
+		{
+			#logmsg "WARN", "GlobalDB: put(): [BATCH] $key => ", ($val||''), "\n";
+			push @{$self->{_batch_list}}, {key=>$key, _key_deleted=>1};
+			return $key;
+		}
+
+		#logmsg "TRACE", "GlobalDB: put(): $key => ", ($val||''), "\n";
+
+		my $data_ref = $self->_delete_local($key);
+
+		$self->_push_tr([{
+			key		=> $key,
+			_key_deleted    => 1,
+			timestamp	=> $data_ref->{timestamp},
+			edit_num	=> $data_ref->{edit_num},
+		}]);
+	}
+	
+	sub _delete_local
+	{
+		my $self = shift;
+		my $key = shift;
+		my $check_timestamp  = shift || undef;
+		my $check_edit_num   = shift || undef;
+
+		return if ! defined $key;
+
+		#trace "GlobalDB: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
+		trace "GlobalDB: _delete_local(): '", elide_string($key), "'\n";
+
+
+		# TODO: Sanatize key to remove any '..' or other potentially invalid file path values
+		my $key_path = $self->{db_root} . $key;
+		mkpath($key_path) if !-d $key_path;
+
+		my $key_file = $key_path . '/data';
+
+		my $edit_num = 0;
+		#if(defined $timestamp
+		#   && -f $key_file)
+		if(-f $key_file)
+		{
+			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
+
+			$edit_num  = $key_data->{edit_num};
+			my $key_ts = $key_data->{timestamp};
+
+			if(defined $check_timestamp &&
+				   $check_timestamp < $key_ts)
+			{
+				logmsg "ERROR", "GlobalDB: _delete_local(): Timestamp for '$key' is OLDER than timestamp in database, NOT deleting (incoming time ", (date($check_timestamp))[1], " < stored ts ", (date($key_ts))[1], ")\n";
+				return undef;
+			}
+
+# 			if(defined $check_edit_num &&
+# 			           $check_edit_num < $edit_num)
+# 			{
+# 				logmsg "ERROR", "GlobalDB: _put_local(): Edit num for '$key' is older than edit num stored, NOT storing (incoming edit_num $check_edit_num < stored edit_num $edit_num)\n";
+# 				return undef;
+# 			}
+		}
+
+		
+		my $data_ref =
+		{
+			timestamp	=> $check_timestamp || time(),
+			edit_num	=> $edit_num,
+		};
+		
+		unlink($key_file);
+		
+		$self->update_db_rev();
+
+		#trace "GlobalDB: _put_local(): key_file: $key_file\n";
+		#	unless $key =~ /^\/global\/nodes\//;
+
+		return $data_ref;
+	}
+	
 
 	sub _push_tr
 	{
@@ -808,6 +1065,10 @@ package HashNet::MP::GlobalDB;
 	{
 		my $self = shift;
 		my $key = shift;
+		
+		my %opts = @_;
+		
+		my $exclusive_create = $opts{exclusive_create} || 0;
 
 		$key = sanatize_key($key);
 
@@ -834,27 +1095,89 @@ package HashNet::MP::GlobalDB;
 		
 		trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
 		$queue->lock_file();
-		eval
+		
+		my $file;
+		if($exclusive_create)
 		{
-			if(-f $key_file && (stat($key_file))[7] > 0)
+			my $fh;
+			if(!sysopen($fh, $key_file, O_EXCL|O_CREAT))
 			{
-				$key_data = $self->_retrieve($key_file);
-				if(!defined $key_data)
-				{
-					logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
-				}
+				trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+				$queue->unlock_file();
+				trace "GlobalDB: get(): exclusive_create for '$key' failed, propogating error\n";
+				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on local disk cache and exclusive_create option specified";
 			}
-		};
+			
+			# Exclusive create means the file did NOT exist before we got to this line in our program
+			# Therefore, there is nothing in the file to retrieve.
+			# HOWEVER, since we DID open it exlusively here, we need to check with all hubs to make sure we have the ONLY key open
+			# Only THEN can we return successfully
+			my $found_data = $self->_query_hubs($key, %opts);
+			if($found_data)
+			{
+				trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+				$queue->unlock_file();
+				
+				trace "GlobalDB: get(): exclusive_create/_query_hubs failure for '$key', removing lock disk cache file\n";
+				unlink($key_file);
+				
+				trace "GlobalDB: get(): exclusive_create succeeded, but _query_hubs() for '$key' failed, propogating error\n";
+				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on remote hubs and exclusive_create option specified";
+			}
+			
+			trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+			$queue->unlock_file();
+			
+			trace "GlobalDB: get(): exclusive_create for '$key' succeded\n";
+			return wantarray ? () : undef;
+		}
+		else
+		{
+			eval
+			{
+				if(-f $key_file && (stat($key_file))[7] > 0)
+				{
+					$key_data = $self->_retrieve($key_file);
+					if(!defined $key_data)
+					{
+						logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+					}
+				}
+			};
+		}
 		error "GlobalDB: get(): Error while trying to retrieve '$key': $@" if $@;
 		trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
 		$queue->unlock_file();
 		
-		if(defined $key_data)
+		
+		my $found_data = $self->_query_hubs($key, %opts);
+		if(!$found_data)
 		{
-			return wantarray ? %{$key_data || {}} : $key_data->{data};
+			error "GlobalDB: get(): Could not get '$key' from any hub, returning\n";
+			return wantarray ? () : undef;
+		}
+ 		else
+ 		{
+			# Retrieve the key data directly instead of just using the $val so we can return the $key_data if requested
+			$key_data = $self->_retrieve($key_file);
 		}
 		
-		my $req_uuid = shift;
+		if(defined $key_data)
+		{
+			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+		}
+
+		return wantarray ? () : undef;
+	}
+	
+	sub _query_hubs
+	{
+		my $self = shift;
+		my $key  = shift;
+		my %opts = @_;
+		my $exclusive_create = $opts{exclusive_create} || 0;
+
+		my $req_uuid = $opts{req_uuid} || undef;
 		if(!$req_uuid)
 		{
 			$req_uuid = $UUID_GEN->generate_v1->as_string();
@@ -916,14 +1239,20 @@ package HashNet::MP::GlobalDB;
 				my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
 				
 				my $env = $sw_handle->create_envelope(
-					{ key => $key, req_uuid => $req_uuid },
+					{
+						key => $key,
+						options => 
+						{
+							req_uuid => $req_uuid,
+							exclusive_create => $exclusive_create,
+						},
+					},
 					type	=> MSG_GLOBALDB_GET_QUERY,
 					to	=> $hub->uuid,
 					from	=> $uuid,
 				);
 				$sw_handle->outgoing_queue->add_row($env);
 				
-				# MSG_GLOBALDB_BATCH_REPLY is processed above
 				if($sw_handle->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_GET_REPLY))
 				{
 					my $queue = $sw_handle->incoming_queue();
@@ -946,8 +1275,28 @@ package HashNet::MP::GlobalDB;
 					my $msg = @messages;
 					if($msg->{data})
 					{
-						trace "GlobalDB: get(): Hub '".$hub->{name}."' successfully provided data for '$key'\n";
-						$self->_put_local_batch($msg->{data}, 1);
+						if($msg->{data}->{error})
+						{
+							trace "GlobalDB: get(): Hub '".$hub->{name}."' encountered error while retrieving '$key', will propogate: $msg->{data}->{error}\n";
+							if($exclusive_create)
+							{
+								$found_data = 1;
+								last;
+							}
+							else
+							{
+								$dbh->update_begin;
+								delete $dbh->{globaldb_data}->{$req_uuid};
+								$dbh->update_end;
+								
+								die $msg->{data}->{error};
+							}
+						}
+						else
+						{
+							trace "GlobalDB: get(): Hub '".$hub->{name}."' successfully provided data for '$key'\n";
+							$self->_put_local_batch($msg->{data}, 1);
+						}
 					}
 					else
 					{
@@ -958,28 +1307,13 @@ package HashNet::MP::GlobalDB;
 					last;
 				}
 			}
-			
 		}
 		
 		$dbh->update_begin;
  		delete $dbh->{globaldb_data}->{$req_uuid};
  		$dbh->update_end;
  		
- 		
-		if(!$found_data)
-		{
-			error "GlobalDB: get(): Could not get '$key' from any hub, returning\n";
-			return wantarray ? () : undef;
-		}
- 		
-		# Retrieve the key data directly instead of just using the $val so we can return the $key_data if requested
-		$key_data = $self->_retrieve($key_file);
-		if(defined $key_data)
-		{
-			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
-		}
-
-		return wantarray ? () : undef;
+ 		return $found_data;
 	}
 
 	sub list
@@ -1077,6 +1411,90 @@ package HashNet::MP::GlobalDB;
 		}
 
 		return $result;
+	}
+	
+	sub lock_key
+	{
+		my $self = shift;
+		my $key = shift;
+		my %opts = @_;
+
+		trace "GlobalDB: lock_key(): $key\n";
+
+		# Store lock in database
+		my $time  = time();
+		my $max   = $opts{timeout} || 60;
+		my $speed = $opts{speed}   || 1;
+		my $lock_timeout = 1;
+		while( time - $time < $max )
+		{ 
+			eval { $self->get($key.".lock", exclusive_create => 1); };
+			if($@)
+			{
+				$lock_timeout = 0;
+				last;
+			}
+			sleep $speed;
+		}
+		
+		if($lock_timeout)
+		{
+			my $hashref = $self->get($key.".lock");
+			trace "GlobalDB: lock_key(): Lock FAIL: Peer $hashref->{locking_name}{$hashref->{locking_uuid}} has $key locked\n";
+			return 0;
+		}
+		
+		my $sw = $self->sw;
+		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
+		$self->put($key.".lock", { locking_uuid => $uuid });
+		
+		trace "GlobalDB: lock_key(): Successfully locked '$key', replying SUCCESS to lock request\n";
+		return 1;
+	}
+
+	sub unlock_key
+	{
+		my $self = shift;
+		my $key  = shift;
+
+		trace "GlobalDB: unlock: $key\n";
+
+		$self->delete($key.".lock");
+	}
+
+	sub unlock_if_stale
+	{
+		my $self = shift;
+		
+		my $key = shift;
+		my $ping_max_time = shift || 10;
+
+		my $lock_key = "$key.lock";
+
+		trace "GlobalDB: unlock_if_stale: '$key'\n";
+
+		my $hashref = $self->get($lock_key);
+		if($hashref)
+		{
+			my $uuid = $hashref->{locking_uuid};
+			
+			my $sw_handle = $self->sw_handle;
+			
+			# TODO: Check send_ping() to see if its compatible with being called from a message hub
+			my @results = $sw_handle->send_ping($uuid, $ping_max_time);
+			
+			@results = grep { $_->{msg}->{from} eq $uuid } @results;
+			if(!@results)
+			{
+				trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is stale, removing\n";
+				# TODO: Do we need to do some sort of force-push_tr incase we're inside a batch...?
+				$self->delete($lock_key);
+			}
+			else
+			{
+				trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is NOT stale, locking UUID {$uuid} still alive\n";
+			}
+		}
 	}
 };
 1;

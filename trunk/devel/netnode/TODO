@@ -2,6 +2,11 @@
 #-Test pings
 #-Add geo info
 
+-Add ACLs to server
+-Need tunnel watcher/creator module
+	-SSH expect, see other research files
+-Add server->client event notification to globaldb, e.g. key change/key add/del/etc
+-Add GlobalDB delete key
 -Adapt MessageSocketBase to write attachments immediately to disk?
 -Test reroute_queued_messages
 -Add tests/ for Pings, Reconnect
@@ -19,23 +24,16 @@
 	-To be used in GlobalDB to lock/unlock keys for batch updates
 -Add a GlobalDB 'queue vaccumme' process
 	-Sweep outgoing queue of offline peers every X minutes to compress multiple independent MSG_GLOBALDB_TR into a single GlobalDB TR update
--Need some hook/some way for 'new peers' to a MessageHub/to the network to be able to get caught up-to-date with the state of GlobalDB
-	-Some sort of hook on 'new peer' in SocketWorker for GlobalDB to then queue up a big batch of the current state of the GlobalDB database?
 -Add a generic 'set_timeout*' API for use outside of the MessageHub timer loop which sets up its own AE loop
 	-For use by the GlobalDB vaccumme process
--Idea: Concept of modules to plug into the MessageHub/SocketWorker framework?
-	-Right now, we have two 'modules' that intercept specific message types:
-		-MSG_CLIENT_RECEIPT (MessageHub)
-		-MSG_GLOBALDB_TR (GlobalDB)
-	-We already have fork_receiver - is that enough?
-	-What about GlobalLock? It will probably need it's own set of message types
-		-MSG_GLOCK_LOCK
-		-MSG_GLOCK_UNLOCK
-		-Some sort of facility to remove stale locks 
-			-By peer uuid?
-			-Should peers hold locks even if they are offline?
-				-Which begs the question - do we need some sort of facility to query if the peer is online somewhere on the network?
-					-Wouldn't MSG_PING do that? Just ping to that peers UUID and block till receive or timeout...?
+-Lock
+	-MSG_GLOCK_LOCK
+	-MSG_GLOCK_UNLOCK
+	-Some sort of facility to remove stale locks 
+		-By peer uuid?
+		-Should peers hold locks even if they are offline?
+			-Which begs the question - do we need some sort of facility to query if the peer is online somewhere on the network?
+				-Wouldn't MSG_PING do that? Just ping to that peers UUID and block till receive or timeout...?
 
 
 ---------
@@ -60,4 +58,5 @@ Routing Cases/Scenarios:
 		C1->S1,->S2 [client sends msg via S1 to a UUID of a client that has never come online yet, s2 and s1 hold in outgoing queue]
 		C3<-S2      [new client connects to S2, picks up message, broadcasts receipt that wipes from S1's holding queue]
 
+		
 		

@@ -31,25 +31,6 @@ use common::sense;
 		{
 			my %hash;
 			tie %hash, __PACKAGE__, $file;
-			#return \%hash;
-
-			#trace "SharedRef: new: Tied hash\n";
-
-			#$hash{test} = 1;
-
-			#return \%hash;
-
-			#my $self = $class->_create_inst($file, \%hash);
-
-			#$self->{test} = 1;
-
-
-			#my $file2 = $self->file();
-
-			#die "File mismatch: '$file2' != '$file'" if $file2 ne $file;
-			
-			#return $self;
-
 			return \%hash;
 		}
 		else
