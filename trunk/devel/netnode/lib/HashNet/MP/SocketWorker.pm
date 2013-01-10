@@ -1164,7 +1164,7 @@ use common::sense;
 		# Even if another process with the same PID registers, we dont want stale messages laying in the queue
 		# So we remove the old file.
 		my $queue = msg_queue('listeners/'.$pid);
-		unlink($queue->shared_ref->file);
+		$queue->shared_ref->delete_file;
 
 		$ref->update_end;
 	}
@@ -1178,6 +1178,13 @@ use common::sense;
 		return if !@queues;
 
 		$_->add_row(clean_ref($msg)) foreach @queues;
+	}
+	
+	sub rx_listen_queue
+	{
+		my $self = shift;
+		my $pid  = shift;
+		return msg_queue('listeners/'.$pid)
 	}
 	
 	sub fork_receiver
@@ -1221,13 +1228,17 @@ use common::sense;
 			$0 = "$0 [SocketWorker:$msg_name]";
 			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
 
-			my $queue = msg_queue('listeners/'.$$);
+			my $queue = $self->rx_listen_queue($$);
 			my $receipt_queue = ref $self ? outgoing_queue() : incoming_queue();
 			
 			# Lock incoming queue so we know that we're not going to duplicate messages
 			# between the time we register interest and the time we check for existing
 			# incoming messages in the queue
 			incoming_queue()->lock_file;
+			# Lock the rx_listen_queue for this PID so that the caller of fork_receiver()
+			# can use rx_listen_queue() to acquire a lock to know when we're processing inorder
+			# to syncronize access to data (e.g. GlobalDB::get())
+			$queue->lock_file;
 			{
 				eval
 				{
@@ -1240,8 +1251,11 @@ use common::sense;
 					# Check the general incoming queue for any messages that have come in before we registered interest
 					my @list = incoming_queue()->by_key(nxthop => $uuid, type => \@msg_names);
 					
-					trace "SocketWorker: Received ", scalar(@list), " messages that arrived prior to registering interest, processing...\n"; 
-					$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid) if @list;
+					if(@list)
+					{
+						trace "SocketWorker: Received ", scalar(@list), " messages that arrived prior to registering interest, processing...\n"; 
+						$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid);
+					}
 					
 					# Delete from queue if we are called on a class instance (fork_receiver).
 					# TODO (true?) The "only" time we would NOT be called on a class instance is if code
@@ -1252,13 +1266,18 @@ use common::sense;
 				error "SocketWorker: Error processing initial messages: $@" if $@;
 			}
 			incoming_queue()->unlock_file;
+			$queue->unlock_file;
 			
 			while(1)
 			{
+				$queue->lock_file;
+			
 				my @list = HashNet::MP::MessageQueues->pending_messages($queue);
 				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
 				$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid);
+				
+				$queue->unlock_file;
 
 				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
 				unless(kill 0, $parent_pid)

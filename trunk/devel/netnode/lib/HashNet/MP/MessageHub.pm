@@ -916,6 +916,10 @@
 			# list all known hubs, clients, etc
 			#debug "MessageHub: bcast, peers: ".Dumper(\@peers);
 		}
+		elsif($msg->{to} eq $self_uuid)
+		{
+			debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}' - destined for this hub, evaporating\n";
+		}
 		else
 		{
 			my $to = $msg->{to};
