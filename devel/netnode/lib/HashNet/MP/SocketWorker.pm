@@ -1206,6 +1206,7 @@ use common::sense;
 			if(!ref $self)
 			{
 				warn "SocketWorker::fork_receiver() called without a blessed ref, unable to find self-uuid automatically, unable to automatically generate client receipts for $msg_name";
+				print_stack_trace();
 			}
 			else
 			{

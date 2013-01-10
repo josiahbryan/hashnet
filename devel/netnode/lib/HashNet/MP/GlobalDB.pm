@@ -10,6 +10,7 @@ package HashNet::MP::GlobalDB;
 	use Cwd qw/abs_path/;
 	#use LWP::Simple qw/getstore/; # for clone database
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
+	use File::Path; # for remove_Tree
 	use JSON::PP qw/encode_json decode_json/; # for stringify routine
 	use UUID::Generator::PurePerl;
 	use HashNet::Util::Logging;
@@ -139,6 +140,10 @@ package HashNet::MP::GlobalDB;
 			$ch->wait_for_start;
 			$self->{ch} = $ch;
 		}
+		
+		#print_stack_trace();
+		#die Dumper ($self->{ch}, \%args, \@_);
+		
 		#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data" if !$sw;
 
 		$self->setup_message_listeners();
@@ -160,6 +165,30 @@ package HashNet::MP::GlobalDB;
 
 		return $self;
 	};
+	
+	sub delete_disk_cache
+	{
+		my $self = shift;
+		if(!@_)
+		{
+			my $root = $self->{db_root};
+			rmtree($root) if -d $root;
+			return;
+		}
+		
+		if(!ref $self)
+		{
+			my $db = shift;
+			if(-d $db)
+			{
+				rmtree($db);
+				return;
+			}
+			
+			$db .= '.data';
+			rmtree($db) if -d $db;
+		}
+	}
 
 	sub client_handle { shift->{ch} }
 	sub sw            {
@@ -363,7 +392,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 
 		my $db_root = $self->db_root;
-		my $cmd = 'cd '.$db_root.'; tar -zcf $OLDPWD/db.tar.gz *; cd $OLDPWD';
+		my $cmd = 'cd '.$db_root.'; tar -zcf $OLDPWD/db.tar.gz * 2>/dev/null; cd $OLDPWD';
 		trace "GlobalDB: gen_db_archive(): Running clone cmd: '$cmd'\n";
 		system($cmd);
 		
@@ -401,7 +430,7 @@ package HashNet::MP::GlobalDB;
 
 		#logmsg "INFO", "GlobalDB: apply_db_archive(): Download finished.\n";
 
-		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file";
+		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file 2>/dev/null";
 
 		trace "StorageEngine: apply_db_archive(): Decompressing: '$decomp_cmd'\n";
 
