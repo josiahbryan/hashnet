@@ -892,6 +892,7 @@ package HashNet::MP::GlobalDB;
 			edit_num	=> $edit_num,
 		};
 		
+		trace "GlobalDB: _delete_local(): unlink('$key_file')\n";
 		unlink($key_file);
 		
 		$self->update_db_rev();
@@ -1104,6 +1105,7 @@ package HashNet::MP::GlobalDB;
 			{
 				trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
 				$queue->unlock_file();
+				
 				trace "GlobalDB: get(): exclusive_create for '$key' failed, propogating error\n";
 				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on local disk cache and exclusive_create option specified";
 			}
@@ -1423,13 +1425,13 @@ package HashNet::MP::GlobalDB;
 
 		# Store lock in database
 		my $time  = time();
-		my $max   = $opts{timeout} || 60;
+		my $max   = $opts{timeout} || 10;
 		my $speed = $opts{speed}   || 1;
 		my $lock_timeout = 1;
 		while( time - $time < $max )
 		{ 
 			eval { $self->get($key.".lock", exclusive_create => 1); };
-			if($@)
+			if(!$@)
 			{
 				$lock_timeout = 0;
 				last;
