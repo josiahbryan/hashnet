@@ -1,9 +1,11 @@
--Adapt MessageSocketBase to write attachments immediately to disk?
 #-MessageHub: Reconnect to other hubs if disconnected
 #-Test pings
 #-Add geo info
 
+-Adapt MessageSocketBase to write attachments immediately to disk?
+-Test reroute_queued_messages
 -Add tests/ for Pings, Reconnect
+-Add tests for routing edge cases
 -Add tests for globaldb: clone on rev 0
 -GlobalDB: Add partial-key search
 -Idea: Add web interface (.cgi?) for:
@@ -34,3 +36,28 @@
 			-Should peers hold locks even if they are offline?
 				-Which begs the question - do we need some sort of facility to query if the peer is online somewhere on the network?
 					-Wouldn't MSG_PING do that? Just ping to that peers UUID and block till receive or timeout...?
+
+
+---------
+Routing Cases/Scenarios:
+	Convention:
+		Cx - Client (originator/destination for a message)
+		Sx - Server ('hub')
+		
+	1. Simple Point-to-Point
+		C1->S1
+	2. Client-hub-Client
+		C1->S1->C2
+	3. Client Broadcast
+		C1->S1->*
+	4. Client Intermittent Roaming
+		C1->S1->S2 [broadcast generic online message, setup route]
+		(C1 goes offline)
+		    S1<-S2<-C2 [c2 sends to c1 via s2,s1, s1 stores in queue for later]
+		C1->S2->S1 [broadcast generic online message, setup route - via S2]
+		C1<-S2<-S1 [s1 reroutes stored messasage from c2 to c1 via s2]
+	5. Client to New Client
+		C1->S1,->S2 [client sends msg via S1 to a UUID of a client that has never come online yet, s2 and s1 hold in outgoing queue]
+		C3<-S2      [new client connects to S2, picks up message, broadcasts receipt that wipes from S1's holding queue]
+
+		
