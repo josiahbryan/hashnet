@@ -960,7 +960,7 @@ use common::sense;
 		my $self  = shift;
 		my $max   = shift || 4;
 		my $speed = shift || 0.1;
-		my $uuid  = $self->peer_uuid;
+		my $uuid  = shift || $self->peer_uuid;
 		my $queue = outgoing_queue();
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
@@ -991,13 +991,13 @@ use common::sense;
 		my $max   = $opts{timeout} || $opts{max}   || 4;
 		my $speed = $opts{speed}   ||                 0.01;
 		my $type  = $opts{type}    ||                 undef;
+		my $uuid  = $opts{uuid}    ||                 $self->uuid;
 		
-		my $uuid  = $self->uuid;
 		#trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
 		
-		$self->wait_for_start; # if $self->state_handle->{online} == 0.5;
+		$self->wait_for_start if ref $self; # if $self->state_handle->{online} == 0.5;
 
 # 		sleep $speed while time - $time < $max
 # 		             and !$queue->has_external_changes;  # check has_external_changes first to prevent having to re-load data every time if nothing changed
@@ -1030,7 +1030,16 @@ use common::sense;
 		}
 
 		# Returns 1 if at least one msg received, 0 if incoming queue empty
-		my $res = scalar $queue->all_by_key(to => $uuid);
+		my $res;
+		if($type)
+		{
+			$res = scalar ( $queue->all_by_key(to => $uuid, type => $type) );
+		}
+		else
+		{
+			$res = scalar $queue->all_by_key(to => $uuid);
+		}
+		
 		#trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
@@ -1212,63 +1221,44 @@ use common::sense;
 			$0 = "$0 [SocketWorker:$msg_name]";
 			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
 
-			$self->_rx_register_listener($_, $$) foreach @msg_names;
-
-			#my $queue = incoming_queue();
 			my $queue = msg_queue('listeners/'.$$);
-			my $recipt_queue = ref $self ? outgoing_queue() : incoming_queue();
-
-			my %seen_msg_flag;
-			my $max_time = 60;
+			my $receipt_queue = ref $self ? outgoing_queue() : incoming_queue();
+			
+			# Lock incoming queue so we know that we're not going to duplicate messages
+			# between the time we register interest and the time we check for existing
+			# incoming messages in the queue
+			incoming_queue()->lock_file;
+			{
+				eval
+				{
+					$self->_rx_register_listener($_, $$) foreach @msg_names;
+				};
+				error "SocketWorker: Error registering listeners: $@" if $@;
+				
+				eval
+				{
+					# Check the general incoming queue for any messages that have come in before we registered interest
+					my @list = incoming_queue()->by_key(nxthop => $uuid, type => \@msg_names);
+					
+					trace "SocketWorker: Received ", scalar(@list), " messages that arrived prior to registering interest, processing...\n"; 
+					$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid) if @list;
+					
+					# Delete from queue if we are called on a class instance (fork_receiver).
+					# TODO (true?) The "only" time we would NOT be called on a class instance is if code
+					# is running a a hub, in which case, the message router should be the only one deleting
+					# messages from the incoming queue
+					incoming_queue()->del_batch(\@list) if ref $self;
+				};
+				error "SocketWorker: Error processing initial messages: $@" if $@;
+			}
+			incoming_queue()->unlock_file;
 			
 			while(1)
 			{
 				my @list = HashNet::MP::MessageQueues->pending_messages($queue);
 				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
 
-				if(@list)
-				{
-					#trace "SocketWorker: fork_receiver/$msg_name: Received ".scalar(@list)." messages\n";
-					$recipt_queue->begin_batch_update;
-					
-					foreach my $msg (@list)
-					{
-						local *@;
-						eval
-						{
-							$msg_subs{$msg->{type}}->($msg);
-						};
-						trace "SocketWorker: fork_receiver/$msg_name: Error processing msg $msg->{type} {$msg->{uuid}}: $@" if $@;
-
-						# We're cheating the system a bit if we don't have a $self ref -
-						# we assume that if no ref $self, we are running on a hub,
-						# so we dump the receipt into the *incoming* queue instead
-						# of the outgoing queue, and set the nxthop to the *hub's* uuid
-						# instead of the uuid on the other end of the socket,
-						# so then the local hub picks up the receipt and routes it to
-						# all connected clients.
-						if($uuid)
-						{
-							# See note above on 'cheating'
-							my $nxthop_uuid = ref $self ? $self->peer_uuid : $uuid;
-							
-							my $new_env = $self->create_client_receipt($msg, $uuid, $nxthop_uuid);
-							
-							$recipt_queue->add_row($new_env);
-						}
-					}
-
-					$recipt_queue->end_batch_update;
-
-					#trace "SocketWorker: fork_receiver/$msg_name: Deleting batch: ".Dumper(\@list);
-
-					#$queue->del_batch(\@list) unless $no_del;
-
-					$self->wait_for_send if ref $self;
-					#error "SocketWorker: fork_receiver/$msg_name: !ref \$self, not waiting for send\n" if !ref $self;
-
-					#print STDERR Dumper $recipt_queue;
-				}
+				$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid);
 
 				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
 				unless(kill 0, $parent_pid)
@@ -1305,6 +1295,59 @@ use common::sense;
 # 		}
 
 		return $kid;
+	}
+	
+	sub _rx_process_messages
+	{
+		my $self = shift;
+		my @list = @{ shift || [] };
+		my $msg_subs = shift || {};
+		my $receipt_queue = shift;
+		my $uuid = shift;
+	
+		if(@list)
+		{
+			#trace "SocketWorker: _rx_process_messages: Received ".scalar(@list)." messages\n";
+			$receipt_queue->begin_batch_update;
+			
+			foreach my $msg (@list)
+			{
+				local *@;
+				eval
+				{
+					$msg_subs->{$msg->{type}}->($msg);
+				};
+				trace "SocketWorker: _rx_process_messages: Error processing msg $msg->{type} {$msg->{uuid}}: $@" if $@;
+
+				# We're cheating the system a bit if we don't have a $self ref -
+				# we assume that if no ref $self, we are running on a hub,
+				# so we dump the receipt into the *incoming* queue instead
+				# of the outgoing queue, and set the nxthop to the *hub's* uuid
+				# instead of the uuid on the other end of the socket,
+				# so then the local hub picks up the receipt and routes it to
+				# all connected clients.
+				if($uuid)
+				{
+					# See note above on 'cheating'
+					my $nxthop_uuid = ref $self ? $self->peer_uuid : $uuid;
+					
+					my $new_env = $self->create_client_receipt($msg, $uuid, $nxthop_uuid);
+					
+					$receipt_queue->add_row($new_env);
+				}
+			}
+
+			$receipt_queue->end_batch_update;
+
+			#trace "SocketWorker: _rx_process_messages: Deleting batch: ".Dumper(\@list);
+
+			#$queue->del_batch(\@list) unless $no_del;
+
+			$self->wait_for_send if ref $self;
+			#error "SocketWorker: _rx_process_messages: !ref \$self, not waiting for send\n" if !ref $self;
+
+			#print STDERR Dumper $receipt_queue;
+		}	
 	}
 };
 

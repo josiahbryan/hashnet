@@ -7,8 +7,74 @@
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	use Data::Dumper;
+	use File::Basename; # for setup()
 
 	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
+
+	## Options:
+	# (All options are optional, sensible defaults are provided for all values that will 'just work' in most cases)
+	# - log_level   - Integer to set HashNet::Util::Logging::LEVEL, optional - if not given, ::LEVEL not set
+	# - no_ansi     - Boolean, if true, HashNet::Util::Logging::ANSI_ENBALED is left at default, otherwise ANSI_ENABLED set to 1
+	# - hosts       - Arrayref, list of hosts to try to connect in order, if not given, then @ARGV is used as list of hosts, unless:
+	# - ignore_argv - Boolean, setup() will NOT use @ARGV as a list of hosts if 'hosts' option NOT provided if ignore_argv is true
+	# - uuid        - UUID to use for this client in node_info arg to ClientHandle. If not provided, $0 is used
+	# - name        - Name to use for this client in node_info arg to ClientHandle. If not provided, $0 is used
+	# - use_default_db - Boolean, if true, $HashNet::MP::LocalDB::DBFILE is left at default value (e.g. not changed)
+	# - db_prefix   - String, if use_default_db is false or not given, DBFILE is set to ".db." + db_prefix
+	#                 If db_prefix not given, $0 is parsred and just the filename (sans extension and sans path) is used
+		
+	sub setup
+	{
+		shift if $_[0] eq __PACKAGE__;
+		
+		my %opts = @_;
+		
+		$HashNet::Util::Logging::LEVEL = $opts{log_level} if defined $opts{log_level};
+		$HashNet::Util::Logging::ANSI_ENABLED = 1 unless $opts{no_ansi};
+	
+		my @hosts = @{ $opts{hosts} || ( $opts{ignore_argv} ? () : @ARGV ) };
+	
+		@hosts = ('localhost:8031') if !@hosts;
+	
+		my $node_info = {
+			uuid => $opts{uuid} || $0,
+			name => $opts{name} || $0,
+			type => 'client',
+		};
+		
+		if(!$opts{db_prefix})
+		{
+			my @parts = fileparse($0, qr/\.[^.]*/);
+			$opts{db_prefix} = $parts[0];
+		}
+	
+		#$HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
+		if(!$opts{use_default_db})
+		{
+			$HashNet::MP::LocalDB::DBFILE = ".db.".$opts{db_prefix};
+			trace "ClientHandle: setup(): Using DBFILE '$HashNet::MP::LocalDB::DBFILE'\n";
+		}
+	
+		my $ch;
+		
+		while(my $host = shift @hosts)
+		{
+			$ch = HashNet::MP::ClientHandle->connect($host, $node_info);
+			if($ch)
+			{
+				$ENV{REMOTE_ADDR} = $host;
+				info "ClientHandle: setup(): Connected to $ENV{REMOTE_ADDR}\n";
+				last;
+			}
+		}
+		
+		if(!$ch)
+		{
+			die "Couldn't connect to any hosts (@hosts)";
+		}
+		
+		return $ch;
+	}
 
 	sub connect
 	{
@@ -158,5 +224,6 @@
 		$self->wait_for_receive(@_) if $wait_flag;
 		return $self->incoming_messages;
 	}
+
 };
 1;
