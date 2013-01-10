@@ -80,7 +80,7 @@ else
 	$ch->sw->outgoing_queue->end_batch_update;
 	
 	$ch->wait_for_send;
-	$ch->wait_for_receive;
+	$ch->wait_for_receive(timeout => 10);
 
 	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
@@ -93,7 +93,7 @@ else
 	else
 	{
 		#debug "$0: Did not receive any message\n";
-		ok(0, "Did not receive any messages");
+		ok(0, "Did not receive first message");
 	}
 
 #######
@@ -119,7 +119,7 @@ else
 	else
 	{
 		#debug "$0: Did not receive any message\n";
-		ok(0, "Did not receive any messages");
+		ok(0, "Did not receive attachment message");
 	}
 	
 	$ch->stop();

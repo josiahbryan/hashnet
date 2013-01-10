@@ -3,6 +3,7 @@ package HashNet::MP::GlobalDB;
 	use common::sense;
 	
 	use Storable qw/freeze thaw nstore retrieve/;
+	use File::Slurp qw/:std/; # for cloning db
 	use File::Path qw/mkpath/;
 	use Data::Dumper;
 	use Time::HiRes qw/time sleep/;
@@ -10,7 +11,6 @@ package HashNet::MP::GlobalDB;
 	#use LWP::Simple qw/getstore/; # for clone database
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
 	use JSON::PP qw/encode_json decode_json/; # for stringify routine
-	use File::Slurp qw/:std/; # for cloning db
 	use UUID::Generator::PurePerl;
 	use HashNet::Util::Logging;
 	use HashNet::Util::SNTP;
@@ -200,7 +200,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 
 		my $db_root = $self->db_root;
-		my $cmd = 'cd '.$db_root.'; tar -zcvf $OLDPWD/db.tar.gz *; cd $OLDPWD';
+		my $cmd = 'cd '.$db_root.'; tar -zcf $OLDPWD/db.tar.gz *; cd $OLDPWD';
 		trace "GlobalDB: gen_db_archive(): Running clone cmd: '$cmd'\n";
 		system($cmd);
 		
@@ -265,6 +265,8 @@ package HashNet::MP::GlobalDB;
 		if($self->db_rev() <= 0)
 		{
 			my $sw = $self->{sw};
+			my $sw_handle = $sw ? $sw : 'HashNet::MP::SocketWorker';
+			
 			trace "GlobalDB: check_db_rev: Batch update needed\n";
 			my $env;
 			if($sw)
@@ -286,7 +288,7 @@ package HashNet::MP::GlobalDB;
 					my $hub  = shift @list;
 					trace "GlobalDB: check_db_rev: Found hub in DB, '".$hub->{name}."', sending batch request\n";
 					my $uuid = $self->{rx_uuid};
-					$env = $sw->create_envelope("Batch Request",
+					$env = $sw_handle->create_envelope("Batch Request",
 						type	=> MSG_GLOBALDB_BATCH_REQ,
 						to	=> $hub->uuid,
 						from	=> $uuid,
@@ -295,12 +297,15 @@ package HashNet::MP::GlobalDB;
 				
 			}
 			
-			$sw->outgoing_queue->add_row($env) if $env;
+			$sw_handle->outgoing_queue->add_row($env) if $env;
 			
-			$sw->wait_for_send;
-			
-			# MSG_GLOBALDB_BATCH_REPLY is processed above
-			$sw->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_BATCH_REPLY);
+			if($sw)
+			{
+				$sw->wait_for_send;
+				
+				# MSG_GLOBALDB_BATCH_REPLY is processed above
+				$sw->wait_for_receive(timeout => 10, type => MSG_GLOBALDB_BATCH_REPLY);
+			}
 		}	
 	}
 	

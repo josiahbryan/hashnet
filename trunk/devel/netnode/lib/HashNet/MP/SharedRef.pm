@@ -77,6 +77,8 @@ use common::sense;
 		trace "SharedRef: ", $file, ": _create_inst(): file: '$file', self: '$self'\n" if DEBUG;
 
 		$ClassData{$self} = { data => $self, file => $file };
+		
+		$self->unlock_if_stale;
 
 		$self->load_data();
 
@@ -89,6 +91,7 @@ use common::sense;
 		my $file = shift;
 		my $storage = bless {}, $class; #$class->_create_inst($file);
 		$ClassData{$storage} = { data => $storage, file => $file };
+		$storage->unlock_if_stale;
 		$storage->load_data();
 		#warn "New ".__PACKAGE__."created, stored in $storage.\n";
 		trace "SharedRef: ", $file, ": TIEHASH: New tied hash created as $storage\n" if DEBUG;
@@ -323,8 +326,8 @@ use common::sense;
 		$self->_d->{locked} = 0 if !$self->_d->{locked};
 		$self->_d->{locked} ++;
 		
-		#trace "\t\t SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n";# if $self->_d->{locked} < 1; # if DEBUG;
-		#trace "\t\t ".get_stack_trace();# if $self->_d->{locked} < 1;
+		#trace "\t\t SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n" if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1; # if DEBUG;
+		#trace "\t\t ".get_stack_trace() if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1;
 
 		return 2 if $self->_d->{locked} > 1;
 		
@@ -336,6 +339,8 @@ use common::sense;
 			$self->_d->{locked} --;
 			return 0;
 		}
+		
+		#trace "\t\t SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock\n" if $self->file eq 'db.test-basic-client_queues_outgoing';
 
 		
 
@@ -354,12 +359,12 @@ use common::sense;
 
 		$self->_d->{locked} --;
 		
-		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n" ;# if $self->_d->{locked} <= 0;;# if DEBUG;
+		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n"  if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
 		#trace "\t\t ".get_stack_trace() if $self->_d->{locked} <= 0;
 
 		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
 
-		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() -\n";# if DEBUG;
+		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() -\n" if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
 		_unlock_file($self->file);
 		return 1;
 	}

@@ -32,6 +32,7 @@ $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 my $server_pid = fork;
 if(!$server_pid)
 {
+	trace "$0: Starting server thread\n";
 	$HashNet::MP::LocalDB::DBFILE = $db_server_file;
 	HashNet::MP::MessageHub->new(
 		port        => $test_port,
