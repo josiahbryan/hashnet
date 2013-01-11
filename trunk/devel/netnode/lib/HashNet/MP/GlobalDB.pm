@@ -234,7 +234,8 @@ package HashNet::MP::GlobalDB;
 
 				my $key      = $msg->{data}->{key};
 				my $options  = $msg->{data}->{options};
-				my $req_uuid = $msg->{data}->{req_uuid};
+
+				my $req_uuid = $options->{req_uuid};
 				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Received get req for key '$key', request UUID {$req_uuid}\n";
 				
 				my @result;
@@ -575,12 +576,7 @@ package HashNet::MP::GlobalDB;
 		
 		my $tmp_file = shift;
 
-		#logmsg "INFO", "StorageEngine: clone_database(): Downloading database tar from $upgrade_url to $tmp_file\n";
-
-		#getstore($upgrade_url, $tmp_file);
-
-		#logmsg "INFO", "GlobalDB: apply_db_archive(): Download finished.\n";
-
+		#my $decomp_cmd = "tar zxv -C ".$self->db_root." -f $tmp_file";
 		my $decomp_cmd = "tar zx -C ".$self->db_root." -f $tmp_file 2>/dev/null";
 
 		trace "StorageEngine: apply_db_archive(): Decompressing: '$decomp_cmd'\n";
@@ -778,7 +774,8 @@ package HashNet::MP::GlobalDB;
 
 		#trace "GlobalDB: put(): '", elide_string($key), "' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
 		trace "GlobalDB: put(): '", elide_string($key), "' => ",
-			(defined $val ? elide_string(printable_value($val)) : '(undef)'),
+			#(defined $val ? elide_string(printable_value($val)) : '(undef)'),
+			(defined $val ? printable_value($val) : '(undef)'),
 			"\n";
 
 
@@ -865,7 +862,9 @@ package HashNet::MP::GlobalDB;
 		#   && -f $key_file)
 		if(-f $key_file)
 		{
-			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
+			my $key_data;
+			eval { $key_data = retrieve($key_file) };
+			$key_data ||= { edit_num => 0 };
 
 			$edit_num  = $key_data->{edit_num};
 			my $key_ts = $key_data->{timestamp};
@@ -949,7 +948,8 @@ package HashNet::MP::GlobalDB;
 
 		#trace "GlobalDB: _put_local(): '$key' \t => ", (defined $val ? "'$val'" : '(undef)'), "\n";
 		trace "GlobalDB: _put_local(): '", elide_string($key), "' => ",
-			(defined $val ? elide_string(printable_value($val)) : '(undef)'),
+			#(defined $val ? elide_string(printable_value($val)) : '(undef)'),
+			(defined $val ? printable_value($val) : '(undef)'),
 			"\n";
 
 		# TODO: Purge cache/age items in ram
@@ -966,7 +966,9 @@ package HashNet::MP::GlobalDB;
 		#   && -f $key_file)
 		if(-f $key_file)
 		{
-			my $key_data = retrieve($key_file) || { edit_num => 0 }; #->{data};
+			my $key_data;
+			eval { $key_data = retrieve($key_file) };
+			$key_data ||= { edit_num => 0 };
 
 			$edit_num  = $key_data->{edit_num};
 			my $key_ts = $key_data->{timestamp};
@@ -1106,9 +1108,11 @@ package HashNet::MP::GlobalDB;
 				trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
 				$queue->unlock_file();
 				
-				trace "GlobalDB: get(): exclusive_create for '$key' failed, propogating error\n";
+				trace "GlobalDB: get(): exclusive_create for '$key' (file: $key_file) failed, propogating error\n";
 				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on local disk cache and exclusive_create option specified";
 			}
+
+			trace "GlobalDB: get(): Acquired exclusive_create rights on '$key' (file: $key_file), querying hub for additional exclusive rights\n";
 			
 			# Exclusive create means the file did NOT exist before we got to this line in our program
 			# Therefore, there is nothing in the file to retrieve.
@@ -1183,7 +1187,7 @@ package HashNet::MP::GlobalDB;
 		if(!$req_uuid)
 		{
 			$req_uuid = $UUID_GEN->generate_v1->as_string();
-			#logmsg "TRACE", "GlobalDB: get(): Generating new UUID $req_uuid for request for '$key'\n";
+			#logmsg "TRACE", "GlobalDB: _query_hubs(): Generating new UUID $req_uuid for request for '$key'\n";
 		}
 
 		# Prevents looping
@@ -1209,7 +1213,7 @@ package HashNet::MP::GlobalDB;
 		$dbh->load_changes;
 		if($dbh->{globaldb_data}->{$req_uuid})
 		{
-			logmsg "TRACE", "GlobalDB: get(): Already seen uuid $req_uuid\n";
+			logmsg "TRACE", "GlobalDB: _query_hubs(): Already seen uuid $req_uuid\n";
 			return wantarray ? () : undef;
 		}
 		
@@ -1220,7 +1224,7 @@ package HashNet::MP::GlobalDB;
 		my $sw = $self->sw;
 		my $sw_handle = $self->sw_handle;
 		
-		trace "GlobalDB: get(): Checking hubs for '$key'\n";
+		trace "GlobalDB: _query_hubs(): Checking hubs for '$key'\n";
 		
 		my $found_data = 0;
 		
@@ -1228,7 +1232,7 @@ package HashNet::MP::GlobalDB;
 		my @list = HashNet::MP::PeerList->peers_by_type('hub');
 		if(!@list)
 		{
-			trace "GlobalDB: get(): No hubs in database, cant get '$key'\n";	
+			trace "GlobalDB: _query_hubs(): No hubs in database, cant get '$key'\n";
 		}
 		else
 		{
@@ -1237,7 +1241,7 @@ package HashNet::MP::GlobalDB;
 				next if !$hub->is_online || 
 				         $hub->uuid eq $self->{rx_uuid}; # only will be true if we are running inside a MessageHub instance
 				
-				trace "GlobalDB: get(): Trying '".$hub->{name}."', sending batch request\n";
+				trace "GlobalDB: _query_hubs(): Trying '".$hub->{name}."', sending batch request\n";
 				my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
 				
 				my $env = $sw_handle->create_envelope(
@@ -1266,20 +1270,20 @@ package HashNet::MP::GlobalDB;
 						@messages = map { clean_ref($_) } grep { defined $_ } @tmp;
 						$queue->del_batch(\@tmp);
 					};
-					error "GlobalDB: get(): Error getting data from incoming message queue: $@" if $@;
+					error "GlobalDB: _query_hubs(): Error getting data from incoming message queue: $@" if $@;
 					$queue->end_batch_update;
 					
 					if(@messages > 1)
 					{
-						error "GlobalDB: get(): More than one 'MSG_GLOBALDB_GET_REPLY' received, only using first: ".Dumper(\@messages); 
+						error "GlobalDB: _query_hubs(): More than one 'MSG_GLOBALDB_GET_REPLY' received, only using first: ".Dumper(\@messages);
 					}
 					
-					my $msg = @messages;
+					my $msg = shift @messages;
 					if($msg->{data})
 					{
 						if($msg->{data}->{error})
 						{
-							trace "GlobalDB: get(): Hub '".$hub->{name}."' encountered error while retrieving '$key', will propogate: $msg->{data}->{error}\n";
+							trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' encountered error while retrieving '$key', will propogate: $msg->{data}->{error}\n";
 							if($exclusive_create)
 							{
 								$found_data = 1;
@@ -1296,17 +1300,18 @@ package HashNet::MP::GlobalDB;
 						}
 						else
 						{
-							trace "GlobalDB: get(): Hub '".$hub->{name}."' successfully provided data for '$key'\n";
+							trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' successfully provided data for '$key'\n";
 							$self->_put_local_batch($msg->{data}, 1);
 						}
 					}
 					else
 					{
-						trace "GlobalDB: get(): Hub '".$hub->{name}."' replied FALSE for '$key'\n";
+						trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' replied FALSE for '$key'\n";
+						#trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' false debug: ".Dumper($msg);
 					}
 					
-					$found_data = 1;
-					last;
+# 					$found_data = 1;
+# 					last;
 				}
 			}
 		}
@@ -1436,6 +1441,10 @@ package HashNet::MP::GlobalDB;
 				$lock_timeout = 0;
 				last;
 			}
+			else
+			{
+				#trace "GlobalDB: lock_key(): In lock loop, failure msg: '$@'\n";
+			}
 			sleep $speed;
 		}
 		
@@ -1448,7 +1457,7 @@ package HashNet::MP::GlobalDB;
 		
 		my $sw = $self->sw;
 		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
-		$self->put($key.".lock", { locking_uuid => $uuid });
+		$self->put($key.".lock", { locking_uuid => $uuid, locking_name => $sw ? $sw->node_info->{name} : "(name unknown)" });
 		
 		trace "GlobalDB: lock_key(): Successfully locked '$key', replying SUCCESS to lock request\n";
 		return 1;

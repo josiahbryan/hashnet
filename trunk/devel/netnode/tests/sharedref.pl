@@ -17,10 +17,10 @@ my $time = time();
 $HashNet::Util::Logging::LEVEL = 0;
 #$HashNet::Util::Logging::ANSI_ENABLED = 1;
 
-my $ref_tied    = HashNet::MP::SharedRef->new($datafile, 1);
+my $ref_tied    = HashNet::MP::SharedRef->new($datafile, tied => 1);
 test_ref($ref_tied, 'Tied');
 
-my $ref_normal  = HashNet::MP::SharedRef->new($datafile, 0);
+my $ref_normal  = HashNet::MP::SharedRef->new($datafile, tied => 0);
 test_ref($ref_normal, 'Normal');
 
 sub test_ref
