@@ -51,11 +51,14 @@ if(!$server_pid)
 my $client_pid = fork;
 if(!$client_pid)
 {
+	trace "$0: Locking $lock_ref (", $lock_ref->file, ")\n";
 	$lock_ref->lock_file;
+	#trace "$0: Lock acquired on $lock_ref\n";
 	
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	sleep 1.1;
+	#sleep 1.1;
 	#print STDERR "# Proceeding with test...\n";
+	#trace "$0: Test proceding\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;
 	
@@ -93,7 +96,7 @@ if(!$client_pid)
 
 {
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
-	#sleep .1;
+	sleep 2.0;
 	#print STDERR "# Proceeding with test...\n";
 	
 	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;

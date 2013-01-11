@@ -19,27 +19,29 @@ use common::sense;
 
 	my %Counts;
 
-	## TODO: Try to use a simple tied hash to fetch/store
-
 	sub new
 	{
 		my $class = shift;
-		my $file = shift || "$0.dat"; #Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
-		my $tied = shift || 0;
+		my $file  = shift; #Carp::cluck __PACKAGE__."::new: Expected a filename as first argument";
+		my %opts  = @_;
+
+		my $tied = $opts{tied} || 0;
+		my $gdb  = $opts{gdb}  || undef;
+
+		$file = $gdb ? "/shared/$0.dat" : "$0.dat";
 
 		if($tied)
 		{
 			my %hash;
-			tie %hash, __PACKAGE__, $file;
+			tie %hash, __PACKAGE__, $file, $gdb;
 			return \%hash;
 		}
 		else
 		{
-			my $self = $class->_create_inst($file);
+			my $self = $class->_create_inst($file, $gdb);
 			return $self;
 		}
 	};
-	
 	# Shortcut, so users can do:
 	# HashNet::MP::LocalDB->handle("filename.dat")->indexed_handle("/test")
 	sub indexed_handle
