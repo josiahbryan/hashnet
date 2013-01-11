@@ -1,12 +1,13 @@
+#-Add GlobalDB delete key
 #-MessageHub: Reconnect to other hubs if disconnected
 #-Test pings
 #-Add geo info
 
+-Add reconnect to CLientHandle
 -Add ACLs to server
 -Need tunnel watcher/creator module
 	-SSH expect, see other research files
 -Add server->client event notification to globaldb, e.g. key change/key add/del/etc
--Add GlobalDB delete key
 -Adapt MessageSocketBase to write attachments immediately to disk?
 -Test reroute_queued_messages
 -Add tests/ for Pings, Reconnect
