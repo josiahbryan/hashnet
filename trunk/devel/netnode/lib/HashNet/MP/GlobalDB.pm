@@ -798,7 +798,7 @@ package HashNet::MP::GlobalDB;
 		}]);
 
 
-		return $key;
+		return $data_ref;
 	}
 	
 	sub delete
@@ -1471,6 +1471,40 @@ package HashNet::MP::GlobalDB;
 		trace "GlobalDB: unlock: $key\n";
 
 		$self->delete($key.".lock");
+
+		return 1;
+	}
+
+	sub is_lock_stale
+	{
+		my $self = shift;
+		my $key = shift;
+		my $ping_max_time = shift || 10;
+
+		my $lock_key = "$key.lock";
+		
+		my $hashref = $self->get($lock_key);
+		if($hashref)
+		{
+			my $uuid = $hashref->{locking_uuid};
+
+			my $sw_handle = $self->sw_handle;
+
+			# TODO: Check send_ping() to see if its compatible with being called from a message hub
+			my @results = $sw_handle->send_ping($uuid, $ping_max_time);
+
+			@results = grep { $_->{msg}->{from} eq $uuid } @results;
+			if(!@results)
+			{
+				trace "GlobalDB: is_lock_stale: Lock for '$key' is stale\n";
+				return 1;
+			}
+			else
+			{
+				trace "GlobalDB: is_lock_stale: Lock for '$key' is NOT stale, locking UUID {$uuid} still alive\n";
+			}
+		}
+		return 0;
 	}
 
 	sub unlock_if_stale
@@ -1484,27 +1518,16 @@ package HashNet::MP::GlobalDB;
 
 		trace "GlobalDB: unlock_if_stale: '$key'\n";
 
-		my $hashref = $self->get($lock_key);
-		if($hashref)
+		if($self->is_lock_stale($key, $ping_max_time))
 		{
-			my $uuid = $hashref->{locking_uuid};
-			
-			my $sw_handle = $self->sw_handle;
-			
-			# TODO: Check send_ping() to see if its compatible with being called from a message hub
-			my @results = $sw_handle->send_ping($uuid, $ping_max_time);
-			
-			@results = grep { $_->{msg}->{from} eq $uuid } @results;
-			if(!@results)
-			{
-				trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is stale, removing\n";
-				# TODO: Do we need to do some sort of force-push_tr incase we're inside a batch...?
-				$self->delete($lock_key);
-			}
-			else
-			{
-				trace "GlobalDB: MSG_GLOBALDB_UNSTALE: Lock for '$key' is NOT stale, locking UUID {$uuid} still alive\n";
-			}
+			# TODO: Do we need to do some sort of force-push_tr incase we're inside a batch...?
+			$self->delete($lock_key);
+			return 1;
+		}
+		else
+		{
+			#trace "GlobalDB: unlock_if_stale: Lock for '$key' is NOT stale, locking UUID {$uuid} still alive\n";
+			return 0;
 		}
 	}
 };

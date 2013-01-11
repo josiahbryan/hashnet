@@ -30,7 +30,7 @@ HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
 HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 # The tests use this shared ref to sync testing
