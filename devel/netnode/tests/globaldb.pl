@@ -30,12 +30,13 @@ HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
 HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 # The tests use this shared ref to sync testing
 my $lock_ref = HashNet::MP::SharedRef->new();
 
+my $test_key = '/test/server_pid';
 
 my $server_pid = fork;
 if(!$server_pid)
@@ -85,7 +86,7 @@ if(!$client_pid)
 	my $db = HashNet::MP::GlobalDB->new($ch);
 
 	trace "$0: Client: putting /test/server_pid => $server_pid\n"; 
-	$db->put('/test/server_pid' => $server_pid);
+	$db->put($test_key => $server_pid);
 	trace "$0: Client put done, exiting\n";
 
 	$lock_ref->unlock_file;
@@ -99,7 +100,7 @@ if(!$client_pid)
 	sleep 2.0;
 	#print STDERR "# Proceeding with test...\n";
 	
-	$HashNet::MP::LocalDB::DBFILE = $db_client_file1;
+	$HashNet::MP::LocalDB::DBFILE = $db_client_file2;
 	
 	my $node_info = {
 		uuid => '81cfb18e-0b9c-4b1f-b9f9-58be6ffa8731',
@@ -115,9 +116,17 @@ if(!$client_pid)
 	sleep 0.5 while time - $start < $max_time and
 	                !($ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info));
 
+	#print "\n\n\n\n\n\n\n\n";
+	trace "$0: Starting final test client (disk cache $db_client_file2)\n";
+
 	my $db = HashNet::MP::GlobalDB->new($ch);
 	
-	my $pid_t = $db->get('/test/server_pid');
+	trace "$0: Getting $test_key\n";
+	
+	my $pid_t = $db->get($test_key);
+	
+	trace "$0: Get finished, result: '$pid_t', expected: '$server_pid', match? ".($pid_t == $server_pid ? "Yes" : "No")."\n";
+	
 	is($pid_t, $server_pid, "Data retrieval");
 	
 	$lock_ref->unlock_file;
