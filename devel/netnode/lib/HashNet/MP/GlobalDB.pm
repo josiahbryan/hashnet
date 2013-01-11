@@ -30,6 +30,9 @@ package HashNet::MP::GlobalDB;
 	sub MSG_GLOBALDB_REV_REPLY   { 'MSG_GLOBALDB_REV_REPLY'   }
 	sub MSG_GLOBALDB_BATCH_GET   { 'MSG_GLOBALDB_BATCH_GET'   }
 	sub MSG_GLOBALDB_BATCH_REPLY { 'MSG_GLOBALDB_BATCH_REPLY' }
+	
+	# Just here so tests/sharedref-globaldb-basic.pl can turn it off so as to not clutter debug output
+	our $OFFLINE_TX_ENABLED = 1;
 
 	my $UUID_GEN = UUID::Generator::PurePerl->new();
 	
@@ -146,10 +149,6 @@ package HashNet::MP::GlobalDB;
 		
 		$self->{shared_lock} = HashNet::MP::SharedRef->new($self->{db_root}.'/dblock');
 		
-		my $tr_data_handle  = HashNet::MP::SharedRef->new($self->{db_root}.'/offline_transactions');
-		my $tr_table_handle = HashNet::MP::LocalDB::IndexedTable->new($tr_data_handle);
-		$self->{offline_tr_db}  = $tr_table_handle;
-		
 		#print_stack_trace();
 		#die Dumper ($self->{ch}, \%args, \@_);
 		#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data" if !$sw;
@@ -163,22 +162,29 @@ package HashNet::MP::GlobalDB;
 		# Check for 0 rev (new database) and download copy from connected hub
 		$self->_check_db_rev();
 		
-		# Pending offline transactions, send them first
-		if($ch && $tr_table_handle->size > 0)
+		if($OFFLINE_TX_ENABLED)
 		{
-			trace "GlobalDB: Found ", $tr_table_handle->size, " pending offline messages, transmitting before continuing ...\n";
+			my $tr_data_handle  = HashNet::MP::SharedRef->new($self->{db_root}.'/offline_transactions');
+			my $tr_table_handle = HashNet::MP::LocalDB::IndexedTable->new($tr_data_handle);
+			$self->{offline_tr_db}  = $tr_table_handle;
 			
-			$tr_table_handle->lock_file;
-			my @tr_list = @{ $tr_table_handle->list || []};
-			$self->_push_tr($_->{item}, 0) foreach @tr_list; # second arg (0) turns off wait_for_send
-			
-			$tr_table_handle->del_batch(\@tr_list);
-			$tr_table_handle->unlock_file;
-			
-			# Wait for the transactions to make it off this node before continuing
-			$ch->wait_for_send;
-			
-			trace "GlobalDB: Done transmitting offline messages\n";
+			# Pending offline transactions, send them first
+			if($ch && $tr_table_handle->size > 0)
+			{
+				trace "GlobalDB: Found ", $tr_table_handle->size, " pending offline messages, transmitting before continuing ...\n";
+				
+				$tr_table_handle->lock_file;
+				my @tr_list = @{ $tr_table_handle->list || []};
+				$self->_push_tr($_->{item}, 0) foreach @tr_list; # second arg (0) turns off wait_for_send
+				
+				$tr_table_handle->del_batch(\@tr_list);
+				$tr_table_handle->unlock_file;
+				
+				# Wait for the transactions to make it off this node before continuing
+				$ch->wait_for_send;
+				
+				trace "GlobalDB: Done transmitting offline messages\n";
+			}
 		}
 		
 		# Yield for incoming messages before continuing
@@ -274,9 +280,9 @@ package HashNet::MP::GlobalDB;
 				my $req_uuid = $options->{req_uuid};
 				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Received get req for key '$key', request UUID {$req_uuid}\n";
 				
-				my $value;
-				local *@;
-				eval { $value = $self->get($key, %{$options || {}}); };
+				undef $@;
+				my $value = $self->get($key, %{$options || {}});
+				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: after get('$key'), \$\@='$@', value='$value'\n";
 				my $data = 0;
 				if($@)
 				{
@@ -760,7 +766,8 @@ package HashNet::MP::GlobalDB;
 		my $sw = $self->sw;
 		if(!$sw)
 		{
-			$self->{offline_tr_db}->add_row({ item => $tr });
+			$self->{offline_tr_db}->add_row({ item => $tr })
+				if $OFFLINE_TX_ENABLED;
 			#warn "GlobalDB: No SocketWorker given, cannot upload data off this node";
 		}
 		else
@@ -875,7 +882,7 @@ package HashNet::MP::GlobalDB;
 
 		# Store data first, before storing meta, so the 'size' key can be set correctly
 		nstore({val => $val},      $key_data_file);
-		trace "GlobalDB: _put_local(): Stored ", (defined $val ? printable_value($val) : '(undef)'), " in '$key_data_file''\n";
+		trace "GlobalDB: _put_local(): Stored ", (defined $val ? printable_value($val) : '(undef)'), " in '$key_data_file'\n";
 		
 		my $meta_ref =
 		{
@@ -1017,7 +1024,9 @@ package HashNet::MP::GlobalDB;
 				}
 				
 				trace "GlobalDB: get(): exclusive_create for '$key' (file: $key_data_file) failed, propogating error\n";
-				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on local disk cache and exclusive_create option specified";
+				$@ = "GlobalDB::get('$key', %opts): get() failing because '$key' exists on local disk cache and exclusive_create option specified";
+				
+				return undef;
 			}
 
 			trace "GlobalDB: get(): Acquired exclusive_create rights on '$key' (file: $key_data_file), querying hub for additional exclusive rights\n";
@@ -1027,7 +1036,7 @@ package HashNet::MP::GlobalDB;
 			# HOWEVER, since we DID open it exlusively here, we need to check with all hubs to make sure we have the ONLY key open
 			# Only THEN can we return successfully
 			my $found_data = $self->_query_hubs($key, %opts);
-			if($found_data)
+			if(!$found_data && $@)
 			{
 				if(defined $queue)
 				{
@@ -1038,8 +1047,10 @@ package HashNet::MP::GlobalDB;
 				trace "GlobalDB: get(): exclusive_create/_query_hubs failure for '$key', removing lock disk cache file\n";
 				unlink($key_data_file);
 				
-				trace "GlobalDB: get(): exclusive_create succeeded, but _query_hubs() for '$key' failed, propogating error\n";
-				die "GlobalDB::get('$key', %opts): get() failing because '$key' exists on remote hubs and exclusive_create option specified";
+				trace "GlobalDB: get(): exclusive_create succeeded, but _query_hubs() for exclusive_create for '$key' FAILED on remote hub (\$\@=\"$@\")\n";
+				$@ = "GlobalDB::get('$key', %opts): get() failing because exclusive_create for '$key' FAILED on remote hub (\$\@=\"$@\")";
+			
+				return undef; 
 			}
 			
 			if(defined $queue)
@@ -1080,10 +1091,16 @@ package HashNet::MP::GlobalDB;
 			$queue->unlock_file();
 		}
 		
+		undef $@;
 		my $found_data = $self->_query_hubs($key, %opts);
-		if(!$found_data)
+		if($@)
 		{
-			error "GlobalDB: get(): Could not get '$key' from any hub, returning\n";
+			error "GlobalDB: get_meta(): Could not get '$key' from any hub, error: \"$@\", returning\n";
+			return undef;
+		}
+		elsif(!$found_data)
+		{
+			error "GlobalDB: get_meta(): Could not get '$key' from any hub, returning\n";
 			$@ = "Key '$key' not found";
 			return undef;
 		}
@@ -1138,10 +1155,16 @@ package HashNet::MP::GlobalDB;
 		trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
 		$queue->unlock_file();
 		
+		undef $@;
 		my $found_data = $self->_query_hubs($key, %opts);
-		if(!$found_data)
+		if($@)
 		{
-			error "GlobalDB: get_meta(): Could not get '$key' from any hub, returning\n";
+			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, error: \"$@\", returning\n";
+			return undef;
+		}
+		elsif(!$found_data)
+		{
+			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, returning\n";
 			$@ = "Key '$key' not found";
 			return undef;
 		}
@@ -1269,7 +1292,8 @@ package HashNet::MP::GlobalDB;
 								delete $dbh->{globaldb_data}->{$req_uuid};
 								$dbh->update_end;
 								
-								die $msg->{data}->{error};
+								$@ = $msg->{data}->{error};
+								return 0;
 							}
 						}
 						else
@@ -1409,7 +1433,8 @@ package HashNet::MP::GlobalDB;
 		my $lock_timeout = 1;
 		while( time - $time < $max )
 		{ 
-			eval { $self->get($key.".lock", exclusive_create => 1); };
+			undef $@;
+			$self->get($key.".lock", exclusive_create => 1);
 			if(!$@)
 			{
 				$lock_timeout = 0;

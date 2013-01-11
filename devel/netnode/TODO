@@ -3,6 +3,9 @@
 #-Test pings
 #-Add geo info
 
+-Add auto-discovery to ClientHandle
+	-e.g. if No host give, and localhost:8031 times out after a few tires,
+	run a broadcast ping on the local net to find a host
 -Add reconnect to CLientHandle
 -Add ACLs to server
 -Need tunnel watcher/creator module
