@@ -212,20 +212,19 @@ use common::sense;
 			$Counts{load} ++;
 			my $t1 = time();
 			local *@;
-			my %meta;
-
+			
 			# TODO : GlobalDB needs to separate metadata from actually loading the file
-			eval { %meta = $gdb->get($file); };
+			eval { $data = $gdb->get($file); };
 			error "SharedRef: ", $self->file, ": load_data (gdb): Error loading data from gdb $gdb: $@" if $@;
+			
+			my $meta = $gdb->get_meta($file);
 			
 			my $len = time - $t1;
 			$Counts{load_t} += $len;
 
-			$data = $meta{data};
-
-			$self->_d->{cache_mtime} = $meta{timestamp};
-			$self->_d->{cache_size}  = 0; # TODO 
-			$self->_d->{edit_count}  = $meta{edit_num};
+			$self->_d->{cache_mtime} = $meta->{timestamp};
+			$self->_d->{cache_size}  = $meta->{size};
+			$self->_d->{edit_count}  = $meta->{editnum};
 
 			debug "SharedRef: ", $self->file, ": load_data (gdb): cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
 		}
@@ -342,8 +341,8 @@ use common::sense;
 			# Store our cache size/time in memory, so if another fork changes
 			# the cache, sync_in() will notice the change and reload the cache
 			$self->_d->{cache_mtime} = $meta_ref->{timestamp};
-			$self->_d->{cache_size}  = 0; # TODO
-			$self->_d->{edit_count}  = $meta_ref->{edit_num};
+			$self->_d->{cache_size}  = $meta_ref->{size};
+			$self->_d->{edit_count}  = $meta_ref->{editnum};
 
 			debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
 		}
@@ -566,11 +565,11 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 		my $gdb  = $self->gdb;
-		my %meta = $gdb->get($file);
+		my $meta = $gdb->get_meta($file);
 		
-		my $cur_mtime = $meta{timestamp};
-		my $cur_size  = 0; # TODO
-		my $cur_cnt   = $meta{edit_num};
+		my $cur_mtime = $meta->{timestamp};
+		my $cur_size  = $meta->{size};
+		my $cur_cnt   = $meta->{editnum};
 		if($cur_mtime  != $self->_d->{cache_mtime} ||
 		   $cur_size   != $self->_d->{cache_size}  ||
 		   $cur_cnt    != $self->_d->{edit_count})
