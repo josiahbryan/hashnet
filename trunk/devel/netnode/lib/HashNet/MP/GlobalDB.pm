@@ -545,6 +545,7 @@ package HashNet::MP::GlobalDB;
 
 		my $db_root = $self->db_root;
 		my $cmd = 'cd '.$db_root.'; tar -zcf $OLDPWD/db.tar.gz * 2>/dev/null; cd $OLDPWD';
+		#my $cmd = 'cd '.$db_root.'; tar -zcf $OLDPWD/db.tar.gz *; cd $OLDPWD';
 		trace "GlobalDB: gen_db_archive(): Running clone cmd: '$cmd'\n";
 		system($cmd);
 		
@@ -1091,6 +1092,8 @@ package HashNet::MP::GlobalDB;
 		my $key_file = $key_path . '/data';
 		my $key_data = undef;
 		
+		debug "GlobalDB: get(): key:'$key', key_file: '$key_file' (\$exclusive_create: '$exclusive_create')\n";
+		
 		# Lock data queue so we know that the fork_listener() process is not in the middle of processing while we're trying to get()
 		my $sw = $self->sw;
 		my $sw_handle = $self->sw_handle;
@@ -1155,6 +1158,10 @@ package HashNet::MP::GlobalDB;
 		trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
 		$queue->unlock_file();
 		
+		if(defined $key_data)
+		{
+			return wantarray ? %{$key_data || {}} : $key_data->{data}; #$val;
+		}
 		
 		my $found_data = $self->_query_hubs($key, %opts);
 		if(!$found_data)
