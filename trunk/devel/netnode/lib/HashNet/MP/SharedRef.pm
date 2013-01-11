@@ -18,6 +18,8 @@ use common::sense;
 	tie %ClassData, 'Tie::RefHash';
 
 	my %Counts;
+	
+	our $LOCK_DEBUGOUT_PREFIX = "\t\t ";
 
 	sub new
 	{
@@ -240,7 +242,7 @@ use common::sense;
 				my $len = time - $t1;
 				$Counts{load_t} += $len;
 
-				#debug "\t\t SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
+				#debug "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
 
 				#logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
 			}
@@ -335,7 +337,7 @@ use common::sense;
 			my $len = time - $t1;
 			$Counts{store_t} += $len;
 
-			#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+			#debug "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
 			#debug "\t\t".get_stack_trace(0);
 
 			# Store our cache size/time in memory, so if another fork changes
@@ -354,7 +356,7 @@ use common::sense;
 			my $len = time - $t1;
 			$Counts{store_t} += $len;
 
-			#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+			#debug "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
 			#debug "\t\t".get_stack_trace(0);
 
 			# Store our cache size/time in memory, so if another fork changes
@@ -377,14 +379,24 @@ use common::sense;
 		$self->_d->{locked} = 0 if !$self->_d->{locked};
 		$self->_d->{locked} ++;
 		
-		#trace "\t\t SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n" if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1; # if DEBUG;
-		#trace "\t\t ".get_stack_trace() if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n" if DEBUG;
+		#if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1; # if DEBUG;
+		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1;
 
 		return 2 if $self->_d->{locked} > 1;
 		
-		if(($self->gdb &&
-		   !$self->gdb->lock_key($self->file, timeout => $time)) ||
-		   !_lock_file($self->file, $time)) # 2nd arg max sec to wait
+		my $have_lock = 0;
+		
+		if($self->gdb)
+		{
+			$have_lock = $self->gdb->lock_key($self->file, timeout => $time);
+		}
+		else
+		{
+			$have_lock = _lock_file($self->file, $time); # 2nd arg max sec to wait
+		}
+		
+		if(!$have_lock)
 		{
 			#die "Can't lock ",$self->file;
 			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
@@ -393,7 +405,7 @@ use common::sense;
 			return 0;
 		}
 		
-		#trace "\t\t SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock\n" if $self->file eq 'db.test-basic-client_queues_outgoing';
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';
 
 		
 
@@ -412,12 +424,12 @@ use common::sense;
 
 		$self->_d->{locked} --;
 		
-		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n"  if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
-		#trace "\t\t ".get_stack_trace() if $self->_d->{locked} <= 0;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
+		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->_d->{locked} <= 0;
 
 		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
 
-		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() -\n" if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() -\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
 
 		if($self->gdb)
 		{

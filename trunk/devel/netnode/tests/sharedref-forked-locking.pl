@@ -52,6 +52,7 @@ else
 	{
 		ok(1, "Parent locked file");
 		trace "Parent: File locked, testing data\n";
+		is($ref->_cache_dirty, 1, "_cache_dirty() true");
 		$ref->load_changes;
 		trace "Parent: PID from file: $ref->{test}, real child: $pid\n";
 		is($ref->{test}, $pid, "Load child PID from file");
