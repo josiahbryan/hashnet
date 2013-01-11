@@ -28,7 +28,7 @@ use common::sense;
 		my $tied = $opts{tied} || 0;
 		my $gdb  = $opts{gdb}  || undef;
 
-		$file = $gdb ? "/shared/$0.dat" : "$0.dat";
+		$file = $gdb ? "/shared/$0.dat" : "$0.dat" if !$file;
 
 		if($tied)
 		{
@@ -42,6 +42,7 @@ use common::sense;
 			return $self;
 		}
 	};
+
 	# Shortcut, so users can do:
 	# HashNet::MP::LocalDB->handle("filename.dat")->indexed_handle("/test")
 	sub indexed_handle
@@ -54,15 +55,14 @@ use common::sense;
 	sub _create_inst
 	{
 		my $class = shift;
-		my $file = shift;
-		my $ref = shift || {};
-		my $self = bless $ref, $class;
+		my $file  = shift;
+		my $gdb   = shift;
+		my $self  = bless {}, $class;
 		trace "SharedRef: ", $file, ": _create_inst(): file: '$file', self: '$self'\n" if DEBUG;
 
-		$ClassData{$self} = { data => $self, file => $file };
+		$ClassData{$self} = { data => $self, file => $file, gdb => $gdb };
 		
-		$self->unlock_if_stale;
-
+		$self->unlock_if_stale();
 		$self->load_data();
 
 		return $self;
@@ -71,11 +71,15 @@ use common::sense;
 	sub TIEHASH
 	{
 		my $class = shift;
-		my $file = shift;
+		my $file  = shift;
+		my $gdb   = shift;
 		my $storage = bless {}, $class; #$class->_create_inst($file);
-		$ClassData{$storage} = { data => $storage, file => $file };
+		
+		$ClassData{$storage} = { data => $storage, file => $file, gdb => $gdb };
+
 		$storage->unlock_if_stale;
 		$storage->load_data();
+		
 		#warn "New ".__PACKAGE__."created, stored in $storage.\n";
 		trace "SharedRef: ", $file, ": TIEHASH: New tied hash created as $storage\n" if DEBUG;
 		return $storage;
@@ -128,6 +132,7 @@ use common::sense;
 	}
 	
 	sub file { shift->_d->{file} }
+	sub gdb  { shift->_d->{gdb}  }
 	
 # 	sub file
 # 	{
@@ -196,37 +201,63 @@ use common::sense;
 	{
 		my $self = shift;
 		my $file = $self->file;
-
+		my $gdb  = $self->gdb;
+		
 		my $data = {};
 		#debug "SharedRef: Loading data file '$file' in pid $$\n";
 		#debug "SharedRef: ", $self->file, ": load_data\n";
 		
-		if(-f $file && (stat($file))[7] > 0)
+		if($gdb)
 		{
-			#local $@;
-			
 			$Counts{load} ++;
 			my $t1 = time();
-			eval '$data = retrieve($file);';
+			local *@;
+			my %meta;
+
+			# TODO : GlobalDB needs to separate metadata from actually loading the file
+			eval { %meta = $gdb->get($file); };
+			error "SharedRef: ", $self->file, ": load_data (gdb): Error loading data from gdb $gdb: $@" if $@;
+			
 			my $len = time - $t1;
 			$Counts{load_t} += $len;
 
-			#debug "\t\t SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
+			$data = $meta{data};
 
-			#logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
+			$self->_d->{cache_mtime} = $meta{timestamp};
+			$self->_d->{cache_size}  = 0; # TODO 
+			$self->_d->{edit_count}  = $meta{edit_num};
+
+			debug "SharedRef: ", $self->file, ": load_data (gdb): cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
 		}
-
-		if(-f $file)
+		else
 		{
-			# Store our cache size/time in memory, so if another fork changes
-			# the cache, sync_in() will notice the change and reload the cache
-			$self->_d->{cache_mtime} = (stat($file))[9];
-			$self->_d->{cache_size}  = (stat(_))[7];
-			$self->_d->{edit_count}  = $self->_get_edit_count;
+			if(-f $file && (stat($file))[7] > 0)
+			{
+				#local $@;
 
-			debug "SharedRef: ", $self->file, ": load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
+				$Counts{load} ++;
+				my $t1 = time();
+				eval '$data = retrieve($file);';
+				my $len = time - $t1;
+				$Counts{load_t} += $len;
+
+				#debug "\t\t SharedRef: ", $self->file, ": load_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n" ;# if DEBUG;
+
+				#logmsg "DEBUG", "SharedRef: ", $self->file, ": Error loading data from '$file': $@" if $@;
+			}
+
+			if(-f $file)
+			{
+				# Store our cache size/time in memory, so if another fork changes
+				# the cache, sync_in() will notice the change and reload the cache
+				$self->_d->{cache_mtime} = (stat($file))[9];
+				$self->_d->{cache_size}  = (stat(_))[7];
+				$self->_d->{edit_count}  = $self->_get_edit_count;
+
+				debug "SharedRef: ", $self->file, ": load_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}."\n" if DEBUG;
+			}
 		}
-
+		
 		$self->_set_data($data);
 
 		#logmsg "DEBUG", "SharedRef: ", $self->file, ": load_state(): $file: node_info: ".Dumper($state->{node_info});
@@ -247,6 +278,8 @@ use common::sense;
 	sub _inc_edit_count
 	{
 		my $self = shift;
+		return if $self->gdb;
+
 		my $file = $self->file;
 		my $count_file = "$file.counter";
 		my $cnt = $self->_get_edit_count + 1;
@@ -257,6 +290,8 @@ use common::sense;
 	sub _get_edit_count
 	{
 		my $self = shift;
+		return undef if $self->gdb;
+		
 		my $file = $self->file;
 		my $count_file = "$file.counter";
 		my $cnt = 0;
@@ -273,6 +308,10 @@ use common::sense;
 	{
 		my $self = shift;
 		my $file = $self->file;
+		
+		return $self->gdb->delete($file)
+			if $self->gdb;
+
 		my $count_file = "$file.counter";
 		unlink($file);
 		unlink($count_file);
@@ -289,23 +328,44 @@ use common::sense;
 
 		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file: node_info: ".Dumper($state->{node_info});
 
-		$Counts{store} ++;
-		my $t1 = time();
-		nstore($self, $file);
-		my $len = time - $t1;
-		$Counts{store_t} += $len;
+		if($self->gdb)
+		{
+			$Counts{store} ++;
+			my $t1 = time();
+			my $meta_ref = $self->gdb->put($file, $self);
+			my $len = time - $t1;
+			$Counts{store_t} += $len;
 
-		#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
-		#debug "\t\t".get_stack_trace(0);
+			#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+			#debug "\t\t".get_stack_trace(0);
 
-		# Store our cache size/time in memory, so if another fork changes
-		# the cache, sync_in() will notice the change and reload the cache
-		$self->_d->{cache_mtime} = (stat($file))[9];
-		$self->_d->{cache_size}  = (stat(_))[7];
-		$self->_d->{edit_count}  = $self->_inc_edit_count();
+			# Store our cache size/time in memory, so if another fork changes
+			# the cache, sync_in() will notice the change and reload the cache
+			$self->_d->{cache_mtime} = $meta_ref->{timestamp};
+			$self->_d->{cache_size}  = 0; # TODO
+			$self->_d->{edit_count}  = $meta_ref->{edit_num};
 
-		debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
+			debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
+		}
+		else
+		{
+			$Counts{store} ++;
+			my $t1 = time();
+			nstore($self, $file);
+			my $len = time - $t1;
+			$Counts{store_t} += $len;
 
+			#debug "\t\t SharedRef: ", $self->file, ": save_data: (load: $Counts{load}, $Counts{load_t} sec | store: $Counts{store}, $Counts{store_t} sec)\n";# if DEBUG;
+			#debug "\t\t".get_stack_trace(0);
+
+			# Store our cache size/time in memory, so if another fork changes
+			# the cache, sync_in() will notice the change and reload the cache
+			$self->_d->{cache_mtime} = (stat($file))[9];
+			$self->_d->{cache_size}  = (stat(_))[7];
+			$self->_d->{edit_count}  = $self->_inc_edit_count();
+
+			debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
+		}
 	}
 
 	sub lock_file
@@ -323,7 +383,9 @@ use common::sense;
 
 		return 2 if $self->_d->{locked} > 1;
 		
-		if(!_lock_file($self->file, $time)) # 2nd arg max sec to wait
+		if(($self->gdb &&
+		   !$self->gdb->lock_key($self->file, timeout => $time)) ||
+		   !_lock_file($self->file, $time)) # 2nd arg max sec to wait
 		{
 			#die "Can't lock ",$self->file;
 			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
@@ -357,6 +419,13 @@ use common::sense;
 		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
 
 		#trace "\t\t SharedRef: ", $self->file, ": unlock_file() -\n" if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
+
+		if($self->gdb)
+		{
+			$self->gdb->unlock_key($self->file);
+			return 1;
+		}
+		
 		_unlock_file($self->file);
 		return 1;
 	}
@@ -368,6 +437,10 @@ use common::sense;
 		my $file = shift;
 		$file = $self->file if !$file && ref $self eq __PACKAGE__;
 		return -1 if !$file;
+
+		return $self->gdb->unlock_if_stale($file)
+			if ref $self && $self->gdb;
+		
 		if($self->is_lock_stale($file))
 		{
 			my $lock_file = $file;
@@ -386,6 +459,9 @@ use common::sense;
 		
 		$file = $self->file if !$file && ref $self eq __PACKAGE__;
 		return -1 if !$file;
+
+		return $self->gdb->is_lock_stale($file)
+			if ref $self && $self->gdb;
 		
 		$file .= '.lock' if $file !~ /\.lock$/;
 		my $fh;
@@ -464,12 +540,37 @@ use common::sense;
 	sub _cache_dirty
 	{
 		my $self = shift;
+		return $self->_gdb_cache_dirty
+			if $self->gdb;
+			
 		my $cache = $self->file;
 		return 1 if !-f $cache;
 		
 		my $cur_mtime = (stat($cache))[9];
 		my $cur_size  = (stat(_))[7];
 		my $cur_cnt   = $self->_get_edit_count;
+		if($cur_mtime  != $self->_d->{cache_mtime} ||
+		   $cur_size   != $self->_d->{cache_size}  ||
+		   $cur_cnt    != $self->_d->{edit_count})
+		{
+			trace "SharedRef: ", $self->file, ": _cache_dirty(): Cache is dirty\n" if DEBUG;
+			return 1;
+		}
+
+		#trace "SharedRef: ", $self->file, ": _cache_dirty(): Cache not dirty, nothing changed (cur: $cur_mtime, $cur_size | old: ".$self->_d->{cache_mtime}.', '.$self->_d->{cache_size}.")\n" if DEBUG;
+		return 0;
+	}
+
+	sub _gdb_cache_dirty
+	{
+		my $self = shift;
+		my $file = $self->file;
+		my $gdb  = $self->gdb;
+		my %meta = $gdb->get($file);
+		
+		my $cur_mtime = $meta{timestamp};
+		my $cur_size  = 0; # TODO
+		my $cur_cnt   = $meta{edit_num};
 		if($cur_mtime  != $self->_d->{cache_mtime} ||
 		   $cur_size   != $self->_d->{cache_size}  ||
 		   $cur_cnt    != $self->_d->{edit_count})
