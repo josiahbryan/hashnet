@@ -34,6 +34,9 @@ package HashNet::MP::GlobalDB;
 	# Just here so tests/sharedref-globaldb-basic.pl can turn it off so as to not clutter debug output
 	our $OFFLINE_TX_ENABLED = 1;
 
+	# Not official yet...
+	our $RAW_STORE_ENABLED  = 1;
+
 	my $UUID_GEN = UUID::Generator::PurePerl->new();
 	
 	sub is_folder_empty
@@ -886,7 +889,24 @@ package HashNet::MP::GlobalDB;
 		}
 
 		# Store data first, before storing meta, so the 'size' key can be set correctly
-		nstore({val => $val},      $key_data_file);
+		if($RAW_STORE_ENABLED)
+		{
+			# By storing undefined values using nstore() instead of write_file(),
+			# we avoid the following warning in File::Slurp:
+			# "Use of uninitialized value $_[0] in join or string at /usr/local/share/perl5/File/Slurp.pm line 405"
+			if(ref $val || !defined $val)
+			{
+				nstore({val => $val},  $key_data_file);
+			}
+			else
+			{
+				 write_file($key_data_file, {binmode => ':raw'}, $val);
+			}
+		}
+		else
+		{
+			nstore({val => $val},      $key_data_file);
+		}
 		trace "GlobalDB: _put_local(): Stored ", (defined $val ? printable_value($val) : '(undef)'), " in '$key_data_file'\n";
 		
 		my $meta_ref =
@@ -895,6 +915,7 @@ package HashNet::MP::GlobalDB;
 			editnum		=> $editnum,
 			mimetype	=> $mimetype,
 			size		=> (stat($key_data_file))[7],
+			is_ref		=> ref($val) || !defined $val ? 1:0,
 		};
 		
 		nstore($meta_ref, $key_meta_file);
@@ -1073,21 +1094,13 @@ package HashNet::MP::GlobalDB;
 		}
 		else
 		{
-			$key_data = $self->_safe_retrieve($key_data_file);
-			if(!$key_data && $@)
+			if(defined $queue)
 			{
-				logmsg "WARN", "GlobalDB: get(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+				trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+				$queue->unlock_file();
 			}
-			else
-			{
-				if(defined $queue)
-				{
-					trace "GlobalDB: get(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
-					$queue->unlock_file();
-				}
-				
-				return $key_data ? $key_data->{val} : undef;
-			}
+			
+			return $self->_get_data($key, $key_data_file)
 		}
 		
 		error "GlobalDB: get(): Error while trying to retrieve '$key': $@\n" if $@;
@@ -1101,17 +1114,31 @@ package HashNet::MP::GlobalDB;
 		my $found_data = $self->_query_hubs($key, %opts);
 		if($@)
 		{
-			error "GlobalDB: get_meta(): Could not get '$key' from any hub, error: \"$@\", returning\n";
+			error "GlobalDB: get(): Could not get '$key' from any hub, error: \"$@\", returning\n";
 			return undef;
 		}
 		elsif(!$found_data)
 		{
-			error "GlobalDB: get_meta(): Could not get '$key' from any hub, returning\n";
+			error "GlobalDB: get(): Could not get '$key' from any hub, returning\n";
 			$@ = "Key '$key' not found";
 			return undef;
 		}
  			
- 		return $self->_safe_retrieve($key_data_file);
+ 		return $self->_get_data($key, $key_data_file);
+	}
+
+	sub _get_data
+	{
+		my $self = shift;
+		my ($key, $file) = @_;
+		if($RAW_STORE_ENABLED)
+		{
+			my $meta = $self->get_meta($key);
+			return undef if !-f $file;
+			return read_file($file, binmode => ':raw') if !$meta->{is_ref};
+		}
+			
+		return $self->_safe_retrieve($file)->{val};
 	}
 	
 	sub get_meta
@@ -1417,7 +1444,8 @@ package HashNet::MP::GlobalDB;
 			my $value = undef;
 			if(-f $key_data_file)
 			{
-				$value = $self->_safe_retrieve($key_data_file)->{val};
+				#$value = $self->_safe_retrieve($key_data_file)->{val};
+				$value = $self->_get_data($key, $key_data_file);
 				
 				if($incl_meta)
 				{

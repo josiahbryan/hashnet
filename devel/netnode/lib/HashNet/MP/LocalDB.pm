@@ -160,11 +160,13 @@ use common::sense;
 	sub begin_batch_update
 	{
 		my $self = shift;
+		my $timeout = shift || undef;
 		#$self->update_begin;
-		return 0 if !$self->lock_file;
+		return 0 if !$self->lock_file($timeout);
 		$self->shared_ref->load_changes;
 		$self->{_updates_paused} = 1;
 		$self->{_update_end_count_while_locked} = 0;
+		return 1;
 	}
 
 	sub end_batch_update
@@ -178,7 +180,8 @@ use common::sense;
 	sub update_begin
 	{
 		my $self = shift;
-		$self->shared_ref->update_begin unless $self->{_updates_paused};
+		return $self->shared_ref->update_begin unless $self->{_updates_paused};
+		return 1;
 		#$self->shared_ref->load_changes if $self->{_updates_paused};
 	}
 	
