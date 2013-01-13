@@ -192,23 +192,29 @@
 
 		if($self->{send_receipts})
 		{
-			my $sw = $self->sw;
-			
-			$self->outgoing_queue->begin_batch_update;
-
-			foreach my $msg (@msgs)
+			# Return right away, send receipts from another fork
+			#if(!fork)
 			{
-				my $new_env = $sw->create_client_receipt($msg);
-				#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
-				$self->enqueue($new_env);
+				my $sw = $self->sw;
+
+				$self->outgoing_queue->begin_batch_update;
+
+				foreach my $msg (@msgs)
+				{
+					my $new_env = $sw->create_client_receipt($msg);
+					#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+					$self->enqueue($new_env);
+				}
+
+				$self->outgoing_queue->end_batch_update;
+
+				# Wait for all the MSG_CLIENT_RECEIPTs to transmit before deleting the messages
+				# from the incoming queue and returning to caller so that we can be assured
+				# that receipts are sent
+				$self->sw->wait_for_send if @msgs;
+
+				#exit;
 			}
-
-			$self->outgoing_queue->end_batch_update;
-
-			# Wait for all the MSG_CLIENT_RECEIPTs to transmit before deleting the messages
-			# from the incoming queue and returning to caller so that we can be assured
-			# that receipts are sent
-			$self->sw->wait_for_send if @msgs;
 		}
 
 		$self->incoming_queue->del_batch(\@msgs);
