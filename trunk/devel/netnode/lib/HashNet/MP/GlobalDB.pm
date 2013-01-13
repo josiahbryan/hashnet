@@ -4,19 +4,19 @@ package HashNet::MP::GlobalDB;
 	
 	use Storable qw/freeze thaw nstore retrieve/;
 	use File::Slurp qw/:std/; # for cloning db
-	use File::Path qw/mkpath/;
+	use File::Path qw/mkpath rmtree/;
 	use Data::Dumper;
 	use Time::HiRes qw/time sleep/;
-	use Cwd qw/abs_path/;
-	#use LWP::Simple qw/getstore/; # for clone database
+	#use Cwd qw/abs_path/;
 	use File::Temp qw/tempfile tempdir/; # for mimetype detection
-	use File::Path; # for remove_Tree
 	use JSON::PP qw/encode_json decode_json/; # for stringify routine
 	use POSIX; # for O_EXCL, etc for sysopen() in get()
 	use UUID::Generator::PurePerl;
+	
 	use HashNet::Util::Logging;
 	use HashNet::Util::SNTP;
 	use HashNet::Util::CleanRef;
+	
 	use HashNet::MP::SharedRef;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::SocketWorker;
@@ -173,7 +173,8 @@ package HashNet::MP::GlobalDB;
 			{
 				trace "GlobalDB: Found ", $tr_table_handle->size, " pending offline messages, transmitting before continuing ...\n";
 				
-				$tr_table_handle->lock_file;
+				# TODO: Handle failure to lock
+				$tr_table_handle->lock_file(30);
 				my @tr_list = @{ $tr_table_handle->list || []};
 				$self->_push_tr($_->{item}, 0) foreach @tr_list; # second arg (0) turns off wait_for_send
 				
@@ -483,6 +484,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 		
 		my $db_data_ts_file = $self->db_root . '/.db_rev';
+		# TODO: Handle failure to lock
 		HashNet::MP::SharedRef::_lock_file($db_data_ts_file);
 		
 		my $db_rev = 0;
@@ -497,6 +499,7 @@ package HashNet::MP::GlobalDB;
 		my $self = shift;
 		
 		my $db_data_ts_file = $self->db_root . '/.db_rev';
+		# TODO: Handle failure to lock
 		HashNet::MP::SharedRef::_lock_file($db_data_ts_file);
 		
 		my $db_data = { ts => 0, rev => 0 };
@@ -699,6 +702,7 @@ package HashNet::MP::GlobalDB;
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
 
+		# TODO: Handle failure to lock
 		$self->db_lock->lock_file;
 		
 		my $unlock = sub {
@@ -823,6 +827,7 @@ package HashNet::MP::GlobalDB;
 		# TODO: Purge cache/age items in ram
 		#$t->{cache}->{$key} = $val;
 
+		# TODO: Handle failure to lock
 		$self->db_lock->lock_file;
 		
 		# TODO: Sanatize key to remove any '..' or other potentially invalid file path values
@@ -1002,6 +1007,7 @@ package HashNet::MP::GlobalDB;
 		my $sw_handle = $self->sw_handle;
 		my $queue = $self->{rx_pid}->{pid} ? $sw_handle->rx_listen_queue($self->{rx_pid}->{pid}) : undef;
 		
+		# TODO: Handle failure to lock
 		if(defined $queue)
 		{
 			trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
@@ -1134,8 +1140,12 @@ package HashNet::MP::GlobalDB;
 		my $sw_handle = $self->sw_handle;
 		my $queue = $sw_handle->rx_listen_queue($self->{rx_pid}->{pid});
 		
-		trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
-		$queue->lock_file();
+		# TODO: Handle failure to lock
+		if(defined $queue)
+		{
+			trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
+			$queue->lock_file();
+		}
 		
 		$key_meta = $self->_safe_retrieve($key_meta_file);
 		if(!$key_meta && $@)
@@ -1144,16 +1154,22 @@ package HashNet::MP::GlobalDB;
 		}
 		elsif($key_meta->{timestamp} > 0)
 		{
-			trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
-			$queue->unlock_file();
+			if(defined $queue)
+			{
+				trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+				$queue->unlock_file();
+			}
 			
 			#trace "GlobalDB: get_meta(): Returning meta for key '$key' '$key_meta'\n";
 			return $key_meta;
 		}
 		
 		error "GlobalDB: get_meta(): Error while trying to retrieve '$key': $@\n" if $@;
-		trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
-		$queue->unlock_file();
+		if(defined $queue)
+		{
+			trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+			$queue->unlock_file();
+		}
 		
 		undef $@;
 		my $found_data = $self->_query_hubs($key, %opts);

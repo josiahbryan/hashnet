@@ -778,11 +778,12 @@ use common::sense;
 		}
 	}
 
+	# TODO: Update Message Socket Base to honor failure to lock
 	sub bulk_read_start_hook
 	{
 		my $self = shift;
 		#trace "SocketWorker: bulk_read_start_hook()\n";# if $self->{node_info}->{uuid} eq '1509280a-5687-4a6b-acc8-bd58beaccbae';
-		incoming_queue()->begin_batch_update;
+		return incoming_queue()->begin_batch_update;
 		#trace "SocketWorker: bulk_read_start_hook() [done]\n"
 	}
 	
@@ -1235,11 +1236,11 @@ use common::sense;
 			# Lock incoming queue so we know that we're not going to duplicate messages
 			# between the time we register interest and the time we check for existing
 			# incoming messages in the queue
-			incoming_queue()->lock_file;
-			# Lock the rx_listen_queue for this PID so that the caller of fork_receiver()
-			# can use rx_listen_queue() to acquire a lock to know when we're processing inorder
-			# to syncronize access to data (e.g. GlobalDB::get())
-			$queue->lock_file;
+			if(incoming_queue()->lock_file(30) &&
+				# Lock the rx_listen_queue for this PID so that the caller of fork_receiver()
+				# can use rx_listen_queue() to acquire a lock to know when we're processing inorder
+				# to syncronize access to data (e.g. GlobalDB::get())
+				$queue->lock_file(30))
 			{
 				eval
 				{
@@ -1265,34 +1266,44 @@ use common::sense;
 					incoming_queue()->del_batch(\@list) if ref $self;
 				};
 				error "SocketWorker: Error processing initial messages: $@" if $@;
+				
+				incoming_queue()->unlock_file;
+				$queue->unlock_file;
 			}
-			incoming_queue()->unlock_file;
-			$queue->unlock_file;
+			else
+			{
+				error "SocketWorker: Error locking queue at pre-register\n";
+			}
 			
 			while(1)
 			{
-				$queue->lock_file;
-			
-				my @list = HashNet::MP::MessageQueues->pending_messages($queue);
-				#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
-
-				$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid);
-				
-				$queue->unlock_file;
-
-				# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
-				unless(kill 0, $parent_pid)
+				if($queue->lock_file)
 				{
-					#trace "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
-					last;
+					my @list = HashNet::MP::MessageQueues->pending_messages($queue);
+					#trace "SocketWorker: fork_receiver/$msg_name: Checking for nxthop $uuid, found ".scalar(@list)."\n";
+	
+					$self->_rx_process_messages(\@list, \%msg_subs, $receipt_queue, $uuid);
+					
+					$queue->unlock_file;
+	
+					# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
+					unless(kill 0, $parent_pid)
+					{
+						#trace "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
+						last;
+					}
+					
+					if(ref $self && !$self->state_handle->{online})
+					{
+						#trace "SocketWorker: fork_receiver/$msg_name: SocketWorker dead or dieing, not waiting anymore\n";
+						last;
+					}
 				}
-				
-				if(ref $self && !$self->state_handle->{online})
+				else
 				{
-					#trace "SocketWorker: fork_receiver/$msg_name: SocketWorker dead or dieing, not waiting anymore\n";
-					last;
+					#error "SocketWorker: Error locking queue\n";
 				}
-				
+					
 				sleep $speed;
 			}
 

@@ -296,29 +296,12 @@
 
 				sleep 0.1;
 			}
-		
-			
-	# 		PROCESS_LOOP: while (<$read_socket>)
-	# 		{
-	# 			s/[\r\n]+$//;
-	# 			print $write_socket "You said '$_'\015\012"; # basic echo
-	# 			last PROCESS_LOOP if /quit/i;
-	# 		}
-			
 		};
 		my $die_please = 0;
 		if(my $err = $@)
 		{
 			print STDERR "\nError in process_loop(): $err";
 			$die_please = 1;
-
-# 			# Attempt to recover from some common errors
-# 			if($err =~ /Use of init.*DBM\/Deep\/Engine\/File/)
-# 			{
-# 				HashNet::MP::LocalDB->reset_cached_handles();
-# 				goto Restart_Process_Loop;
-# 			}
-			
 		}
 		
 		$self->disconnect_handler();
@@ -609,7 +592,7 @@
 		
 		print STDERR "dispatch_message: hash: ".Dumper($hash)."\n";
 		
-		#$self->send_message({ received => $hash }); 
+		#$self->send_message({ received => $hash });
 	}
 	
 	# NOTE: Use in subclass
@@ -716,7 +699,7 @@
 	
 	}
 
-	sub bulk_read_start_hook {}
+	sub bulk_read_start_hook { return 1 }
 	sub bulk_read_end_hook {}
 	sub process_loop_start_hook {}
 	

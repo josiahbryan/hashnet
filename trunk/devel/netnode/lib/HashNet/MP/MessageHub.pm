@@ -654,18 +654,24 @@
 
 			if(@list)
 			{
-				$self->outgoing_queue->begin_batch_update;
-				
-				foreach my $msg (@list)
+				if($self->outgoing_queue->begin_batch_update)
 				{
-					local *@;
-					eval { $self->route_message($msg); };
-					trace "MessageHub: Error in route_message(): $@" if $@;
+					
+					foreach my $msg (@list)
+					{
+						local *@;
+						eval { $self->route_message($msg); };
+						trace "MessageHub: Error in route_message(): $@" if $@;
+					}
+		
+					#$self->incoming_queue->del_batch(\@list);
+					#$self->incoming_queue->unlock_file;
+					$self->outgoing_queue->end_batch_update;
 				}
-	
-				#$self->incoming_queue->del_batch(\@list);
-				#$self->incoming_queue->unlock_file;
-				$self->outgoing_queue->end_batch_update;
+				else
+				{
+					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()";
+				}
 			}
 
 			sleep 0.1;
@@ -731,6 +737,8 @@
 				my $route_to = $hist[0]->{from};
 				my $route_from = $hist[$#hist]->{from}; # not 'to', because last @hist is 'to' this node
 				my $tbl = $self->route_table;
+				
+				# TODO: Handle failure to lock in begin_batch_update() 
 				$tbl->begin_batch_update;
 				eval
 				{
