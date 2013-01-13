@@ -96,12 +96,12 @@ else
 }
 
 # Lock tests from sharedref.pl
-ok($shref->lock_file, "Lock file");
-is($shref->lock_file, 2, "Lock file again");
+ok($shref->lock_file,      "Lock file");
+is($shref->lock_file,   2, "Lock file again");
 is($shref->unlock_file, 2, "Unlock file");
 is($shref->unlock_file, 1, "Unlock file (really)");
-is($shref->lock_file, 1, "Lock file after unlock");
-ok($shref->unlock_file, "Unlock file again");
+is($shref->lock_file,   1, "Lock file after unlock");
+ok($shref->unlock_file,    "Unlock file again");
 
 # TODO: test 'fail on updated' mode
 

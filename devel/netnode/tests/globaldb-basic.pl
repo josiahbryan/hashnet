@@ -256,6 +256,10 @@ my ($rev2, $ts) = $gdb->db_rev();
 is($rev2, $rev, "db_rev() in list context returns ($rev2, ...)");
 ok($ts > 0, "db_rev() in list context returns timestamp");
 
+# TODO: Add tests for different types of data:
+# - Refs (Succeede), code refs (fail)
+# - Binary (images, etc)
+# - Plain text/scalars
 
 # Test delete_disk_cache
 ok(-d $db_file,  "$db_file is directory");

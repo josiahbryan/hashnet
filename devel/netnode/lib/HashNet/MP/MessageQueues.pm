@@ -10,6 +10,7 @@ use common::sense;
 	our @EXPORT_OK = qw();
 
 	use HashNet::Util::CleanRef;
+	use HashNet::Util::Logging;
 	use HashNet::MP::LocalDB;
 
 	# Class Data
@@ -67,29 +68,37 @@ use common::sense;
 			$queue_name = 'incoming' if $queue_name eq 'in'  || $queue_name eq 'rx';
 		}
 
+		my @return_list;
 		my $queue = ref $queue_name ? $queue_name : msg_queue($queue_name);
-		$queue->lock_file;
-		
-		my @list  = $idx_key && $uuid ? $queue->by_key($idx_key => $uuid) : @{ $queue->list || [] };
-		#return () if !@list;
-		if(!@list)
+		if($queue->lock_file)
 		{
+			
+			my @list  = $idx_key && $uuid ? $queue->by_key($idx_key => $uuid) : @{ $queue->list || [] };
+			#return () if !@list;
+			if(!@list)
+			{
+				$queue->unlock_file;
+				return ();
+			}
+			
+			@list = sort { $a->{time} cmp $b->{time} } @list;
+	
+			#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
+			#use Data::Dumper;
+			#print STDERR Dumper(\@list) if @list && ref $queue_name;
+			#print STDERR Dumper($self->peer);
+	
+			@return_list = map { clean_ref($_) } grep { defined $_ } @list;
+	
+			$queue->del_batch(\@list) unless $no_del;
+	
 			$queue->unlock_file;
+		}
+		else
+		{
+			trace "MessageQueues: pending_messages(): Failed to lock '$queue_name' queue, returning empty list\n";
 			return ();
 		}
-		
-		@list = sort { $a->{time} cmp $b->{time} } @list;
-
-		#trace "SocketWorker: pending_messages: Found ".scalar(@list)." messages for peer {$uuid}\n" if @list;
-		#use Data::Dumper;
-		#print STDERR Dumper(\@list) if @list && ref $queue_name;
-		#print STDERR Dumper($self->peer);
-
-		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
-
-		$queue->del_batch(\@list) unless $no_del;
-
-		$queue->unlock_file;
 		#print STDERR Dumper(\@return_list) if @return_list;
 		return @return_list;
 	}

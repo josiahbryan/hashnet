@@ -161,7 +161,7 @@ use common::sense;
 	{
 		my $self = shift;
 		#$self->update_begin;
-		$self->lock_file;
+		return 0 if !$self->lock_file;
 		$self->shared_ref->load_changes;
 		$self->{_updates_paused} = 1;
 		$self->{_update_end_count_while_locked} = 0;

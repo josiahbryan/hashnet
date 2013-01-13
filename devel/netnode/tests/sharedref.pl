@@ -64,12 +64,12 @@ sub test_ref
 
 #die "Test done";
 
-ok($ref_normal->lock_file, "Lock file");
-is($ref_normal->lock_file, 2, "Lock file again");
+ok($ref_normal->lock_file,      "Lock file");
+is($ref_normal->lock_file,   2, "Lock file again");
 is($ref_normal->unlock_file, 2, "Unlock file");
 is($ref_normal->unlock_file, 1, "Unlock file (really)");
-is($ref_normal->lock_file, 1, "Lock file after unlock");
-ok($ref_normal->unlock_file, "Unlock file again");
+is($ref_normal->lock_file,   1, "Lock file after unlock");
+ok($ref_normal->unlock_file,    "Unlock file again");
 
 
 done_testing();
