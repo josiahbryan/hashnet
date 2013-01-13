@@ -129,6 +129,8 @@ sub run_ssh {
 	$exp->debug($exp_debug);
 	$exp->raw_pty($raw_pty);	
 	$exp->restart_timeout_upon_receive($rtup);
+	
+	#print STDERR "[DEBUG] \$ssh_string='$ssh_string'\n";
 	my $success = $exp->spawn($ssh_string); 
 	
 	return (defined $success);

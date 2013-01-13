@@ -9,11 +9,11 @@ sub getrootpw() { `cat rootpw.txt` =~ /^(.*)[\r\n]*$/;$1 }
 my $ssh = Net::SSH::Expect->new (
 	#host => "192.168.0.2",
 	#host => 'productiveconcepts.com',
-	host => 'bryannet.na.tl',
+	host => 'bryanhq.homelinux.com', #bryannet.na.tl',
 	password => getrootpw(),
 	user => 'root',
 	raw_pty => 1,
-	ssh_option => '-R 8022:localhost:22'
+	ssh_option => '-L 8022:localhost:22'
 
 );
 
@@ -30,6 +30,9 @@ my $login_output = $ssh->login();
 my $ls = ssh_command($ssh, "ifconfig eth0 ; uname -a");
 #my $ls = $ssh->exec('mount | grep appcluster');
 print($ls);
+
+print "Sleeping...\n";
+sleep 999;
         
 #my $who = $ssh->exec("who");
 #print ($who);
