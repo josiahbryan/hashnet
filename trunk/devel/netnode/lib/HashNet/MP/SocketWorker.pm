@@ -539,6 +539,8 @@ use common::sense;
 		{
 			time	=> $self->sntp_time(),
 			uuid	=> $opts{uuid} || $UUID_GEN->generate_v1->as_string(),
+			# re_uuid is the uuid of the envelope to which this envelope is a reply (if any, can be undef - usually is)
+			re_uuid => $opts{re_uuid} || undef,
 			# From is the hub/client where this envelope originated
 			from    => $opts{from},
 			# To is the hub/client where this envelope is destined

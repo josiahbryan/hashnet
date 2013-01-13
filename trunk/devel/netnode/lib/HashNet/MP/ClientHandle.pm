@@ -92,14 +92,25 @@
 			return undef;
 		}
 
-		return bless {
+		my $self = bless {
 			sw   => $worker,
 			peer => $peer,
 			send_receipts => 1,
-		}, $class;	
+			host => $host,
+			node_info => $node_info,
+		}, $class;
+
+		#$self->start_watcher;
+
+		return $self;
 	};
 
-	sub sw			{ shift->{sw} }
+	sub sw			{
+		my $self = shift;
+		$self->reconnect_if_dead;
+		return $self->{sw};
+	}
+	
 	sub peer		{ shift->{peer} }
 
 	sub send_ping		{ shift->sw->send_ping(@_) }
@@ -117,6 +128,12 @@
 		my $self = shift;
 
 		$self->stop;
+
+		if($self->{watcher_pid} &&
+		   $self->{watcher_pid}->{started_from} == $$)
+		{
+			kill 15, $self->{watcher_pid}->{pid};
+		}
 	}
 	
 	sub send
@@ -231,5 +248,102 @@
 		return $self->incoming_messages;
 	}
 
+# 	sub start_watcher
+# 	{
+# 		my $self = shift;
+# 
+# 		# Fork timer loop
+# 		my $kid = fork();
+# 		die "Fork failed" unless defined($kid);
+# 		if ($kid == 0)
+# 		{
+# 			$0 = "$0 [ClientHandle Watcher]";
+# 
+# 			info "ClientHandle: Watcher PID $$ running as '$0'\n";
+# 			RESTART_WATCHER_LOOP:
+# 			eval
+# 			{
+# 				$self->watcher_loop();
+# 			};
+# 			if($@)
+# 			{
+# 				error "ClientHandle: watcher_loop() crashed: $@";
+# 				goto RESTART_WATCHER_LOOP;
+# 			}
+# 			info "ClientHandle: Wathcer PID $$ complete, exiting\n";
+# 			exit 0;
+# 		}
+# 
+# 		# Parent continues here.
+# 		while ((my $k = waitpid(-1, WNOHANG)) > 0)
+# 		{
+# 			# $k is kid pid, or -1 if no such, or 0 if some running none dead
+# 			my $stat = $?;
+# 			debug "Reaped $k stat $stat\n";
+# 		}
+# 
+# 		$self->{watcher_pid} = { pid => $kid, started_from => $$ };
+# 	}
+# 
+# 	sub watcher_loop
+# 	{
+# 		my $self = shift;
+# 
+# 		my $sw = $self->sw;
+# 		while(1)
+# 		{
+# 			unless(kill 0, $sw->{child_pid})
+# 			{
+# 				error "ClientHandle: SocketWorker went away (was in PID $sw->{child_pid}), attempting reconnect\n";
+# 			}
+# 
+# # 			my $env = $sw->create_envelope(MSG_KEEP_ALIVE, type => MSG_KEEP_ALIVE, sfwd => 0);
+# # 			$sw->send_message($env);
+# # 			
+# # 
+# # 			wait_for_receive(
+# 		}
+# 	}
+
+	sub is_sw_dead
+	{
+		my $self = shift;
+		return ! (kill 0, $self->{sw}->{child_pid});
+	}
+
+	sub kill_sw
+	{
+		my $self = shift;
+		# Kill both threads of the socketworker incase just the primary went away
+		kill 15, $self->{sw}->{child_pid};
+		kill 15, $self->{sw}->state_handle->{tx_loop_pid};
+		delete $self->{sw};
+	}
+	
+	sub reconnect_if_dead
+	{
+		my $self = shift;
+		my $timeout = shift || 10;
+		my $speed = shift || 1;
+		return 0 if !$self->is_sw_dead();
+		$self->kill_sw();
+		
+		my $new_sw;
+		trace "ClientHandle: Connection to host $self->{host} went away, trying to reconnect\n";
+		my $time = time;
+		while(time - $time < $timeout && !($new_sw = $self->peer->open_connection($self->{node_info})))
+		{
+			trace "ClientHandle: Reconnect to $self->{host} failed, sleeping 1 sec\n";
+			sleep 1;
+		}
+
+		# TODO Is there a better way to handle this?
+		die "ClientHandle: Connection to $self->{host} went away, unable to reconnect" if !$new_sw;
+		
+		$self->{sw} = $new_sw;
+		trace "ClientHandle: Reconnected to $self->{host}\n";
+		return 1;
+		
+	}
 };
 1;
