@@ -693,6 +693,9 @@ use common::sense;
 		#print STDERR "dispatch_message: envelope: ".Dumper($envelope)."\n";
 		
 		#$self->send_message({ received => $envelope });
+		$envelope->{_att} = $second_part if defined $second_part;
+		$envelope->{_rx_time} = $self->sntp_time();
+				
 		my $msg_type = $envelope->{type};
 		info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 
@@ -815,8 +818,6 @@ use common::sense;
 			}
 			else
 			{
-				$envelope->{_att} = $second_part if defined $second_part;
-				$envelope->{_rx_time} = $self->sntp_time();
 				incoming_queue()->add_row($envelope);
 				
 				$self->_rx_copy_to_listen_queues($envelope);
