@@ -27,5 +27,4 @@ HashNet::MP::AutoUpdater->send_update(
 	app  => $app,
 );
 
-$ch->wait_for_send;
-$ch->stop;
+$ch->destroy_app;

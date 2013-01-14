@@ -368,12 +368,14 @@
 		}
 	}
 
-
-	sub read_config
+	sub select_config_file
 	{
 		my $self = shift;
-
-		my $config_file = $self->{opts}->{config_file} || $CONFIG_FILE; 
+		my $config_file = shift;
+		
+		$config_file = $self->{opts}->{config_file} if ref $self && !$config_file;
+		$config_file = $CONFIG_FILE if !$config_file;
+		
 		if(ref($config_file) eq 'ARRAY')
 		{
 			my @files = @$config_file;
@@ -392,7 +394,7 @@
 			if(!$found)
 			{
 				my $file = shift @$config_file;
-				logmsg "WARN", "PeerServer: No config file found, using default location '$file'\n";
+				logmsg "WARN", "MessageHub: No config file found, using default location '$file'\n";
 				$config_file = $file;
 			}
 		}
@@ -401,14 +403,40 @@
 			#die Dumper $CONFIG_FILE;
 		}
 		
+		return $config_file;
+	}
+
+	sub read_config
+	{
+		my $self = shift;
+
+		my $config_file = $self->select_config_file();
+		
 		$self->{config_file} = $config_file;
 
 		#logmsg "DEBUG", "PeerServer: Loading config from $CONFIG_FILE\n";
 		my $config = {};
-		if(-f $config_file)
+		$config = YAML::Tiny::LoadFile($config_file) if -f $config_file;
+		
+		# Offline mode, just return check and return hashref
+		if(!ref $self)
 		{
-			$config = YAML::Tiny::LoadFile($config_file);
+			# Do what check_node_info does, just dont save
+			my $inf = $config->{node_info};
+			HashNet::MP::SocketWorker->update_node_info($inf);
+			$inf->{hub_ver} = $VERSION;
+			$inf->{type}    = 'hub';
+			
+			# Do part of what check_config_items does
+			my $cfg = $config->{config};
+			foreach my $key (keys %$DEFAULT_CONFIG)
+			{
+				$cfg->{$key} = $DEFAULT_CONFIG->{$key} if ! $cfg->{$key};
+			}
+			
+			return $config;
 		}
+		
 		#print Dumper $config;
 		$self->{node_info} = $config->{node_info};
 		#delete $config->{node_info};
@@ -425,7 +453,7 @@
 		my $config =
 		{
 			node_info => $self->{node_info},
-			config => $self->{config},
+			config    => $self->{config},
 		};
 		#trace Dumper($self);
 		
