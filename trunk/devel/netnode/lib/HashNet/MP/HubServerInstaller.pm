@@ -79,11 +79,17 @@
 	{
 		my ($class, $src, $dest) = @_;
 		my $config = HashNet::MP::MessageHub->read_config($src);
-		delete $config->{node_info};
+		my $inf = $config->{node_info};
 		delete $config->{config}->{auto_start};
+		
+		my @ips = split /\s*,\s*/, $inf->{lan_ips};
+		my $ip = shift @ips;
+		$config->{config}->{seed_hubs} .= ', ' if $config->{config}->{seed_hubs};
+		$config->{config}->{seed_hubs} .= "$ip:8031";
+		delete $config->{node_info};
 		my $yaml = YAML::Tiny::Dump($config);
 		
-		#trace "HubServerInstaller: write_config: New config: $yaml\n";
+		trace "HubServerInstaller: write_config: New config: $yaml\n";
 		
 		trace "HubServerInstaller: write_config: src: $src, dest: $dest\n";
 		

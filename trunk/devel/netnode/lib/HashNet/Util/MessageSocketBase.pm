@@ -32,8 +32,14 @@
 	use common::sense;
 	use Data::Dumper;
 	use POSIX qw( WNOHANG );
-	use JSON qw/to_json from_json/;
 	use Time::HiRes qw/sleep time alarm/;
+	
+	# For compat with older servers
+	use JSON::PP qw/encode_json decode_json/;
+	#use JSON qw/to_json from_json/;
+	sub to_json   { encode_json(shift) } 
+	sub from_json { decode_json(shift) }
+	
 	
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::Logging;
@@ -637,6 +643,7 @@
 		{
 			use Carp;
 			Carp::cluck "send_message: Error encoding json: $@";
+			#warn "clean_ref that caused error: ".Dumper($clean_ref);
 			return;
 		}
 

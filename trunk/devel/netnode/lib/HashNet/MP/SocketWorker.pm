@@ -1,8 +1,18 @@
 use common::sense;
 {package HashNet::MP::SocketWorker;
 
-	use base qw/HashNet::Util::MessageSocketBase/;
-	use JSON qw/to_json from_json/;
+	#use base qw/HashNet::Util::MessageSocketBase/;
+	use HashNet::Util::MessageSocketBase;
+	our @ISA = qw( HashNet::Util::MessageSocketBase );
+	
+	#use JSON qw/to_json from_json/;
+	# For compat with older servers
+	use JSON::PP qw/encode_json decode_json/;
+	#use JSON qw/to_json from_json/;
+	sub to_json   { encode_json(shift) } 
+	sub from_json { decode_json(shift) }
+	
+	
 	use Data::Dumper;
 	
 	use Time::HiRes qw/time sleep/;
@@ -143,7 +153,8 @@ use common::sense;
 		#die Dumper \%opts;
 		
 		my $self = $class->SUPER::new(%opts);
-
+		#my $self = HashNet::MP::MessageSocketBase->new(%opts);
+		
 		# Create a UUID for this *object instance* to use to sync state across forks via LocalDB
 		$self->{state_uuid} = $UUID_GEN->generate_v1->as_string();
 

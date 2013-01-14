@@ -7,7 +7,7 @@ use HashNet::MP::HubServerInstaller;
 use Getopt::Std;
 
 my %opts;
-getopts('f:h:u:p:o:', \%opts);
+getopts('tf:h:u:p:o:', \%opts);
 
 my $file = $opts{f} || undef;
 my $host = $opts{h} || undef;
