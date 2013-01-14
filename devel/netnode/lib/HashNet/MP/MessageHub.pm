@@ -74,7 +74,10 @@
 	{
 		my $self = shift;
 		# Start GlobalDB running and listening for incoming updates
-		$self->{globaldb} = HashNet::MP::GlobalDB->new(rx_uuid => $self->node_info->{uuid});
+		$self->{globaldb} = HashNet::MP::GlobalDB->new(
+			hub_mode => 1,  # don't consume incoming messages
+			rx_uuid  => $self->node_info->{uuid}, # need to know what UUID we're transmitting from since GlobalDB will never get a socketworker handle directly on a hub
+		);
 	}
 	
 	sub start_timer_loop
@@ -670,7 +673,7 @@
 				}
 				else
 				{
-					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()";
+					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()\n";
 				}
 			}
 

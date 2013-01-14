@@ -82,6 +82,8 @@ if(!$client_pid)
 		type => 'client',
 	};
 
+	my $db = HashNet::MP::GlobalDB->new();
+	
 	my $ch;
 	my $start = time;
 	my $max_time = 60;
@@ -96,7 +98,8 @@ if(!$client_pid)
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
 	#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
-	my $db = HashNet::MP::GlobalDB->new($ch);
+	
+	$db->set_client_handle($ch);
 	
 	my $shref = HashNet::MP::SharedRef->new($sh_key, gdb => $db);
 
@@ -129,16 +132,19 @@ if(!$client_pid)
 
 	$lock_ref->lock_file;
 
+	my $db = HashNet::MP::GlobalDB->new();
+	
 	my $ch;
 	my $start = time;
 	my $max_time = 60;
 	sleep 0.5 while time - $start < $max_time and
 	                !($ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info));
 
+	$db->set_client_handle($ch);
+	
 	#print "\n\n\n\n\n\n\n\n";
 	trace "$0: Starting final test client (disk cache $db_client_file2)\n";
 
-	my $db = HashNet::MP::GlobalDB->new($ch);
 	my $shref = HashNet::MP::SharedRef->new($sh_key, gdb => $db);
 	
 	trace "$0: Getting $test_key\n";

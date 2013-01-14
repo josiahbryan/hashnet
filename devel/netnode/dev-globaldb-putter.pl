@@ -18,7 +18,7 @@ my $logging = $opts{l} ? 99 :0;
 my $hosts = [ split /,/, ($opts{h} || 'localhost:8031') ];
 
 my $ch  = HashNet::MP::ClientHandle->setup(hosts => $hosts, log_level => $logging);
-my $eng = HashNet::MP::GlobalDB->new($ch);
+my $eng = $ch->globaldb;
 
 if(!defined $val)
 {
@@ -38,8 +38,8 @@ else
 }
 $eng->put($key => $val);
 
-trace "$0: Waiting a second for any messages to come in\n";
-$ch->wait_for_receive(msgs => 1, timeout => 4, speed => 1);
+#trace "$0: Waiting a second for any messages to come in\n";
+$ch->wait_for_receive(msgs => 1, timeout => 1, speed => 1);
 
 trace "$0: Done\n";
 

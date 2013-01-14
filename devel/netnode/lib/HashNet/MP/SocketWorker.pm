@@ -10,6 +10,8 @@ use common::sense;
 	use Carp qw/carp croak/;
 	use POSIX qw( WNOHANG );
 
+	use Storable qw/store retrieve/; # WAN IP cache
+
 	use HashNet::MP::PeerList;
 	use HashNet::MP::LocalDB;
 	use HashNet::MP::MessageQueues;
@@ -36,6 +38,9 @@ use common::sense;
 
 	# Used to index the SocketWorkers for the running app
 	our $STARTUP_PID = $$;
+	
+	# Class-wide hash of arrayrefs of coderefs to process new messages
+	my %MsgHandlers;
 
 	my @IP_LIST_CACHE;
 	sub my_ip_list
@@ -336,15 +341,37 @@ use common::sense;
 # 			$external_ip =~ s/.*?([\d\.]+).*/$1/;
 # 			$external_ip =~ s/(^\s+|\s+$)//g;
 #
-			trace "SocketWorker: update_node_info(): Looking up WAN IP ...\n";
-			#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
-			$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
-			if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
-				$external_ip = $1;
+			my $wan_cache_file = '/tmp/mywanip.data';
+			my $wan_cache;
+			eval { $wan_cache = -f $wan_cache_file ? retrieve($wan_cache_file) : undef; };
+			
+			$wan_cache = {} if !$wan_cache;
+			
+			# Max time to cache IP
+			my $max_time = 60 * 60;
+			
+			if(!$wan_cache->{wan_ip} || 
+			    time - $wan_cache->{timestamp} > $max_time)
+			{
+				
+				trace "SocketWorker: update_node_info(): Looking up WAN IP ...\n";
+				#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
+				$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
+				if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
+					$external_ip = $1;
+				}
+	
+				$external_ip = '' if !$external_ip;
+				trace "SocketWorker: update_node_info(): WAN IP is: '$external_ip'\n";
+				
+				# Cache IP
+				store({ wan_ip => $external_ip, timestamp => time() }, $wan_cache_file);
 			}
-
-			$external_ip = '' if !$external_ip;
-			trace "SocketWorker: update_node_info(): WAN IP is: '$external_ip'\n";
+			else
+			{
+				$external_ip = $wan_cache->{wan_ip};
+			}
+			
 
 			$set->('wan_ip', $external_ip)
 				if ($inf->{wan_ip}||'') ne $external_ip;
@@ -667,6 +694,7 @@ use common::sense;
 		
 		#$self->send_message({ received => $envelope });
 		my $msg_type = $envelope->{type};
+		info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 
 		if($msg_type eq MSG_PING)
 		{
@@ -708,14 +736,34 @@ use common::sense;
 		}
 		# We let MSG_PINGs fall thru to be dropped in the incoming queue as well so they can be processed by the MessageHub
 
-# 		# Hook for custom message handlers to be called based on the type of message
-# 		my $msg_handlers = $self->state_handle->{msg_handlers};
-# 		if($msg_handlers->{$msg_type})
-# 		{
-# 			$msg_handlers->{$msg_type}->($envelope);
-# 		}
+		# Store return value of check_env_hist() for use later in adding envelope to queue 
+		my $check_hist = check_env_hist($envelope, $self->uuid);
 		
-		if($msg_type eq MSG_ACK)
+		# Hook for custom message handlers to be called based on the type of message
+		my $consumed = 0;
+		if(!$check_hist)
+		{
+			if(my $arrayref = $MsgHandlers{$msg_type})
+			{
+				my @list = @{$arrayref || []};
+				debug "SocketWorker: dispatch_msg: Found ".scalar(@list)." handlers for msg_type '$msg_type'\n";
+				foreach my $coderef (@list)
+				{
+					my $flag = $coderef->($envelope);
+					
+					$self->send_message($self->create_client_receipt($envelope))
+						if $self->peer->{type} eq 'hub';
+					
+					$consumed = 1 if $flag == 1;
+				}
+			}
+		}
+		
+		if($consumed)
+		{
+			trace "SocketWorker: dispatch_msg: Custom coderef consumed message ${msg_type}{$envelope->{uuid}}, not enqueing\n";
+		}
+		elsif($msg_type eq MSG_ACK)
 		{
 			# Just ignore ACKs for now
 			return;
@@ -761,7 +809,7 @@ use common::sense;
 		}
 		else
 		{
-			if(check_env_hist($envelope, $self->uuid))
+			if($check_hist) #check_env_hist($envelope, $self->uuid))
 			{
 				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
 			}
@@ -774,7 +822,7 @@ use common::sense;
 				$self->_rx_copy_to_listen_queues($envelope);
 
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
-				info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
+				#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 				#print STDERR Dumper $envelope;
 			}
 		}
@@ -1088,20 +1136,29 @@ use common::sense;
 		$self->outgoing_queue->del_batch($batch);
 	}
 
-	# Won't work because we cant store coderefs via Storable
-# 	sub reg_msg_handler
-# 	{
-# 		my $self = shift;
-# 		my $msg_name = shift;
-# 		my $coderef = shift;
-# 
-# 		$self->state_update(1);
-# 		$self->state_handle->{msg_handlers}->{$msg_name} = $coderef;
-# 		$self->state_update(0);
-# 	}
+	# NOTE: This only works BEFORE
+	# a SocketWorker is constructed - after it's called,
+	# the forked listener thread will NOT see any changes
+	# made to the %MsgHandlers hash.
+	sub reg_msg_handler
+	{
+		my $class = shift;
+		my $msg_name = shift;
+		my $coderef = shift;
+		
+		#trace "SocketWorker: Registering msg '$msg_name': $coderef\n";
 
-
-
+		$MsgHandlers{$msg_name} ||= [];
+		push @{ $MsgHandlers{$msg_name} }, $coderef;
+	}
+	
+	sub reg_handlers
+	{
+		my $class = shift;
+		my %msgs = @_;
+		$class->reg_msg_handler($_, $msgs{$_}) foreach keys %msgs;
+	}
+	
 	sub _rx_register_listener
 	{
 		my $self = shift;
@@ -1137,7 +1194,7 @@ use common::sense;
 			push @valid_pids, $pid if $self->_rx_validate_pid($msg_name, $pid);
 		}
 		
-		my @queues = map { msg_queue('listeners/'.$_) } @pids;
+		my @queues = map { msg_queue('listeners/'.$_) } grep { $_ } @pids;
 		return @queues;
 	}
 
@@ -1157,19 +1214,23 @@ use common::sense;
 		my $self = shift;
 		my $msg_name = shift;
 		my $pid = shift;
+		
+		return if !$pid;
 
 		my $ref = HashNet::MP::LocalDB->handle();
-		$ref->update_begin;
-
-		# $pid no longer valid, automatically de-register it
-		delete $ref->{socketworker}->{rx_listeners}->{$msg_name}->{$pid};
-
-		# Even if another process with the same PID registers, we dont want stale messages laying in the queue
-		# So we remove the old file.
-		my $queue = msg_queue('listeners/'.$pid);
-		$queue->shared_ref->delete_file;
-
-		$ref->update_end;
+		if($ref->update_begin)
+		{
+	
+			# $pid no longer valid, automatically de-register it
+			delete $ref->{socketworker}->{rx_listeners}->{$msg_name}->{$pid};
+	
+			# Even if another process with the same PID registers, we dont want stale messages laying in the queue
+			# So we remove the old file.
+			my $queue = msg_queue('listeners/'.$pid);
+			$queue->shared_ref->delete_file;
+	
+			$ref->update_end;
+		}
 	}
 
 	sub _rx_copy_to_listen_queues
@@ -1187,6 +1248,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $pid  = shift;
+		return undef if !$pid;
 		return msg_queue('listeners/'.$pid)
 	}
 	

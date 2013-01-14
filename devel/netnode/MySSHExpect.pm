@@ -189,7 +189,7 @@ sub login {
 	my $t = $self->{terminator};
 
 	croak(ILLEGAL_STATE . " field 'user' is not set.") unless $user;
-	croak(ILLEGAL_STATE . " field 'password' is not set.") unless $password;
+	#croak(ILLEGAL_STATE . " field 'password' is not set.") unless $password;
 
 	# spawns the ssh process if this wasn't done yet
 	if (! defined($self->{expect})) {
@@ -202,7 +202,7 @@ sub login {
 	#print STDERR "[Debug] Logging in, timeout: $timeout\n";
 	$self->_sec_expect($timeout,
 		[ qr/\(yes\/no\)\?\s*$/ => sub { $exp->send("yes$t"); exp_continue; } ],
-		[ $password_prompt	=> sub { $exp->send("$password$t"); } ],
+		[ $password_prompt	=> sub { $exp->send("$password$t") if $password; } ],
 		[ $login_prompt         => sub { $exp->send("$user$t"); exp_continue; } ],
 		[ qr/REMOTE HOST IDEN/  => sub { print "FIX: .ssh/known_hosts\n"; exp_continue; } ],
 		# This case hits when the user is ssh'ing from a host in the remote host's ~/.ssh/allows_keys2

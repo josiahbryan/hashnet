@@ -69,6 +69,8 @@ if(!$client_pid)
 		type => 'client',
 	};
 
+	my $db = HashNet::MP::GlobalDB->new();
+	
 	my $ch;
 	my $start = time;
 	my $max_time = 60;
@@ -83,7 +85,7 @@ if(!$client_pid)
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
 	#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
-	my $db = HashNet::MP::GlobalDB->new($ch);
+	$db->set_client_handle($ch);
 
 	trace "$0: Client: putting /test/server_pid => $server_pid\n"; 
 	$db->put($test_key => $server_pid);
@@ -109,6 +111,8 @@ if(!$client_pid)
 	};
 
 	$lock_ref->lock_file;
+	
+	my $db = HashNet::MP::GlobalDB->new();
 
 	my $ch;
 	my $start = time;
@@ -119,7 +123,7 @@ if(!$client_pid)
 	#print "\n\n\n\n\n\n\n\n";
 	trace "$0: Starting final test client (disk cache $db_client_file2)\n";
 
-	my $db = HashNet::MP::GlobalDB->new($ch);
+	$db->set_client_handle($ch);
 	
 	trace "$0: Getting $test_key\n";
 	
@@ -139,9 +143,9 @@ if(!$client_pid)
 	is($tr_table_handle->size, 0, "_push_tr did not add to offline_tr_db");
 	 
 	# Test _setup_message_listeners setup the fork
-	my $pid_data = $db->{rx_pid};
-	is( (kill 0, $pid_data->{pid}) ? 1 :0, 1, "listener fork running");
-	is( $pid_data->{started_from}, $$, "started_from value for listner fork is correct");
+# 	my $pid_data = $db->{rx_pid};
+# 	is( (kill 0, $pid_data->{pid}) ? 1 :0, 1, "listener fork running");
+# 	is( $pid_data->{started_from}, $$, "started_from value for listner fork is correct");
 	
 	is( $db->client_handle, $ch, "client_handle() returns $ch");
 	is( $db->sw, $ch->sw, "sw() returns ".$ch->sw);
