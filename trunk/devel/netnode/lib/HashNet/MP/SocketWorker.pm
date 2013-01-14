@@ -815,7 +815,7 @@ use common::sense;
 		my $self = shift;
 		my $uuid_to = shift;
 		my $max   = shift || 5;
-		my $speed = shift || 0.01;
+		my $speed = shift || 0.1;
 
 		my $start_time = $self->sntp_time();
 		my $bcast = $uuid_to ? 0 : 1;
@@ -1195,7 +1195,7 @@ use common::sense;
 		my $self = shift;
 		my %msg_subs = @_;
 
-		my $speed = 0.01;
+		my $speed = 0.25;
 		$speed = $msg_subs{speed} and delete $msg_subs{speed} if $msg_subs{speed} > 0; # speed of <0 still is boolean true, so eliminate <0 with >0
 
 		my $uuid = undef;

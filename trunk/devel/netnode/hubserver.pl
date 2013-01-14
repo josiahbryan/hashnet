@@ -6,3 +6,8 @@ use HashNet::MP::MessageHub;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 HashNet::MP::MessageHub->new();
+# 	addons => qw/
+# 		HashNet::MP::MessageHub::UpgradeMonitor
+# 		HashNet::MP::GlobalDB
+# /);
+# 

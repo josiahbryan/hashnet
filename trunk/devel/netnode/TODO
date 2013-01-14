@@ -2,12 +2,13 @@
 #-MessageHub: Reconnect to other hubs if disconnected
 #-Test pings
 #-Add geo info
+#-Add reconnect to CLientHandle
 
 -Benchmark GlobalDB storing plain scalars (non refs) directly in data
 -Add auto-discovery to ClientHandle
 	-e.g. if No host give, and localhost:8031 times out after a few tires,
 	run a broadcast ping on the local net to find a host
--Add reconnect to CLientHandle
+
 -Add ACLs to server
 -Need tunnel watcher/creator module
 	-SSH expect, see other research files
@@ -17,6 +18,7 @@
 -Add tests/ for Pings, Reconnect
 -Add tests for routing edge cases
 -Add tests for globaldb: clone on rev 0
+-Add tests for ClientHandle reconnect
 -GlobalDB: Add partial-key search
 -Idea: Add web interface (.cgi?) for:
 	-viewing queues (client/hub)
