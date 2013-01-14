@@ -112,6 +112,7 @@
 			debug "Reaped $k stat $stat\n";
 		}
 
+		debug "MessageSocketBase: start_tx_loop: Setting tx_pid $self->{tx_pid}\n";
 		$self->{tx_pid} = $kid;
 	}
 	
@@ -181,6 +182,7 @@
 
 		if($self->{tx_pid})
 		{
+			debug "MessageSocketBase: stop: Killing tx_pid $self->{tx_pid}\n";
 			kill 15, $self->{tx_pid};
 		}
 	}
@@ -291,6 +293,7 @@
 				# Restart tx loop if it dies
 				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
 				{
+					debug "MessageSocketBase: process_loop: Can't talk to tx_pid $self->{tx_pid}, restarting\n";
 					$self->start_tx_loop();
 				}
 
@@ -305,6 +308,10 @@
 		}
 		
 		$self->disconnect_handler();
+		
+		debug "MessageSocketBase: process_loop: Killing tx_pid $self->{tx_pid}\n";
+		kill 15, $self->{tx_pid};
+		
 		die "Quitting process due to error above" if $die_please;
 	}
 
@@ -603,6 +610,8 @@
 		my $att  = shift;
 		my $json = "";
 		my $clean_ref = undef;
+		return undef if !$hash;
+		
 		trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n";#  if DEBUG;
 		undef $@;
 		eval {

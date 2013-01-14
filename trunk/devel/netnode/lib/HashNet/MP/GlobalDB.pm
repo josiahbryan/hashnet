@@ -151,10 +151,6 @@ package HashNet::MP::GlobalDB;
 		}
 		
 		$self->{shared_lock} = HashNet::MP::SharedRef->new($self->{db_root}.'/dblock');
-		
-		#print_stack_trace();
-		#die Dumper ($self->{ch}, \%args, \@_);
-		#warn "GlobalDB: new(): No SocketWorker (sw) given, cannot offload data" if !$sw;
 
 		# Update the SocketWorker to register new message handlers
 		$self->_setup_message_listeners();
@@ -167,44 +163,79 @@ package HashNet::MP::GlobalDB;
 		
 		if($OFFLINE_TX_ENABLED)
 		{
-			my $tr_data_handle  = HashNet::MP::SharedRef->new($self->{db_root}.'/offline_transactions');
-			my $tr_table_handle = HashNet::MP::LocalDB::IndexedTable->new($tr_data_handle);
-			$self->{offline_tr_db}  = $tr_table_handle;
-			
-			# Pending offline transactions, send them first
-			if($ch && $tr_table_handle->size > 0)
-			{
-				trace "GlobalDB: Found ", $tr_table_handle->size, " pending offline messages, transmitting before continuing ...\n";
-				
-				# TODO: Handle failure to lock
-				$tr_table_handle->lock_file(30);
-				my @tr_list = @{ $tr_table_handle->list || []};
-				$self->_push_tr($_->{item}, 0) foreach @tr_list; # second arg (0) turns off wait_for_send
-				
-				$tr_table_handle->del_batch(\@tr_list);
-				$tr_table_handle->unlock_file;
-				
-				# Wait for the transactions to make it off this node before continuing
-				$ch->wait_for_send;
-				
-				trace "GlobalDB: Done transmitting offline messages\n";
-			}
+			$self->_open_offline_tr_db();
+			$self->_process_pending_offline_tr();
 		}
 		
 		# Yield for incoming messages before continuing
+		$self->_yield_for_incoming();
+
+		return $self;
+	};
+	
+	sub hub_mode { shift->{hub_mode} }
+	
+	sub set_client_handle
+	{
+		my $self = shift;
+		my $ch = shift;
+		$self->{ch} = $ch;
+		$ch->wait_for_start;
+		$self->_process_pending_offline_tr();
+		$self->_yield_for_incoming();
+	}
+	
+	sub _yield_for_incoming
+	{
+		my $self = shift;
+		my $ch = $self->client_handle;
 		if($ch)
 		{
 			my $queue = $ch->incoming_queue;
 			my $size = $queue->size;
+			return if !$size;
+			
 			trace "GlobalDB: Yielding to $ch to process any incoming message before continuing ($size pending messages)...\n";
 			#trace "GlobalDB: Queue: ".Dumper($queue) if $size > 0;
 			# TODO: Somehow we need to make sure we get any pending _TRs from the SW...
-			sleep 1 if $size > 0;
+			sleep 1;# if $size > 0;
 			trace "GlobalDB: Yielding from $ch done\n";
 		}
-
-		return $self;
-	};
+	}
+	
+	sub _open_offline_tr_db
+	{
+		my $self = shift;
+		my $tr_data_handle  = HashNet::MP::SharedRef->new($self->{db_root}.'/offline_transactions');
+		my $tr_table_handle = HashNet::MP::LocalDB::IndexedTable->new($tr_data_handle);
+		$self->{offline_tr_db}  = $tr_table_handle;
+	}
+	
+	sub _process_pending_offline_tr
+	{
+		my $self = shift;
+		my $tr_table_handle = $self->{offline_tr_db};
+		my $ch = $self->client_handle;
+		
+		# Pending offline transactions, send them first
+		if($ch && (defined $tr_table_handle) && $tr_table_handle->size > 0)
+		{
+			trace "GlobalDB: Found ", $tr_table_handle->size, " pending offline messages, transmitting before continuing ...\n";
+			
+			# TODO: Handle failure to lock
+			$tr_table_handle->lock_file(30);
+			my @tr_list = @{ $tr_table_handle->list || []};
+			$self->_push_tr($_->{item}, 0) foreach @tr_list; # second arg (0) turns off wait_for_send
+			
+			$tr_table_handle->del_batch(\@tr_list);
+			$tr_table_handle->unlock_file;
+			
+			# Wait for the transactions to make it off this node before continuing
+			$ch->wait_for_send;
+			
+			trace "GlobalDB: Done transmitting offline messages\n";
+		}
+	}
 	
 	sub db_lock { shift->{shared_lock} }
 	
@@ -247,22 +278,9 @@ package HashNet::MP::GlobalDB;
 	sub _setup_message_listeners
 	{
 		my $self = shift;
-		my $sw = $self->sw;
 		my $sw_handle = $self->sw_handle;
 		
-		# rx_uuid can be given in args so GlobalDB can listen for incoming messages
-		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
-		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
-		if(!$uuid)
-		{
-			# Unable to setup fork_receiver, no uuid given
-			return undef;
-		}
-		
-		my $fork_pid = $sw_handle->fork_receiver(
-
-			# needs UUID to generate MSG_CLIENT_RECEIPTS automatically
-			uuid   => $uuid,
+		my %msgs = (
 			
 			# Used by both clients and servers to update their local disk caches
 			MSG_GLOBALDB_TR => sub {
@@ -272,6 +290,9 @@ package HashNet::MP::GlobalDB;
 				$self->_put_local_batch($msg->{data}, 1);
 				#trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n\n\n\n";
 				trace "GlobalDB: Done with $msg->{type} {$msg->{uuid}}\n";
+				
+				# retval of 1 tells SocketWorker to not add $msg to incoming queue
+				return 1 if !$self->hub_mode;
 			},
 			
 			# Hubs reply to client
@@ -286,7 +307,7 @@ package HashNet::MP::GlobalDB;
 				
 				undef $@;
 				my $value = $self->get($key, %{$options || {}});
-				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: after get('$key'), \$\@='$@', value='$value'\n";
+				#trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: after get('$key'), \$\@='$@', value='$value'\n";
 				my $data = 0;
 				if($@)
 				{
@@ -313,6 +334,9 @@ package HashNet::MP::GlobalDB;
 				trace "GlobalDB: MSG_GLOBALDB_GET_QUERY: Reply with data '$data' for key '$key'\n";
 				#trace "GlobalDB: _push_tr: new_env dump: ".Dumper($new_env,$self->sw->outgoing_queue);
 				$sw_handle->wait_for_send(4, 0.1, $msg->{to}); # Make sure the data gets off this node
+				
+				# retval of 1 tells SocketWorker to not add $msg to incoming queue
+				return 1 if !$self->hub_mode;
 			},
 			
 			# Server side only, clients never would get this
@@ -335,7 +359,9 @@ package HashNet::MP::GlobalDB;
 				
 				#trace "GlobalDB: MSG_GLOBALDB_BATCH_GET: Enqueing new envelope: ".Dumper($env);
 				$sw_handle->outgoing_queue->add_row($env);
-			
+				
+				# retval of 1 tells SocketWorker to not add $msg to incoming queue
+				return 1 if !$self->hub_mode;
 			},
 			
 			# Client or server use
@@ -361,6 +387,9 @@ package HashNet::MP::GlobalDB;
 				close($fh);
 				
 				$self->apply_db_archive($tmp_file);
+				
+				# retval of 1 tells SocketWorker to not add $msg to incoming queue
+				return 1 if !$self->hub_mode;
 			},
 
 			# Not used yet...
@@ -381,10 +410,29 @@ package HashNet::MP::GlobalDB;
 				);
 				my $new_env = $sw_handle->create_envelope(@args);
 				$sw_handle->outgoing_queue->add_row($new_env);
+				
+				# retval of 1 tells SocketWorker to not add $msg to incoming queue
+				return 1 if !$self->hub_mode;
 			},
 		);
+		
+		
+		my $sw = $self->sw;
+		# rx_uuid can be given in args so GlobalDB can listen for incoming messages
+		# on the queue, but doesn't transmit any (e.g. for use in MessageHub)
+		my $uuid = $sw ? $sw->uuid : $self->{rx_uuid};
+		if(!$sw)
+		{
+			HashNet::MP::SocketWorker->reg_handlers(%msgs);
+		}
+		else
+		{
+			# needs UUID to generate MSG_CLIENT_RECEIPTS automatically
+			my $fork_pid = $sw_handle->fork_receiver(uuid => $uuid, %msgs);
 			
-		$self->{rx_pid} = { pid => $fork_pid, started_from => $$ };
+			# Store so we can kill the fork when we are destroyed
+			$self->{rx_pid} = { pid => $fork_pid, started_from => $$ };
+		};
 	}
 	
 	
@@ -1092,7 +1140,7 @@ package HashNet::MP::GlobalDB;
 			undef $@; 
 			return undef;
 		}
-		else
+		elsif(-f $key_data_file)
 		{
 			if(defined $queue)
 			{

@@ -15,38 +15,38 @@ my $logging = $opts{l} ? 99 :0;
 my $hosts = [ split /,/, ($opts{h} || 'localhost:8031') ];
 
 my $ch  = HashNet::MP::ClientHandle->setup(hosts => $hosts, log_level => $logging);
-my $eng = HashNet::MP::GlobalDB->new($ch);
+my $eng = $ch->globaldb;
 
 #trace "$0: Waiting a second for any messages to come in\n";
 $ch->wait_for_receive(msgs => 1, timeout => 1, speed => 1);
 
 trace "$0: Gettting $key\n";
-my %data = $eng->get($key);
-if(!scalar(keys %data))
+my $data = $eng->get($key);
+if(!defined $data && $@)
 {
-	trace "$0: Key '$key' not found in the database\n";
-	warn "Error: Value for '$key' not found in the database.\n";
+	trace "$0: Key '$key' not found in the database: $@\n";
+	warn "Error: Value for '$key' not found in the database: $@";
 	exit(-1);
 }
 
 #trace "$0: Got '$key': ".Dumper(\%data);
 
-trace "$0: Got '$key' => ".$eng->printable_value($data{data})."\n";
+trace "$0: Got '$key' => ".$eng->printable_value($data)."\n";
 
 if(-t STDOUT)
 {
-	if($eng->is_printable($data{data}))
+	if($eng->is_printable($data))
 	{
-		print $data{data}, "\n";
+		print $data, "\n";
 	}
 	else
 	{
-		print $eng->printable_value($data{data}), "\n# Recirect with \"$0 $key > somefile\" to get raw binary data\n";
+		print $eng->printable_value($data), "\n# Recirect with \"$0 $key > somefile\" to get raw binary data\n";
 	}
 }
 else
 {
-	print $data{data};
+	print $data;
 }
 
 trace "$0: Done\n";

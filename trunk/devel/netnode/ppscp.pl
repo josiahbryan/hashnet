@@ -10,6 +10,7 @@ use Data::Dumper;
 use MIME::Base64::Perl;
 use File::Slurp;
 use Getopt::Std;
+use Benchmark::Timer;
 
 my %opts;
 getopts('f:h:u:p:o:', \%opts);
@@ -24,13 +25,10 @@ if(@ARGV)
 {
 	$file = shift;
 	my $host_tmp = shift;
-	#$host_tmp =~ /^(?:(.*?)@)(.*+)(?:\:(.*?))?/;
 	my @parts = split /\@/, $host_tmp;
 	($user,$host) = @parts if @parts == 2;
-	$host = shift @parts if @parts == 1;
+	  $host = shift @parts if @parts == 1;
 	($host, $dest) = split /:/, $host if $host =~ /:/;
-
-	#print Dumper($file,$user,$host,$dest);
 }
 
 $dest = $file if !$dest;
@@ -52,15 +50,19 @@ sub scp
 	my $file = $opts{file};
 	my $host = $opts{host};
 	my $user = $opts{user} || 'root';
-	my $pass = $opts{pass};
+	my $pass = $opts{pass} || '';
 	my $dest = $opts{dest} || $file;
+	
+	#my $t = Benchmark::Timer->new();
 
 	warn "scp(): 'file' arg required" and return 0 if !$file;
 	warn "scp(): 'host' arg required" and return 0 if !$host;
-	warn "scp(): 'pass' arg required" and return 0 if !$pass;
+	#warn "scp(): 'pass' arg required" and return 0 if !$pass;
 	#warn "scp(): 'dest' arg required" and return 0 if !$dest;
 	
 	#warn "scp(): args: file=>$file, host=>$host, user=>$user, dest=>$dest\n";
+	
+	#$t->start("login");
 	
 	# Open SSH connection to host
 	my $ssh = Net::SSH::Expect->new (
@@ -72,12 +74,17 @@ sub scp
 	
 	# Execute login routine
 	my $login_output = $ssh->login();
-
+	
+	#$t->stop(); $t->start("read file");
+	
 	# Get file mode info inorder to recreate on other end
 	my $stat = (stat $file)[2] or die "Couln't stat $file: $!";
 	my ($mode) = sprintf "%04o", $stat & 07777;
 
 	my $buffer  = read_file($file);
+	
+	#$t->stop(); $t->start("encode");
+	
 	my $base64  = encode_base64($buffer);
 	my @lines   = split /\n/, $base64;
 	my $tmpfile = "/tmp/dat$$.uu";
@@ -96,11 +103,21 @@ sub scp
 	
 	my $cmd = "perl -e '$uudecode_perl' $tmpfile $mode $file";
 	push @buffer, $cmd;
+	
+	#$t->stop(); $t->start("exec");
 
-	my $out = ssh_command($ssh, join(';', @buffer));
-	print "out:[$out]\n" if $out;
+	#my $out = ssh_command($ssh, join(';', @buffer));
+	#print "out:[$out]\n" if $out;
+	$ssh->send(join(';', @buffer));
+	
+	#$t->stop(); $t->start("close");
 	
 	$ssh->close();
+	
+# 	$t->stop();
+# 	$t->report();
+# 	warn "Done with timing";
+# 	warn Dumper($t->results);
 
 	return 1;
 }

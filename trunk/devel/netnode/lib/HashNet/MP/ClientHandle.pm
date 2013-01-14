@@ -55,6 +55,8 @@
 			trace "ClientHandle: setup(): Using DBFILE '$HashNet::MP::LocalDB::DBFILE'\n";
 		}
 	
+		my $eng = HashNet::MP::GlobalDB->new();
+		
 		my $ch;
 		
 		while(my $host = shift @hosts)
@@ -73,9 +75,12 @@
 			die "Couldn't connect to any hosts (@hosts)";
 		}
 		
+		$eng->set_client_handle($ch);
+		$ch->{globaldb} = $eng;
+		
 		return $ch;
 	}
-
+	
 	sub connect
 	{
 		my $class = shift;
@@ -104,6 +109,8 @@
 
 		return $self;
 	};
+	
+	sub globaldb { shift->{globaldb} }
 
 	sub sw			{
 		my $self = shift;
