@@ -81,6 +81,17 @@
 		return $ch;
 	}
 	
+	sub destroy_app
+	{
+		my $ch = shift;
+		
+		$ch->wait_for_send;
+		$ch->stop;
+
+		HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);
+		HashNet::MP::GlobalDB->delete_disk_cache($ch->globaldb->db_root);
+	}
+	
 	sub connect
 	{
 		my $class = shift;
