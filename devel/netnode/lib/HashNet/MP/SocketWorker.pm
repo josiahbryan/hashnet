@@ -680,7 +680,13 @@ use common::sense;
 		
 		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n"; #\n\n\n\n\n"; #peer: $self->{peer}\n";
 		#print STDERR "\n\n\n\n\n";
-		$self->{peer}->set_online(0) if $self->{peer};
+		if(my $peer = $self->{peer})
+		{
+			# Close SSH tunnel (does nothing if no tunnel is open)
+			$peer->close_tunnel();
+			
+			$peer->set_online(0);
+		}
 
 		$self->state_update(1);
 		$self->state_handle->{online} = 0;
@@ -763,6 +769,8 @@ use common::sense;
 				debug "SocketWorker: dispatch_msg: Found ".scalar(@list)." handlers for msg_type '$msg_type'\n";
 				foreach my $coderef (@list)
 				{
+					#debug "SocketWorker: dispatch_msg: Custom Handler for '$msg_type': coderef=$coderef\n";
+					
 					my $flag = $coderef->($envelope);
 					
 					$self->send_message($self->create_client_receipt($envelope))
@@ -771,6 +779,14 @@ use common::sense;
 					$consumed = 1 if $flag == 1;
 				}
 			}
+			else
+			{
+				#debug "SocketWorker: dispatch_msg: No custom handlers for msg_type '$msg_type'\n";
+			}
+		}
+		else
+		{
+			debug "SocketWorker: dispatch_msg: Not calling custom handlers (if any) for '$msg_type' because history says it was already here\n";
 		}
 		
 		if($consumed)
@@ -807,7 +823,7 @@ use common::sense;
 
 			#print STDERR Dumper $peer, $node_info;
 			
-			$peer->set_online(1);
+			$peer->set_online(1, $$);
 
 			#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 

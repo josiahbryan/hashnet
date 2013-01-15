@@ -1,3 +1,26 @@
+{package MyNetSSHExpect::InstallDeps;
+	
+	# Workaround for IO::Tty 
+	BEGIN {
+		my @old_inc = @INC;
+		@INC = grep { !/^\/tmp/ } @INC;
+		undef $@;
+		eval('use Expect');
+		if($@)
+		{
+			warn "Error using Expect: $@";
+			use CPAN;
+			undef $@;
+			eval { CPAN::install('Expect'); };
+			warn "Error installing Expect: $@" if $@;
+			CPAN::install('IO::Pty');
+			CPAN::install('IO::Tty');
+		}
+	
+		@INC = @old_inc;
+	}
+};
+
 {package Net::SSH::Expect;
 use 5.008000;
 use warnings;
@@ -8,32 +31,15 @@ use fields qw(
 	timeout terminator expect debug next_line before match after binary
 );
 
-# Workaround for IO::Tty 
-BEGIN {
-	my @old_inc = @INC;
-	@INC = grep { !/^\/tmp/ } @INC;
-	undef $@;
-	eval('use Expect');
-	if($@)
-	{
-		use CPAN;
-		undef $@;
-		eval { CPAN::install('Expect'); };
-		warn "Error installing Expect: $@" if $@;
-		CPAN::install('IO::Pty');
-		CPAN::install('IO::Tty');
-	}
-
-	@INC = @old_inc;
-}
-	
-
 use Expect;
-Expect->import(); # Manually trigger the import process in this context since it was already triggered once, above
+#Expect->import();
 use Carp;
 use POSIX qw(:signal_h WNOHANG);
 
 our $VERSION = '1.09';
+
+no warnings 'redefine';
+use HashNet::Util::Logging;
 
 # error contants
 use constant ILLEGAL_STATE => "IllegalState";
@@ -234,19 +240,29 @@ sub login {
 		[ qr/.*?@.*?'s password:/ => sub { } ],
 		[ timeout		=> sub
 			{
-				if($self->peek() =~ /.*?@.*?'s password:/)
+				my $peek = $self->peek();
+				if($peek =~ /.*?@.*?'s password:/)
 				{
 					$exp->send("$password$t") if $password;
 				}
-				else
+				elsif($peek =~ /Last login/)
+				{
+					# Not an error
+					#warn $peek, "\n";
+					my ($last) = $peek =~ /(Last login:.*)/;
+					$last ||= '';
+					info "SSH ($self->{user}\@$self->{host}): $last\n"; 
+				}
+				elsif($peek)
 				{
 					croak SSH_AUTHENTICATION_ERROR . " Login timed out. " .
-					"The input stream currently has the contents bellow: " .
-					$self->peek();
+					"The input stream currently has the contents bellow: $peek";
 				}
 			}
 		]
 	);
+	
+	info "SSH ($self->{user}\@$self->{host}): Connection opened\n";
 
 	# verifying if we failed to logon
 	if ($test_success) {

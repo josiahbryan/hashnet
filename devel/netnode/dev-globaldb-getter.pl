@@ -51,4 +51,6 @@ else
 
 trace "$0: Done\n";
 
+$ch->destroy_app();
+
 exit;

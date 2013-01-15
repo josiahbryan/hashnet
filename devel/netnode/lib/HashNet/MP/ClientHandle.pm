@@ -136,7 +136,11 @@
 	sub wait_for_start	{ shift->sw->wait_for_start(@_)   }
 	sub wait_for_send	{ shift->sw->wait_for_send(@_)    }
 	sub wait_for_receive	{ shift->sw->wait_for_receive(@_) }
-	sub stop		{ shift->sw->stop }
+	sub stop		{
+		my $self = shift;
+		$self->sw->stop;
+		$self->peer->close_tunnel(); # noop if no tunnel
+	}
 
 	sub uuid 		{ shift->sw->node_info->{uuid} }
 	sub peer_uuid		{ shift->sw->state_handle->{remote_node_info}->{uuid} }
@@ -147,11 +151,11 @@
 
 		$self->stop;
 
-		if($self->{watcher_pid} &&
-		   $self->{watcher_pid}->{started_from} == $$)
-		{
-			kill 15, $self->{watcher_pid}->{pid};
-		}
+# 		if($self->{watcher_pid} &&
+# 		   $self->{watcher_pid}->{started_from} == $$)
+# 		{
+# 			kill 15, $self->{watcher_pid}->{pid};
+# 		}
 	}
 	
 	sub send

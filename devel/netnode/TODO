@@ -4,6 +4,9 @@
 #-Add geo info
 #-Add reconnect to CLientHandle
 
+-Bug: AutoUpdater doesnt allow software updates to be routed
+	-Need some sort of 'restart gracefully' mechanism at end of MessageHub or something like that
+	
 -Benchmark GlobalDB storing plain scalars (non refs) directly in data
 -Add auto-discovery to ClientHandle
 	-e.g. if No host give, and localhost:8031 times out after a few tires,

@@ -7,7 +7,7 @@
 	use YAML::Tiny; # for load_config/save_config
 	use UUID::Generator::PurePerl; # for node_info
 
-	our $VERSION = 0.0318;
+	our $VERSION = 0.0325;
 	
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
@@ -60,13 +60,23 @@
 		
 		$self->{opts} = \%opts;
 		
+		# Load config options
 		$self->read_config();
+		
+		# Start GlobalDB prior to connecting remote hubs
+		# because the forks need the globaldb message handlers
+		$self->start_globaldb();
+		
+		# Connect to remote hubs
 		$self->connect_remote_hubs();
 
-		$self->start_globaldb();
+		# Start timer loop to watch for dead connections
 		$self->start_timer_loop();
 		
+		# Start the router
 		$self->start_router() if $opts{auto_start};
+		
+		# Start the server process
 		$self->start_server() if $opts{auto_start};
 	}
 	
@@ -366,7 +376,7 @@
 				{
 					trace "MessageHub: Connection established to hub '$peer->{host}'\n";
 				}
-
+				
 				exit;
 			}
 		}
