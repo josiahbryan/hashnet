@@ -7,7 +7,7 @@
 	use YAML::Tiny; # for load_config/save_config
 	use UUID::Generator::PurePerl; # for node_info
 
-	our $VERSION = 0.0325;
+	our $VERSION = 0.0326;
 	
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
