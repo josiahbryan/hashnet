@@ -104,7 +104,8 @@
 		my $class = shift;
 		my $peer = shift;
 		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
-		$db->update_row($peer);
+		my %hash = map { $_ => $peer->{$_} } grep { !/^_/ } keys %{$peer};
+		$db->update_row(\%hash);
 	}
 };
 1;

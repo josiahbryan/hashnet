@@ -3,6 +3,7 @@
 	use common::sense;
 	use Data::Dumper;
 	use IO::Socket;
+	use File::Slurp;
 
 	use HashNet::MP::SocketWorker;
 	use HashNet::Util::Logging;
@@ -96,7 +97,7 @@
 				$args{pass} =~ s/[\r\n]//g;
 			}
 
-			my $local_port = 60000;
+			my $local_port = 3729;
 			$local_port ++ while $local_port < 65536 and `lsof -i :$local_port`;
 			if($local_port == 65536)
 			{
@@ -107,20 +108,20 @@
 
 			use HashNet::Util::MyNetSSHExpect;
 
-			my $ssh_tun_arg = "-L$local_port:$args{host}:$args{port}";
+			my $ssh_tun_arg = "-L $local_port:$args{host}:$args{port}";
 
 			trace "Peer: _open_socket: Opening SSH tunnel via $args{tunhost} to $args{host}:$args{port}, local port $local_port\n";
 			debug "Peer: _open_socket: \$ssh_tun_arg: '$ssh_tun_arg'\n";
 
-			$self->{ssh_handle} = Net::SSH::Expect->new (
+			$self->{_ssh_handle} = Net::SSH::Expect->new (
 				host		=> $args{tunhost},
-				password	=> $args{user},
-				user		=> $args{pass},
+				password	=> $args{pass},
+				user		=> $args{user},
 				raw_pty		=> 1,
 				ssh_option	=> $ssh_tun_arg,
 			);
 
-			$self->{ssh_handle}->login();
+			$self->{_ssh_handle}->login();
 		}
 		
 		my $port = 8031;
@@ -148,7 +149,9 @@
 	sub DESTROY
 	{
 		my $self = shift;
-		$self->{ssh_handle}->close() if $self->{ssh_handle};
+
+		local *@;
+		eval { $self->{_ssh_handle}->close() if $self->{_ssh_handle}; }
 	}
 	
 	sub open_connection

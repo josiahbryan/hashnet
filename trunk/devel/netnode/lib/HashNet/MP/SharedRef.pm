@@ -352,7 +352,12 @@ use common::sense;
 		{
 			$Counts{store} ++;
 			my $t1 = time();
-			nstore($self, $file);
+			eval { nstore($self, $file); };
+			if($@)
+			{
+				print STDERR Dumper $self if $@ =~ /GLOB/;
+				die $@ if $@;
+			}
 			my $len = time - $t1;
 			$Counts{store_t} += $len;
 
