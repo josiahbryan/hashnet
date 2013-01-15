@@ -15,9 +15,16 @@
 		
 		$opts{master_pid}   ||= $$;
 		$opts{startup_argv} ||= \@ARGV;
-		$opts{startup_app}  ||= $0;
+		$opts{startup_app}  ||= undef;
 		$opts{app_ver}      ||= 0.0;
 		$opts{hub_mode}     ||= 1;
+		
+		if(!defined $opts{startup_app})
+		{
+			my $app = $0;
+			my ($path, $file) = $app =~ /(^.*?\/)([^\/]+)$/;
+			$opts{startup_app} = $file; 
+		}
 		
 		trace "AutoUpdater: Starting update monitor for $opts{startup_app}, current version $opts{app_ver}\n";
 		
@@ -128,6 +135,15 @@
 						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Moving '$tmp' to '$app'\n";
 						move($tmp, $app);
 						
+						system("chmod +x $app");
+						
+						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Storing update for routing on restart\n";
+						# hack: Hold lock while we kill the process.
+						# - this prevents the router from starting to route the update and not finishing if we kill it
+						# - this lock will be cleared when the app restarts since the lock will show as stale
+						incoming_queue()->lock_file; 
+						incoming_queue()->add_row($msg) if $self->{hub_mode};
+						
 						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Requesting restart\n";
 						$self->rexec_app;
 					}
@@ -156,6 +172,7 @@
 		my $self = shift;
 		
 		info "AutoUpdater: request_restart(): Restart requested\n";
+		
 		$self->kill_children();
 		
 		if(!fork)
@@ -173,6 +190,9 @@
 		}
 		else
 		{
+			#info "AutoUpdater: request_restart(): Waiting a few moments to kill $self->{master_pid}\n";
+			#sleep 5;
+			
 			# Kill the master process
 			info "AutoUpdater: request_restart(): Killing master process $self->{master_pid}\n";
 			kill 15, $self->{master_pid}; # 15 = SIGTERM

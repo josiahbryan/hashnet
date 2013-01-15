@@ -56,6 +56,24 @@ package HashNet::Util::Logging;
 	my $NextPidColor = 0;
 	my $SharedRef;
 	
+	sub logtime
+	{
+		my $secs = time();
+		my @local = localtime($secs);
+		my $ty   = $local[5] + 1900;
+		my $tm   = $local[4] + 1;
+		my $td   = $local[3];
+		my $sec  = $local[0]; 
+		my $min  = $local[1];
+		my $hour = $local[2];
+		my $date = "$ty-".rpad($tm).'-'.rpad($td);
+		my $time = rpad($hour).':'.rpad($min).':'.rpad($sec);
+		my $int_sec = int($secs);
+		my $dec_sec = $secs - $int_sec;
+		return "$date $time".substr(sprintf('%.09f', $dec_sec),1);
+		
+	}
+	
 	sub logmsg
 	{
 		my $level = uc(shift);
@@ -102,11 +120,13 @@ package HashNet::Util::Logging;
 				
 				
 			}
-			print STDERR $color_on, sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
+			#print STDERR $color_on, sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
+			print STDERR $color_on, logtime(), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
 		}
 		else
 		{
-			print STDERR sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+			#print STDERR sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+			print STDERR logtime(), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
 		}
 		unlock_stdout;
 	}

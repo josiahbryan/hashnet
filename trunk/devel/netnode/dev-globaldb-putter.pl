@@ -43,3 +43,6 @@ $ch->wait_for_receive(msgs => 1, timeout => 1, speed => 1);
 
 trace "$0: Done\n";
 
+$ch->destroy_app();
+
+

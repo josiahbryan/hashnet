@@ -38,9 +38,9 @@
 	use JSON::PP qw/encode_json decode_json/;
 	#use JSON qw/to_json from_json/;
 	sub to_json   { encode_json(shift) } 
-	sub from_json { decode_json(shift) }
-	
-	
+	sub from_json { decode_json(shift) }	
+	use IO::Select; # for checking can_read/can_send
+
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::Logging;
 	use HashNet::Util::ExecTimeout;
@@ -118,7 +118,7 @@
 			debug "Reaped $k stat $stat\n";
 		}
 
-		debug "MessageSocketBase: start_tx_loop: Setting tx_pid $self->{tx_pid}\n";
+		debug "MessageSocketBase: start_tx_loop: Setting tx_pid to $kid\n";
 		$self->{tx_pid} = $kid;
 	}
 	
@@ -193,7 +193,6 @@
 		}
 	}
 
-	use IO::Select;
 	sub tx_loop
 	{
 		my $self = shift;
@@ -208,22 +207,31 @@
 		$sel->add($sock);
 		$self->{socket_select} = $sel;
 
-		my $parent_pid = $self->{tx_loop_parent_pid};
+		#my $parent_pid = $self->{tx_loop_parent_pid};
 
-		#trace "MessageSocketBase: Starting tx_loop\n";
+		trace "MessageSocketBase: Starting tx_loop\n";
 		while(1)
 		{
-			#trace "MessageSocketBase: tx_loop: mark1\n";
-			$self->send_pending_messages();
-
-			unless(kill 0, $parent_pid)
+			local *@;
+			eval
 			{
-				#trace "SocketWorker: fork_receiver/$msg_name; Parent pid $parent_pid gone away, not listening anymore\n";
-				last;
+				#trace "MessageSocketBase: tx_loop: mark1\n";
+				$self->send_pending_messages();
+			};
+			if($@)
+			{
+				trace "SocketWorker: tx_loop: Error in send_pending_messages: $@\n";
 			}
+
+# 			unless(kill 0, $parent_pid)
+# 			{
+# 				trace "SocketWorker: tx_loop; Parent pid $parent_pid gone away, not listening anymore\n";
+# 				last;
+# 			}
 
 			sleep 0.1;
 		}
+		trace "MessageSocketBase: Leaving tx_loop\n";
 	}
 	
 	sub process_loop
@@ -297,11 +305,11 @@
 				$self->{in_bulk_read} = 0;
 
 				# Restart tx loop if it dies
-				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
-				{
-					debug "MessageSocketBase: process_loop: Can't talk to tx_pid $self->{tx_pid}, restarting\n";
-					$self->start_tx_loop();
-				}
+# 				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
+# 				{
+# 					debug "MessageSocketBase: process_loop: Can't talk to tx_pid $self->{tx_pid}, restarting\n";
+# 					$self->start_tx_loop();
+# 				}
 
 				sleep 0.1;
 			}
