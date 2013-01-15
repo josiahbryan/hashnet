@@ -6,6 +6,7 @@ use strict;
 use common::sense;
 use HashNet::MP::ClientHandle;
 use HashNet::Util::Logging;
+use HashNet::Util::ANSIUtil;
 use Time::HiRes qw/time/;
 use Getopt::Std;
 
@@ -134,7 +135,7 @@ foreach my $res (@results)
 	#next if $delta < 0;
 
 	#print "$res->{node_info}->{name} - ".sprintf('%.03f', $delta)." sec\n";
-	print sprintf('%.03f', $delta)." sec - $res->{node_info}->{name}\n";
+	print ON_WHITE.BLACK.sprintf('%.03f', $delta)." sec".CLEAR." - ".ON_RED.WHITE.$res->{node_info}->{name}.CLEAR."\n";
 	
 	next if !$complex_route && !$simple_route;
 
@@ -173,7 +174,7 @@ foreach my $res (@results)
 		
 		$last_time = $time;
 	}
-	print "\n";
+	print "\n\n";
 	
 }
 print "\n";

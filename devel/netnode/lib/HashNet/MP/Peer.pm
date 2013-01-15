@@ -111,6 +111,7 @@
 			my $local_port = 0;
 			
 			my $shref = HashNet::MP::SharedRef->new($LOCALPORT_DB);
+			$shref->lock_file;
 			$shref->update_begin;
 			
 			for my $port (3729 .. 65536)
@@ -147,8 +148,9 @@
 				last;
 			}
 			
-			#trace "Peer: _open_tunnel: Writing data to ".$shref->file,"...\n";
+			#trace "Peer: _open_tunnel: Writing data to ".$shref->file.": ".Dumper($shref)."\n";
 			$shref->update_end;
+			$shref->unlock_file;
 			#trace "Peer: _open_tunnel: Writing data to ".$shref->file." done\n";
 
 			if(!$local_port)
