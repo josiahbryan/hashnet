@@ -8,22 +8,28 @@ use fields qw(
 	timeout terminator expect debug next_line before match after binary
 );
 
+# Workaround for IO::Tty 
 BEGIN {
-	local *@;
+	my @old_inc = @INC;
+	@INC = grep { !/^\/tmp/ } @INC;
+	undef $@;
 	eval('use Expect');
 	if($@)
 	{
-		warn "Error using Expect: $@";
 		use CPAN;
-		install('Expect');
-		install('IO::Pty');
-		install('IO::Tty');
+		undef $@;
+		eval { CPAN::install('Expect'); };
+		warn "Error installing Expect: $@" if $@;
+		CPAN::install('IO::Pty');
+		CPAN::install('IO::Tty');
 	}
+
+	@INC = @old_inc;
 }
 	
 
 use Expect;
-Expect::import();
+Expect->import(); # Manually trigger the import process in this context since it was already triggered once, above
 use Carp;
 use POSIX qw(:signal_h WNOHANG);
 
@@ -132,6 +138,8 @@ sub run_ssh {
 	# this sets the ssh command line
 	my $ssh_string = $self->{binary} . " $flags $user\@$host";
 
+	#print STDERR "[DEBUG] ssh_string: $ssh_string\n";
+
 	# creating the Expect object
 	my $exp = new Expect();
 
@@ -188,7 +196,7 @@ sub login {
 	my Net::SSH::Expect $self = shift;
 
 	# setting the default values for the parameters
-	my ($login_prompt, $password_prompt, $test_success) = ( qr/ogin:\s*$/, qr/[Pp]assword.*?:|[Pp]assphrase.*?:/, 0);
+	my ($login_prompt, $password_prompt, $test_success) = ( qr/ogin:\s*$/, qr/(?:[Pp]assword.*?:|[Pp]assphrase.*?:)/, 0);
 
 	# attributing the user defined values
 	if (@_ == 2 || @_ == 3) {
@@ -215,7 +223,7 @@ sub login {
 	my $exp = $self->get_expect();
 
 	# loggin in
-	#print STDERR "[Debug] Logging in, timeout: $timeout\n";
+	#print STDERR "[Debug] Logging in, timeout: $timeout, \$password_prompt:'$password_prompt' \n";
 	$self->_sec_expect($timeout,
 		[ qr/\(yes\/no\)\?\s*$/ => sub { $exp->send("yes$t"); exp_continue; } ],
 		[ $password_prompt	=> sub { $exp->send("$password$t") if $password; } ],
@@ -223,11 +231,19 @@ sub login {
 		[ qr/REMOTE HOST IDEN/  => sub { print "FIX: .ssh/known_hosts\n"; exp_continue; } ],
 		# This case hits when the user is ssh'ing from a host in the remote host's ~/.ssh/allows_keys2
 		[ qr/Last login/	=> sub { } ], #print STDERR "[Debug] got 'Last login'\n"; } ],
+		[ qr/.*?@.*?'s password:/ => sub { } ],
 		[ timeout		=> sub
 			{
-				croak SSH_AUTHENTICATION_ERROR . " Login timed out. " .
-				"The input stream currently has the contents bellow: " .
-				$self->peek();
+				if($self->peek() =~ /.*?@.*?'s password:/)
+				{
+					$exp->send("$password$t") if $password;
+				}
+				else
+				{
+					croak SSH_AUTHENTICATION_ERROR . " Login timed out. " .
+					"The input stream currently has the contents bellow: " .
+					$self->peek();
+				}
 			}
 		]
 	);

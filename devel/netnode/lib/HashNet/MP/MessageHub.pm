@@ -354,16 +354,20 @@
 		foreach my $peer (@list)
 		{
 			next if !$peer || !$peer->host;
-			
-			trace "MessageHub: Connecting to remote hub '$peer->{host}'\n";
-			my $worker = $peer->open_connection($self->node_info);
-			if(!$worker)
+			if(!fork)
 			{
-				error "MessageHub: Error connecting to hub '$peer->{host}'\n";
-			}
-			else
-			{
-				trace "MessageHub: Connection established to hub '$peer->{host}'\n";
+				trace "MessageHub: Connecting to remote hub '$peer->{host}'\n";
+				my $worker = $peer->open_connection($self->node_info);
+				if(!$worker)
+				{
+					error "MessageHub: Error connecting to hub '$peer->{host}'\n";
+				}
+				else
+				{
+					trace "MessageHub: Connection established to hub '$peer->{host}'\n";
+				}
+
+				exit;
 			}
 		}
 	}
