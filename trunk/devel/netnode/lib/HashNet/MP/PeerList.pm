@@ -80,6 +80,20 @@
 		return $peer;
 	}
 	
+	sub get_peer_by_id
+	{
+		my $class = shift;
+		my $id = shift;
+		
+		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
+		
+		my $peer_data = $db->by_id($id);
+		return undef if !$peer_data;
+		
+		my $peer = HashNet::MP::Peer->from_hash($peer_data);
+		return $peer;
+	}
+	
 	sub get_peer_by_host
 	{
 		my $class = shift;

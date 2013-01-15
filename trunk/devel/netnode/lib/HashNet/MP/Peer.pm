@@ -10,6 +10,8 @@
 	use HashNet::Util::Logging;
 	use HashNet::Util::MyNetSSHExpect; # for ssh tunnels
 	
+	our $LOCALPORT_DB = ".sshtun.portnums";
+	
 	sub from_hash
 	{
 		my $class = shift;
@@ -106,13 +108,54 @@
 				$args{pass} =~ s/[\r\n]//g;
 			}
 
-			my $local_port = 3729;
-			$local_port ++ while $local_port < 65536 and qx{ lsof -i :$local_port };
-			if($local_port == 65536)
+			my $local_port = 0;
+			
+			my $shref = HashNet::MP::SharedRef->new($LOCALPORT_DB);
+			$shref->update_begin;
+			
+			for my $port (3729 .. 65536)
 			{
-				warn "Peer: _open_tunnel: sshtun: Cannot find an open port for the local end of the tunnel";
+				next if qx{ lsof -i :$port };
+				if(my $data = $shref->{inuse}->{$port})
+				{
+					my $other_peer = HashNet::MP::PeerList->get_peer_by_id($data->{id});
+					if($other_peer)
+					{
+						my $min_check_time = 60; # # seconds
+						if(time - $data->{timestamp} < $min_check_time)
+						{
+							debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is within the safety window for this port\n";
+							next;  
+						}
+						
+						if($other_peer->is_online) # is_online() checks PID as well
+						{
+							debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is online\n";
+							next;
+						}
+						
+						# Port was marked as inuse, but didnt pass checks, so delete data and we'll use it
+						delete $shref->{inuse}->{$port};
+					}
+				}
+				
+				debug "Peer: _open_tunnel: Found open local port $port, using for tunnel\n";
+				
+				$local_port = $port;
+				$shref->{inuse}->{$port} = { id=> $self->{id}, timestamp => time() };
+				
+				last;
 			}
+			
+			#trace "Peer: _open_tunnel: Writing data to ".$shref->file,"...\n";
+			$shref->update_end;
+			#trace "Peer: _open_tunnel: Writing data to ".$shref->file." done\n";
 
+			if(!$local_port)
+			{
+				die "Peer: _open_tunnel: sshtun: Cannot find an open port for the local end of the tunnel";
+			}
+			
 			# This is the host:port we return to the caller, _open_socket,
 			# so it can connect to the local side of the tunnel
 			$host = "localhost:${local_port}";
