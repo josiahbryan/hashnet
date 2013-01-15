@@ -377,7 +377,7 @@ use common::sense;
 	sub lock_file
 	{
 		my $self = shift;
-		my $time = shift || 10;
+		my $time = shift || 2;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
 		#print_stack_trace();
 		
