@@ -70,6 +70,42 @@
 		return $self;
 	}
 
+	sub _remove_old_pid_ipc_ref
+	{
+		my $self = shift;
+		my @files;
+		opendir(DIR,'.') || die "Cannot read dir '.': $!";
+		@files = grep { /^\.pid_ipc_ref\./ && !/\.counter/ } readdir(DIR);
+		closedir(DIR);
+		foreach my $file (@files)
+		{
+			my $ref = HashNet::MP::SharedRef->new($file);
+			# kil 0 returns false if the PID given is NOT 'allive' (e.g. kill is unable to send any signals to that PID)
+			if(!(kill 0, $ref->{started_from}))
+			{
+				trace "MessageSocketBase: _remove_old_pid_ipc_ref: Removing stale PID IPC file: $file\n";
+				$ref->delete_file;
+			}
+		}
+	}
+
+	sub pid_ipc_ref
+	{
+		my $self = shift;
+		if(!$self->{pid_ipc_ref})
+		{
+			$self->_remove_old_pid_ipc_ref;
+			my $class_string = "$self";
+			$class_string =~ s/[^A-Za-z0-9_\.]//g;
+			my $file = ".pid_ipc_ref.".$class_string;
+			#warn "$self: Using IPC file: $file\n";
+			$self->{pid_ipc_ref} = HashNet::MP::SharedRef->new($file);
+			$self->{pid_ipc_ref}->{started_from} = $$;
+			$self->{pid_ipc_ref}->save_data;
+		}
+		return $self->{pid_ipc_ref};
+	}
+
 	sub start_tx_loop
 	{
 		my $self = shift;
@@ -178,6 +214,11 @@
 		}
 	}
 
+	sub DESTROY
+	{
+		shift->stop();
+	}
+
 	sub stop
 	{
 		my $self = shift;
@@ -191,7 +232,11 @@
 			debug "MessageSocketBase: stop: Killing tx_pid $self->{tx_pid}\n";
 			kill 15, $self->{tx_pid};
 		}
+
+		$self->pid_ipc_ref->delete_file;
 	}
+
+	sub tx_loop_start_hook {}
 
 	sub tx_loop
 	{
@@ -208,8 +253,20 @@
 		$self->{socket_select} = $sel;
 
 		#my $parent_pid = $self->{tx_loop_parent_pid};
+		$self->tx_loop_start_hook();
+
+		my $pid_ipc = $self->pid_ipc_ref;
+		$pid_ipc->lock_file;
+		$pid_ipc->load_changes;
+		unless(!(kill 0, $pid_ipc->{rx_pid}))
+		{
+			$pid_ipc->{rx_pid} = 0;
+			$pid_ipc->save_data;
+		}
+		$pid_ipc->unlock_file;
 
 		trace "MessageSocketBase: Starting tx_loop\n";
+		#warn "Start tx loop $$ [$0]\n";
 		while(1)
 		{
 			local *@;
@@ -223,11 +280,13 @@
 				trace "SocketWorker: tx_loop: Error in send_pending_messages: $@\n";
 			}
 
-# 			unless(kill 0, $parent_pid)
-# 			{
-# 				trace "SocketWorker: tx_loop; Parent pid $parent_pid gone away, not listening anymore\n";
-# 				last;
-# 			}
+			$pid_ipc->load_changes if !$pid_ipc->{rx_pid};
+
+			unless(kill 0, $pid_ipc->{rx_pid})
+			{
+				trace "SocketWorker: tx_loop; Parent pid $pid_ipc->{rx_pid} gone away, not listening anymore\n";
+				last;
+			}
 
 			sleep 0.1;
 		}
@@ -256,8 +315,12 @@
 		$sel->add($sock);
 		
 		$self->process_loop_start_hook();
-		
 
+		my $pid_ipc = $self->pid_ipc_ref;
+		$pid_ipc->update_begin;
+		$pid_ipc->{rx_pid} = $$;
+		$pid_ipc->update_end;
+		
 		Restart_Process_Loop:
 
 		undef $@;

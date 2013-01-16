@@ -30,6 +30,7 @@ use common::sense;
 	use HashNet::Util::Logging;
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::SNTP;
+	use HashNet::Util::ExecTimeout;
 
 	use Geo::IP; # for Geolocating our WAN address
 	use UUID::Generator::PurePerl; # for use in gen_node_info
@@ -238,10 +239,19 @@ use common::sense;
 # 		$self->send_message($env);
 		#print STDERR Dumper $env;
 
+		my $pid = $self->state_handle->{read_loop_pid};
+		#warn "killing read $pid from $$";
+		kill 15, $pid;
+
+# 		$pid = $self->state_handle->{tx_loop_pid};
+# 		#warn "killing tx $pid from $$";
+# 		kill 15, $pid;
+
 		# Remove the state data from the database
 		$ref->update_begin;
 		delete $ref->data->{socketworker}->{$self->{state_uuid}};
 		$ref->update_end;
+
 
 		# Kill any receiver forks
 # 		my @fork_pids = @{ $self->{receiver_forks} || [] };
@@ -692,12 +702,20 @@ use common::sense;
 		$self->state_handle->{online} = 0;
 		$self->state_update(0);
 	}
+
+	sub tx_loop_start_hook
+	{
+		my $self = shift;
+# 		$self->state_update(1);
+# 		$self->state_handle->{tx_loop_pid} = $$;
+# 		$self->state_update(0);
+	}
 	
 	sub process_loop_start_hook
 	{
 		my $self = shift;
 		$self->state_update(1);
-		$self->state_handle->{tx_loop_pid} = $$;
+		$self->state_handle->{read_loop_pid} = $$;
 		$self->state_update(0);
 	}
 	
@@ -763,26 +781,7 @@ use common::sense;
 		my $consumed = 0;
 		if(!$check_hist)
 		{
-			if(my $arrayref = $MsgHandlers{$msg_type})
-			{
-				my @list = @{$arrayref || []};
-				debug "SocketWorker: dispatch_msg: Found ".scalar(@list)." handlers for msg_type '$msg_type'\n";
-				foreach my $coderef (@list)
-				{
-					#debug "SocketWorker: dispatch_msg: Custom Handler for '$msg_type': coderef=$coderef\n";
-					
-					my $flag = $coderef->($envelope);
-					
-					$self->send_message($self->create_client_receipt($envelope))
-						if $self->peer->{type} eq 'hub';
-					
-					$consumed = 1 if $flag == 1;
-				}
-			}
-			else
-			{
-				#debug "SocketWorker: dispatch_msg: No custom handlers for msg_type '$msg_type'\n";
-			}
+			$consumed = $self->_call_msg_handlers($envelope, $msg_type);
 		}
 		else
 		{
@@ -839,13 +838,15 @@ use common::sense;
 		}
 		else
 		{
-			if($check_hist) #check_env_hist($envelope, $self->uuid))
+			#if($check_hist) #check_env_hist($envelope, $self->uuid))
+			if(!$check_hist)
 			{
-				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
-			}
-			else
-			{
-				incoming_queue()->add_row($envelope);
+				my $consumed = $self->_call_msg_handlers($envelope, '*');
+
+				if(!$consumed)
+				{
+					incoming_queue()->add_row($envelope);
+				}
 				
 				$self->_rx_copy_to_listen_queues($envelope);
 
@@ -853,7 +854,50 @@ use common::sense;
 				#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
 				#print STDERR Dumper $envelope;
 			}
+			else
+			{
+				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
+			}
 		}
+	}
+
+	sub _call_msg_handlers
+	{
+		my $self = shift;
+		my $envelope = shift;
+		my $current_type = shift;
+
+		my $consumed = 0;
+
+		if(my $arrayref = $MsgHandlers{$current_type})
+		{
+			my @list = @{$arrayref || []};
+
+			#debug "SocketWorker: _call_msg_handlers: Found ".scalar(@list)." handlers for msg_type '$current_type'\n";
+			foreach my $coderef (@list)
+			{
+				#debug "SocketWorker: _call_msg_handlers: Custom Handler for '$current_type': coderef=$coderef\n";
+				local *@;
+				eval
+				{
+					my $flag = $coderef->($envelope, $current_type);
+
+					$self->send_message($self->create_client_receipt($envelope))
+						if $self->peer &&
+							$self->peer->{type} eq 'hub';
+
+					$consumed = 1 if $flag == 1;
+				};
+
+				error "SocketWorker: _call_msg_handlers: Error in msg handler for '$current_type': $@" if $@;
+			}
+		}
+		else
+		{
+			#debug "SocketWorker: dispatch_msg: No custom handlers for msg_type '$msg_type'\n";
+		}
+
+		return $consumed;
 	}
 
 	# TODO: Update Message Socket Base to honor failure to lock
@@ -879,7 +923,8 @@ use common::sense;
 		$self->state_update(1);
 
 		# (undef, 1) tells sync_time() to only get the offset, not to try and adjust the time
-		$self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1);
+		exec_timeout 1, sub { $self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1); };
+		
 		$self->state_update(0);
 	}
 
@@ -917,6 +962,7 @@ use common::sense;
 		
 		$self->send_message($new_env);
 
+		# TODO Rewrite for custom SW outgoing queue
 		#$self->outgoing_queue->add_row($new_env);
 		#$self->wait_for_send();
 
@@ -1040,6 +1086,8 @@ use common::sense;
 		my $max   = shift || 4;
 		my $speed = shift || 0.1;
 		my $uuid  = shift || $self->peer_uuid;
+
+		# TODO Rewrite for custom SW outgoing queue
 		my $queue = outgoing_queue();
 		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
@@ -1097,9 +1145,9 @@ use common::sense;
 				$cnt = scalar ( $queue->all_by_key(to => $uuid) );
 			}
 			
-			unless(kill 0, $self->state_handle->{tx_loop_pid})
+			unless(kill 0, $self->state_handle->{read_loop_pid})
 			{
-				error "SocketWorker: wait_for_receive: SocketWorker tx loop PID ".$self->state_handle->{tx_loop_pid}." gone away, not waiting anymore\n";
+				error "SocketWorker: wait_for_receive: SocketWorker read loop PID ".$self->state_handle->{read_loop_pid}." gone away, not waiting anymore\n";
 				return $cnt;
 			}
 
@@ -1143,6 +1191,8 @@ use common::sense;
 		return () if !$uuid;
 		#trace "SocketWorker: pending_messages: uuid '$uuid' - querying...\n";
 		#trace Dumper $self->state_handle;
+
+		# TODO Rewrite for custom SW outgoing queue
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(outgoing_queue());# if @res;
@@ -1161,6 +1211,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $batch = shift;
+		# TODO Rewrite for custom SW outgoing queue
 		$self->outgoing_queue->del_batch($batch);
 	}
 
@@ -1323,6 +1374,8 @@ use common::sense;
 			trace "SocketWorker: Forked receiver for '$msg_name' in PID $$ as '$0'\n";
 
 			my $queue = $self->rx_listen_queue($$);
+
+			# TODO Rewrite for custom SW outgoing queue
 			my $receipt_queue = ref $self ? outgoing_queue() : incoming_queue();
 			
 			# Lock incoming queue so we know that we're not going to duplicate messages

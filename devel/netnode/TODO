@@ -4,6 +4,11 @@
 #-Add geo info
 #-Add reconnect to CLientHandle
 
+-Optimizations:
+	-Move router into socketworker plugin
+	-Change SocketWorker in hub mode to use custom outgoing queue
+	-Add third mode to sharedref - shmem
+	
 -Bug: AutoUpdater doesnt allow software updates to be routed
 	-Need some sort of 'restart gracefully' mechanism at end of MessageHub or something like that
 	
