@@ -7,26 +7,29 @@
 	use File::Slurp;
 
 	sub MSG_SOFTWARE_UPDATE { 'MSG_SOFTWARE_UPDATE' }
+	sub MSG_SOFTWARE_UPDATE_QUERY { 'MSG_SOFTWARE_UPDATE_QUERY' }
 	
 	sub new
 	{
 		my $class = shift;
 		my %opts = @_;
+
+		$opts{master_pid}    ||= $$;      # for restarting
+		$opts{startup_argv}  ||= \@ARGV;  # for restarting
+		$opts{startup_app}   ||= $0;      # for restarting
+		$opts{app_name}      ||= undef;   # for checking to see if the update or query is for "our app"
+		$opts{app_ver}       ||= 0.0;     # for version checking/comparrison
+		$opts{app_file}      ||= $0;      # for sending response to update quries
+		$opts{hub_mode}      ||= 1;       # for socket message handlers
 		
-		$opts{master_pid}   ||= $$;
-		$opts{startup_argv} ||= \@ARGV;
-		$opts{startup_app}  ||= undef;
-		$opts{app_ver}      ||= 0.0;
-		$opts{hub_mode}     ||= 1;
-		
-		if(!defined $opts{startup_app})
+		if(!defined $opts{app_name})
 		{
 			my $app = $0;
 			my ($path, $file) = $app =~ /(^.*?\/)([^\/]+)$/;
-			$opts{startup_app} = $file ? $file : $0;
+			$opts{app_name} = $file ? $file : $0;
 		}
 		
-		trace "AutoUpdater: Starting update monitor for $opts{startup_app}, current version $opts{app_ver}\n";
+		trace "AutoUpdater: Starting update monitor for $opts{app_name}, current version $opts{app_ver}\n";
 		
 		my $self = bless \%opts, $class;
 		
@@ -88,7 +91,7 @@
 		my $qname = $opts{uuid} ? 'incoming' : 'outgoing';
 		my $queue = msg_queue($qname);
 		
-		trace "AutoUpdater: send_update(): Posting update ".$env->{type}."{".$env->{uuid}."} into queue '$qname'\n";
+		trace "AutoUpdater: send_update(): Posting ".$env->{type}."{".$env->{uuid}."} into queue '$qname'\n";
 		$queue->add_row($env);
 	}
 	
@@ -96,26 +99,105 @@
 	{
 		my $self = shift;
 		HashNet::MP::SocketWorker->reg_handlers(
-			
+			MSG_NODE_INFO => sub {
+
+				my ($msg, $sw) = @_;
+
+				if($msg->{data}->{type} eq 'client')
+				{
+					# No need to query a client, since two clients dont communicate, they would be different apps
+					return 0;
+				}
+
+				my $app = $self->{app_name};
+				my $ver = $self->{app_ver};
+
+				my $env = $sw->create_envelope(
+					{
+						ver  => $ver,
+						app  => $app,
+					},
+					type   => MSG_SOFTWARE_UPDATE_QUERY,
+					#to     => $msg->{from},
+					nxthop => $msg->{from},
+					bcast  => 1,
+				);
+
+				trace "AutoUpdater: MSG_NODE_INFO: Posting ".$env->{type}."{".$env->{uuid}."} to peer {$msg->{from}}\n";
+				$sw->outgoing_queue->add_row($env);
+
+				# We're just hooking into MSG_NODE_INFO to trigger a query, we never (cross fingers) would need to consume this...
+				return 0;
+			},
+
+			MSG_SOFTWARE_UPDATE_QUERY => sub {
+				my $msg = shift;
+				my $sw  = shift;
+				
+				my $data = $msg->{data};
+
+				my $app = $self->{app_name};
+				my $ver = $self->{app_ver};
+				my $new_app = $data->{app};
+				my $new_ver = $data->{ver};
+
+				if($app ne $new_app)
+				{
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE_QUERY: Not responding, update query is for app '$new_app', not '$app'\n";
+				}
+				elsif($ver <= $new_ver)
+				{
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE_QUERY: Not responding, current '$ver' is older or same as query version '$new_ver'\n";
+				}
+				else
+				{
+					my $file = $self->{app_file};
+					my $buffer = scalar(read_file($file));
+					my $bytes = length($buffer);
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE_QUERY: Responding with file '$file' ($bytes bytes) for app $app, ver $ver\n";
+
+					my $env = $sw->create_envelope(
+						{
+							ver  => $ver,
+							file => $file,
+							app  => $app,
+							len  => $bytes,
+						},
+						type   => MSG_SOFTWARE_UPDATE,
+						to     => $msg->{from}, # NOTE: send_update() sends as bcast, we send directly to requesting peer
+						_att   => $buffer,
+					);
+
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE_QUERY: Posting ".$env->{type}."{".$env->{uuid}."} to peer {$msg->{from}}\n";
+					$sw->outgoing_queue->add_row($env);
+
+					# We return 1 regardless of {hub_mode} because even in a hub, we want to consume this update query
+					# because we responded to it - the client doesnt need multiple responses, only one.
+					return 1;
+				}
+
+				return 1 if !$self->{hub_mode};
+			},
+							
 			MSG_SOFTWARE_UPDATE => sub {
 				my $msg = shift;
 
-				trace "GlobalDB: MSG_SOFTWARE_UPDATE: Received new update message, checking\n";
+				trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Received new update message, checking\n";
 				
 				my $data = $msg->{data};
 				
-				my $app = $self->{startup_app};
+				my $app = $self->{app_name};
 				my $ver = $self->{app_ver};
 				my $new_app = $data->{app};
 				my $new_ver = $data->{ver};
 				
 				if($app ne $new_app)
 				{
-					trace "GlobalDB: MSG_SOFTWARE_UPDATE: Not updating, update is for app '$new_app', not '$app'\n";	
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Not updating, update is for app '$new_app', not '$app'\n";
 				}
 				elsif($new_ver <= $ver)
 				{
-					trace "GlobalDB: MSG_SOFTWARE_UPDATE: Not updating, new version '$new_ver' is older or same as current version '$ver'\n";
+					trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Not updating, new version '$new_ver' is older or same as current version '$ver'\n";
 				}
 				else
 				{
@@ -125,26 +207,26 @@
 					my $len = length($buffer);
 					if($len != $exp_len)
 					{
-						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Not updating, transmission bad, expected $exp_len bytes, only have $len bytes\n";
+						trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Not updating, transmission bad, expected $exp_len bytes, only have $len bytes\n";
 					}
 					else
 					{
-						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Updating software, writing to '$tmp'\n"; 
+						trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Updating software, writing to '$tmp'\n";
 						write_file($tmp, $msg->{_att});
 						
-						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Moving '$tmp' to '$app'\n";
+						trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Moving '$tmp' to '$app'\n";
 						move($tmp, $app);
 						
 						system("chmod +x $app");
 						
-						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Storing update for routing on restart\n";
-						# hack: Hold lock while we kill the process.
-						# - this prevents the router from starting to route the update and not finishing if we kill it
-						# - this lock will be cleared when the app restarts since the lock will show as stale
-						incoming_queue()->lock_file; 
-						incoming_queue()->add_row($msg) if $self->{hub_mode};
+# 						trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Storing update for routing on restart\n";
+# 						# hack: Hold lock while we kill the process.
+# 						# - this prevents the router from starting to route the update and not finishing if we kill it
+# 						# - this lock will be cleared when the app restarts since the lock will show as stale
+# 						incoming_queue()->lock_file; 
+# 						incoming_queue()->add_row($msg) if $self->{hub_mode};
 						
-						trace "GlobalDB: MSG_SOFTWARE_UPDATE: Requesting restart\n";
+						trace "AutoUpdater: MSG_SOFTWARE_UPDATE: Requesting restart\n";
 						$self->rexec_app;
 					}
 				}

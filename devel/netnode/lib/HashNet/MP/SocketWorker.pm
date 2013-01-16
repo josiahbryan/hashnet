@@ -884,7 +884,7 @@ use common::sense;
 				local *@;
 				eval
 				{
-					my $flag = $coderef->($envelope, $current_type);
+					my $flag = $coderef->($envelope, $self, $current_type);
 
 					$self->send_message($self->create_client_receipt($envelope))
 						if $envelope->{type} ne 'MSG_CLIENT_RECEIPT' &&
