@@ -210,7 +210,7 @@
 				debug "Reaped $k stat $stat\n";
 			}
 
-			$self->{child_pid} = $kid;
+			$self->{rx_pid} = $kid;
 		}
 	}
 
@@ -222,9 +222,10 @@
 	sub stop
 	{
 		my $self = shift;
-		if($self->{child_pid})
+		if($self->{rx_pid})
 		{
-			kill 15, $self->{child_pid};
+			debug "MessageSocketBase: stop: Killing rx_pid $self->{rx_pid}\n";
+			kill 15, $self->{rx_pid};
 		}
 
 		if($self->{tx_pid})

@@ -378,6 +378,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $time = shift || 2;
+		my $dont_unstale = shift || 0;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
 		#print_stack_trace();
 		
@@ -403,6 +404,10 @@ use common::sense;
 		
 		if(!$have_lock)
 		{
+			return $self->lock_file($time, 1)
+				if !$dont_unstale &&
+				    $self->unlock_if_stale;
+				
 			#die "Can't lock ",$self->file;
 			trace "SharedRef: ", $self->file, ": lock_file(): Can't lock file\n"; # if DEBUG;
 			trace "SharedRef: lock failed at: ".get_stack_trace();

@@ -240,8 +240,12 @@ use common::sense;
 		#print STDERR Dumper $env;
 
 		my $pid = $self->state_handle->{read_loop_pid};
-		#warn "killing read $pid from $$";
-		kill 15, $pid;
+		if($pid)
+		{
+			#warn "killing read $pid from $$";
+			trace "SocketWorker: DESTROY: Killing read_loop_pid $pid\n";
+			kill 15, $pid;
+		}
 
 # 		$pid = $self->state_handle->{tx_loop_pid};
 # 		#warn "killing tx $pid from $$";
@@ -883,8 +887,9 @@ use common::sense;
 					my $flag = $coderef->($envelope, $current_type);
 
 					$self->send_message($self->create_client_receipt($envelope))
-						if $self->peer &&
-							$self->peer->{type} eq 'hub';
+						if $envelope->{type} ne 'MSG_CLIENT_RECEIPT' &&
+						   $self->peer &&
+						   $self->peer->{type} eq 'hub';
 
 					$consumed = 1 if $flag == 1;
 				};
