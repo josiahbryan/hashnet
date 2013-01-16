@@ -23,7 +23,7 @@
 		{
 			my $app = $0;
 			my ($path, $file) = $app =~ /(^.*?\/)([^\/]+)$/;
-			$opts{startup_app} = $file; 
+			$opts{startup_app} = $file ? $file : $0;
 		}
 		
 		trace "AutoUpdater: Starting update monitor for $opts{startup_app}, current version $opts{app_ver}\n";
