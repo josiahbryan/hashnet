@@ -30,6 +30,7 @@ $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 my $pid = fork;
 if(!$pid)
 {
+	$0 = "$0 [server]";
 	$HashNet::MP::LocalDB::DBFILE = $db_server_file;
 	HashNet::MP::MessageHub->new(
 		port        => $test_port,
@@ -38,6 +39,7 @@ if(!$pid)
 }
 else
 {
+	$0 = "$0 [client]";
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
 	sleep 1.1;
 	#print STDERR "# Proceeding with test...\n";
@@ -125,19 +127,10 @@ else
 	$ch->stop();
 }
 
-#sleep 60;
-
-
 done_testing();
-
-
 
 kill 15, $pid;
 unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 debug "$0: Done in $$, killed child $pid\n";
-
-
-END{ 
-}
