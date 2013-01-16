@@ -693,6 +693,14 @@ use common::sense;
 		my $self = shift;
 		
 		trace "SocketWorker: disconnect_handler: Peer {".$self->peer_uuid."} disconnected\n"; #\n\n\n\n\n"; #peer: $self->{peer}\n";
+
+		$self->shutdown;
+	}
+
+	sub shutdown
+	{
+		my $self = shift;
+		my $no_kill_ping_loop = shift || 0;
 		#print STDERR "\n\n\n\n\n";
 		if(my $peer = $self->{peer})
 		{
@@ -705,6 +713,12 @@ use common::sense;
 		$self->state_update(1);
 		$self->state_handle->{online} = 0;
 		$self->state_update(0);
+
+		if(!$no_kill_ping_loop &&
+		    $self->{ping_loop_pid})
+		{
+			kill 15, $self->{ping_loop_pid};
+		}
 	}
 
 	sub tx_loop_start_hook
@@ -836,6 +850,8 @@ use common::sense;
 			$self->state_update(0);
 
 			$self->_rx_copy_to_listen_queues($envelope);
+
+			#$self->start_ping_loop();
 
 			#trace "SocketWorker: state_handle: ".Dumper($self);
 
@@ -1530,6 +1546,93 @@ use common::sense;
 			#print STDERR Dumper $receipt_queue;
 		}	
 	}
+
+	sub start_ping_loop
+	{
+		my $self = shift;
+
+		$self->{ping_loop_parent_pid} = $$;
+
+		# Fork processing thread
+		my $kid = fork();
+		die "Fork failed" unless defined($kid);
+		if ($kid == 0)
+		{
+			my $peer_name = $self->{peer}->{name};
+
+			if($peer_name)
+			{
+				$0 = "$0 [$peer_name] [Ping]";
+				trace "SocketWorker: Start ping loop for peer $peer_name in PID $$ as '$0' (parent PID $self->{ping_loop_parent_pid})\n";
+			}
+			else
+			{
+				$0 = "$0 [Ping]";
+				trace "SocketWorker: Forked Ping loop $$ as '$0' (parent PID $self->{ping_loop_parent_pid})\n";
+			}
+
+			#info "MessageSocketBase: Child $$ running\n";
+			$self->ping_loop();
+			#info "MessageSocketBase: Child $$ complete, exiting\n";
+			exit 0;
+		}
+
+		# Parent continues here.
+		while ((my $k = waitpid(-1, WNOHANG)) > 0)
+		{
+			# $k is kid pid, or -1 if no such, or 0 if some running none dead
+			my $stat = $?;
+			debug "Reaped $k stat $stat\n";
+		}
+
+		debug "SocketWorker: start_ping_loop: Setting tx_pid to $kid\n";
+		$self->{ping_loop_pid} = $kid;
+	}
+	
+	sub ping_loop
+	{
+		my $self = shift;
+
+		trace "SocketWorker: Starting ping_loop\n";
+		while(1)
+		{
+			local *@;
+			eval
+			{
+				#trace "MessageSocketBase: tx_loop: mark1\n";
+				my $ping_max_time = 5;
+
+				# Do the real work
+				my $ping_uuid = $self->peer->uuid;
+				my @results = $self->send_ping($ping_uuid, $ping_max_time);
+
+				#print STDERR Dumper(\@results);
+
+				@results = grep { $_->{msg}->{from} eq $ping_uuid } @results;
+
+				if(!@results)
+				{
+					trace "SocketWorker: ping_loop: ping $ping_uuid failed, killing threads\n";
+					$self->shutdown(0);
+					kill 15, $self->{ping_loop_parent_pid};
+				}
+			};
+			if($@)
+			{
+				trace "SocketWorker: ping_loop: Error in pinging: $@\n";
+			}
+
+			unless(kill 0, $self->{ping_loop_parent_pid})
+			{
+				trace "SocketWorker: ping_loop; Parent pid $self->{ping_loop_parent_pid} gone away, not listening anymore\n";
+				last;
+			}
+
+			sleep 15;
+		}
+		trace "SocketWorker: Leaving ping_loop\n";
+	}
+
 };
 
 1;
