@@ -928,7 +928,7 @@
 			# Dont delete broadcast messages with same uuid
 			@queued = grep { $_->{to} eq $msg->{from} } @queued;
 
-			trace "MessageHub: process_client_receipt: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
+			#trace "MessageHub: process_client_receipt: Received MSG_CLIENT_RECEIPT for {$rx_msg_uuid}, receipt id {$msg->{uuid}}, lasthop $msg->{curhop}\n";
 
 			#trace "MessageHub: Client Receipt Debug: ".Dumper(\@queued, $msg);
 
@@ -1009,7 +1009,7 @@
 		}
 		elsif($msg->{to} eq $self_uuid)
 		{
-			debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}' - destined for this hub, evaporating\n";
+			debug "MessageHub: route_message: ".$msg->{type}."{$msg->{uuid}} - destined for this hub, evaporating\n";
 		}
 		else
 		{
@@ -1095,8 +1095,8 @@
 			@recip_list = grep { $_->{online} } @recip_list;
 		}
 
-		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
-			if @recip_list;
+		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+		#	if @recip_list;
 
 		#debug Dumper $msg, \@peers;
 

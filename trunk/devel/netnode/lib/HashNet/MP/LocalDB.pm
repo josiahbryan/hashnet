@@ -139,14 +139,14 @@ use common::sense;
 
 	sub shared_ref { shift->{shared_ref} }
 	sub data       {
-		my $data = shift->shared_ref;
-		$data->{data} = {} if !$data->{data};
-		return $data->{data};
+		my $ref = shift->shared_ref;
+		$ref->{data} = {} if !$ref->{data};
+		return $ref->{data};
 	 }
 	sub index      {
-		my $data = shift->shared_ref;
-		$data->{idx} = {} if !$data->{idx};
-		return $data->{idx};
+		my $ref = shift->shared_ref;
+		$ref->{idx} = {} if !$ref->{idx};
+		return $ref->{idx};
 	}
 	sub cur_id     { shift->shared_ref->{cnt} }
 	sub next_id    { ++ shift->shared_ref->{cnt} }
@@ -595,8 +595,6 @@ use common::sense;
 	sub size
 	{
 		my $self = shift;
-		my $sort_key = shift || undef;
-
 		$self->shared_ref->load_changes;
 
 		my @data = values %{ $self->data };

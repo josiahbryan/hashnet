@@ -750,7 +750,9 @@ use common::sense;
 		$envelope->{_rx_time} = $self->sntp_time();
 				
 		my $msg_type = $envelope->{type};
-		info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
+		#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}', from {$envelope->{from}}, to {$envelope->{to}}\n";
+		#info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, from {$envelope->{from}}, to {$envelope->{to}}\n";
+		info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}\n";
 
 		if($msg_type eq MSG_PING)
 		{
@@ -782,7 +784,7 @@ use common::sense;
 				my $new_env = $self->create_envelope(@args);
 				#trace "ClientHandle: incoming_messages: Created MSG_PONG for {$envelope->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 				my $delta = $new_env->{data}->{pong_time} - $envelope->{data}->{ping_time};
-				info "SocketWorker: dispatch_msg: MSG_PING, UUID {$envelope->{uuid}}, sending MSG_PONG back to {$envelope->{from}} ($envelope->{data}->{node_info}->{name}), ping->pong time: ".sprintf('%.03f', $delta)." sec\n";
+				info "SocketWorker: dispatch_msg: MSG_PING{$envelope->{uuid}}, sending MSG_PONG to ".$envelope->{data}->{node_info}->{name}."{$envelope->{from}}, ".sprintf('%.03f', $delta)." sec\n";
 
 				#use Data::Dumper;
 				#print STDERR Dumper $envelope;
@@ -851,7 +853,7 @@ use common::sense;
 
 			$self->_rx_copy_to_listen_queues($envelope);
 
-			#$self->start_ping_loop();
+			$self->start_ping_loop();
 
 			#trace "SocketWorker: state_handle: ".Dumper($self);
 
@@ -979,7 +981,8 @@ use common::sense;
 		);
 		my $new_env = $self->create_envelope(@args);
 
-		info "SocketWorker: send_ping: Sending MSG_PING" . ($uuid_to ? " to $uuid_to" : " as a broadcast ping"). " via hub ".$self->peer_uuid." (".$self->state_handle->{remote_node_info}->{name}.")\n";
+		my $uuid  = $self->uuid;
+		info "SocketWorker: send_ping: Sending MSG_PING" . ($uuid_to ? " to $uuid_to" : " as a broadcast ping"). " via hub ".$self->peer_uuid." (".$self->state_handle->{remote_node_info}->{name}.")\n"; # from $uuid\n";
 		
 		$self->send_message($new_env);
 
@@ -987,8 +990,13 @@ use common::sense;
 		#$self->outgoing_queue->add_row($new_env);
 		#$self->wait_for_send();
 
-		my $uuid  = $self->uuid;
-		my $queue = incoming_queue();
+		#my $queue = incoming_queue();
+		$self->_rx_register_listener('MSG_PONG', $$);
+
+		my $queue = $self->rx_listen_queue($$);
+
+		#print STDERR Dumper $queue;
+
 		if(!$bcast)
 		{
 			# Wait for a single pong back
@@ -1005,7 +1013,7 @@ use common::sense;
 				
 				if(defined $msg)
 				{
-					#print STDERR "SocketWorkeR: wait for ping: got pong: ".Dumper($msg);
+					#print STDERR "SocketWorker: wait for ping: got pong: ".Dumper($msg);
 				}
 				
 				my $flag = 1 if defined $msg;
@@ -1021,15 +1029,27 @@ use common::sense;
 			sleep $max;
 		}
 
+		#print STDERR Dumper $queue;
+
+		$queue->begin_batch_update;
+
 		#my @list = $queue->by_key(to => $uuid, type => 'MSG_PONG');
 		my @list = $queue->by_key(type => 'MSG_PONG');
 		@list = sort { $a->{time} cmp $b->{time} } @list;
 
 		#trace "SocketWorker: Ping dump: ".Dumper(\@list);
 
+		#trace "SocketWorker: Received ".scalar(@list)." MSG_PONGs\n";
+
 		my @return_list = map { clean_ref($_) } grep { defined $_ } @list;
 
 		$queue->del_batch(\@list);
+
+		$queue->end_batch_update;
+
+		#print STDERR Dumper $queue, \@list;
+
+		$self->_rx_deregister_listener('MSG_PONG', $$);
 
 		my $final_rx_time = $self->sntp_time();
 
@@ -1294,7 +1314,7 @@ use common::sense;
 			push @valid_pids, $pid if $self->_rx_validate_pid($msg_name, $pid);
 		}
 		
-		my @queues = map { msg_queue('listeners/'.$_) } grep { $_ } @pids;
+		my @queues = map { my $q = msg_queue('listeners/'.$_); } grep { $_ } @pids;
 		return @queues;
 	}
 
@@ -1328,8 +1348,14 @@ use common::sense;
 			# So we remove the old file.
 			my $queue = msg_queue('listeners/'.$pid);
 			$queue->shared_ref->delete_file;
+
+			#trace "SocketWorker: _rx_deregister_listener: Deleting listener queue file: ".$queue->shared_ref->file.", really deleted? ".(-f $queue->shared_ref->file ? "no:":"yes")."\n";
 	
 			$ref->update_end;
+		}
+		else
+		{
+			error "SocketWorker: _rx_deregister_listener: Unable to lock local handle $ref\n";
 		}
 	}
 
@@ -1338,10 +1364,19 @@ use common::sense;
 		my $self = shift;
 		my $msg = shift;
 
-		my @queues = $self->_rx_listen_queues_for_msg($msg->{type});
+		my @queues = $self->_rx_listen_queues_for_msg($msg->{type}, 1);
 		return if !@queues;
 
-		$_->add_row(clean_ref($msg)) foreach @queues;
+		#$_->add_row(clean_ref($msg)) foreach @queues;
+		foreach my $queue (@queues)
+		{
+			#$queue->shared_ref->load_data;
+			#trace "SocketWor: ", $queue->shared_ref->file, ": _rx_copy_():  [LocalDB Data Key Count]: [RxCp] ".scalar(keys(%{$queue->shared_ref->{data} || {}}))."\n";
+			#trace "SocketWorker: _rx_copy_to_listen_queues: [pre  add_row()] ".$msg->{type}."{$msg->{uuid}}: queue file: ".$queue->shared_ref->file.", queue size: ".$queue->size."\n";
+			$queue->add_row(clean_ref($msg));
+			#trace "SocketWorker: _rx_copy_to_listen_queues: [post add_row()] ".$msg->{type}."{$msg->{uuid}}: queue file: ".$queue->shared_ref->file.", queue size: ".$queue->size."\n";
+
+		}
 	}
 	
 	sub rx_listen_queue
@@ -1604,6 +1639,7 @@ use common::sense;
 
 				# Do the real work
 				my $ping_uuid = $self->peer->uuid;
+
 				my @results = $self->send_ping($ping_uuid, $ping_max_time);
 
 				#print STDERR Dumper(\@results);
@@ -1612,9 +1648,13 @@ use common::sense;
 
 				if(!@results)
 				{
-					trace "SocketWorker: ping_loop: ping $ping_uuid failed, killing threads\n";
+					trace "SocketWorker: ping_loop: Ping failed: ".$self->peer->{name}."{$ping_uuid} did not respond within $ping_max_time seconds, exiting threads\n";
 					$self->shutdown(0);
 					kill 15, $self->{ping_loop_parent_pid};
+				}
+				else
+				{
+					trace "SocketWorker: ping_loop: Still alive: ".$self->peer->{name}."{$ping_uuid}\n";
 				}
 			};
 			if($@)

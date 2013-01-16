@@ -193,8 +193,16 @@ use common::sense;
 		}
 		
 		trace "SharedRef: ", $self->file, ": _set_data(): ref: '$data'\n" if DEBUG;
+		#trace "SharedRef: ", $self->file, ": _set_data(): ref: '$data'".Dumper($data) if $self->file =~ /_queues_listeners_/;
 		
-		$self->{$_} = $data->{$_} foreach keys %$data;
+		if(!scalar(keys(%$data)))
+		{
+			undef $self->{$_} foreach keys %$self;
+		}
+		else
+		{
+			$self->{$_} = $data->{$_} foreach keys %$data;
+		}
 		
 		return $self;
 	}
@@ -266,7 +274,10 @@ use common::sense;
 		$self->data_loaded_hook();
 
 		trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n"  if DEBUG;
-
+		#trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n" if $self->file =~ /_queues_listeners_/;
+		#trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Data] ".scalar(keys(%{$data->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
+		#trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Self] ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
+		
 		return $data;
 	}
 
@@ -323,11 +334,15 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 
-		#trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n";# if DEBUG;
+		trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if DEBUG;
+
+		#trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if $self->file =~ /_queues_listeners_/;
+		#trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
 		#trace "SharedRef: ", $self->file, ": save_data():  data: ".Dumper($self);
 		#print_stack_trace();
 
 		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file: node_info: ".Dumper($state->{node_info});
+		#logmsg "DEBUG", "SharedRef: ", $self->file, ": save_data(): $file\n\n\n" if $self->file =~ /_queues_listeners_/;
 
 		if($self->gdb)
 		{
@@ -612,6 +627,7 @@ use common::sense;
 		{
 			$self->load_data;
 			trace "SharedRef: ", $self->file, ": load_changes(): New data loaded\n" if DEBUG;
+			#trace "SharedRef: ", $self->file, ": load_changes(): New data loaded\n\n\n" if $self->file =~ /_queues_listeners_/;
 			return 1;
 		}
 
