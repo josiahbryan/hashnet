@@ -188,7 +188,7 @@
 		};
 		
 		# Every X seconds, try to reconnect to a hub that is offline
-		set_repeat_timeout 60.0, sub
+		set_repeat_timeout 15.0, sub
 		{
 			my @list = $self->build_hub_list();
 		
@@ -198,7 +198,7 @@
 			{
 				next if !$peer || !$peer->host;
 				next if $peer->is_online;
-				
+
 				trace "MessageHub: Reconnect Check: Attempting to reconnect to remote hub '$peer->{host}'\n";
 				my $worker = $peer->open_connection($self->node_info);
 				if(!$worker)
