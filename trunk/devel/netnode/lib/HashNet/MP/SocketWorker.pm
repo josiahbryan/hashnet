@@ -12,7 +12,6 @@ use common::sense;
 	sub to_json   { encode_json(shift) } 
 	sub from_json { decode_json(shift) }
 	
-	
 	use Data::Dumper;
 	
 	use Time::HiRes qw/time sleep/;
@@ -31,7 +30,10 @@ use common::sense;
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::SNTP;
 	use HashNet::Util::ExecTimeout;
+	use HashNet::Util::MyNetSSHExpect; # for ssh tunnels
 
+	our $LOCALPORT_DB = ".sshtun.portnums";
+	
 	use Geo::IP; # for Geolocating our WAN address
 	use UUID::Generator::PurePerl; # for use in gen_node_info
 	
@@ -118,7 +120,193 @@ use common::sense;
 		# Return a 'clean' hash so user can use this ref across forks
 		return clean_ref($node_info);
 	}
-	
+
+
+# 
+# 	sub _open_tunnel
+# 	{
+# 		my ($self, $host) = @_;
+# 		#
+# 		# Example:
+# 		#	sshtun:root:+rootpw.txt@mypleasanthillchurch.org/localhost:8031
+# 		#
+# 		if($host =~ /^sshtun:(.*?):(.*?)@(.*?)\/(.*?):(.*)$/)
+# 		{
+# 			my $orighost = $host;
+# 
+# 			my %args = (
+# 				user 	=> $1,
+# 				pass	=> $2,
+# 				tunhost	=> $3,
+# 				host	=> $4,
+# 				port	=> $5
+# 			);
+# 
+# 			if($args{pass} =~ /^\+(.*)$/)
+# 			{
+# 				my $file = $1;
+# 				warn "SocketWorker: _open_tunnel: sshtun: Password file '$file' does not exist" if !-f $file;
+# 				$args{pass} = read_file($file);
+# 				$args{pass} =~ s/[\r\n]//g;
+# 			}
+# 
+# 			my $local_port = 0;
+# 
+# 			my $shref = HashNet::MP::SharedRef->new($LOCALPORT_DB);
+# 			$shref->lock_file;
+# 			$shref->update_begin;
+# 
+# 			for my $port (3729 .. 65536)
+# 			{
+# 				next if qx{ lsof -i :$port };
+# 				if(my $data = $shref->{inuse}->{$port})
+# 				{
+# 					my $other_peer = HashNet::MP::PeerList->get_peer_by_id($data->{id});
+# 					if($other_peer)
+# 					{
+# 						my $min_check_time = 60; # seconds
+# 						if(time - $data->{timestamp} < $min_check_time)
+# 						{
+# 							debug "SocketWorker: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is within the safety window for this port\n";
+# 							next;
+# 						}
+# 
+# 						if($other_peer->is_online) # is_online() checks SocketWorker PID as well
+# 						{
+# 							debug "SocketWorker: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is online\n";
+# 							next;
+# 						}
+# 
+# 						# Port was marked as inuse, but didnt pass checks, so delete data and we'll use it
+# 						delete $shref->{inuse}->{$port};
+# 					}
+# 				}
+# 
+# 				debug "SocketWorker: _open_tunnel: Found open local port $port, using for tunnel\n";
+# 
+# 				$local_port = $port;
+# 				$shref->{inuse}->{$port} = { id=> $self->{id}, timestamp => time() };
+# 
+# 				last;
+# 			}
+# 
+# 			#trace "SocketWorker: _open_tunnel: Writing data to ".$shref->file.": ".Dumper($shref)."\n";
+# 			$shref->update_end;
+# 			$shref->unlock_file;
+# 			#trace "SocketWorker: _open_tunnel: Writing data to ".$shref->file." done\n";
+# 
+# 			if(!$local_port)
+# 			{
+# 				die "SocketWorker: _open_tunnel: sshtun: Cannot find an open port for the local end of the tunnel";
+# 			}
+# 
+# 			# This is the host:port we return to the caller, _open_socket,
+# 			# so it can connect to the local side of the tunnel
+# 			$host = "localhost:${local_port}";
+# 
+# 			my $ssh_tun_arg = "-L $local_port:$args{host}:$args{port}";
+# 
+# 			trace "SocketWorker: _open_tunnel: Opening SSH tunnel via $args{tunhost} to $args{host}:$args{port}, local port $local_port\n";
+# 			#debug "SocketWorker: _open_socket: \$ssh_tun_arg: '$ssh_tun_arg'\n";
+# 
+# 			my $pid = fork();
+# 			if(!$pid)
+# 			{
+# 				# Isolate the Expect process in its own fork so that
+# 				# if the process that called _open_tunnel dies (e.g. when called in a fork from MessageHub)
+# 				# the tunnel stays up.
+# 
+# 				$0 = "$0 [Tunnel to $args{host}:$args{port} via $args{tunhost}]";
+# 				my $ssh = Net::SSH::Expect->new (
+# 					host		=> $args{tunhost},
+# 					password	=> $args{pass},
+# 					user		=> $args{user},
+# 					raw_pty		=> 1,
+# 					ssh_option	=> $ssh_tun_arg,
+# 				);
+# 
+# 				$ssh->login();
+# 				sleep 60 *  60 # minutes
+# 					 *  24 # hours
+# 					 * 365 # days
+# 					 *  10;# years
+# 				exit;
+# 			}
+# 			else
+# 			{
+# 				$self->{tunnel_pid} = $pid;
+# 				HashNet::MP::PeerList->update_peer($self);
+# 			}
+# 
+# 			my $timeout = 30;
+# 			my $time = time();
+# 			my $speed = 0.5;
+# 			# Wawit for max $timeout seconds if $local_port is not open
+# 			sleep $speed while time - $time < $timeout and not qx{ lsof -i :${local_port} };
+# 			if(!qx{ lsof -i :${local_port} })
+# 			{
+# 				warn "SocketWorker: _open_tunnel: Local port $local_port for SSH tunnel never opened";
+# 			}
+# 		}
+# 
+# 		return $host;
+# 	}
+# 
+# 	sub has_tunnel
+# 	{
+# 		my $self = shift;
+# 		$self->load_changes();
+# 		return $self->{tunnel_pid} if $self->{tunnel_pid} && kill(0, $self->{tunnel_pid});
+# 		return 0;
+# 	}
+# 
+# 	sub close_tunnel
+# 	{
+# 		my $self = shift;
+# 		if($self->has_tunnel())
+# 		{
+# 			trace "SocketWorker: close_tunnel: Closing tunnel thread $self->{tunnel_pid}\n";
+# 			kill 15, $self->{tunnel_pid};
+# 
+# 			delete $self->{tunnel_pid};
+# 		}
+# 	}
+# 
+# 	sub _open_socket
+# 	{
+# 		my $self = shift;
+# 
+# 		# Make sure we reflect our state correctly
+# 		$self->set_online(0);
+# 
+# 		my $host = $self->{host};
+# 		return undef if !$host;
+# 
+# 		$host = $self->_open_tunnel($host)
+# 			if $host =~ /^sshtun:/;
+# 
+# 		my $port = 8031;
+# 		if($host =~ /^(.*?):(\d+)$/)
+# 		{
+# 			$host = $1;
+# 			$port = $2;
+# 		}
+# 
+# 		# create a tcp connection to the specified host and port
+# 		my $handle = IO::Socket::INET->new(Proto  => "tcp",
+# 						PeerAddr  => $host,
+# 						PeerPort  => $port);
+# 		if(!$handle)
+# 		{
+# 			error "SocketWorker: _open_socket: Can't connect to port $port on $host: $!\n";
+# 			return undef;
+# 		}
+# 
+# 		$handle->autoflush(1); # so output gets there right away
+# 
+# 		return $handle;
+# 	}
+# 
 	sub new
 	{
 		my $class = shift;
@@ -1083,7 +1271,8 @@ use common::sense;
 			foreach my $msg (@return_list)
 			{
 				my $pong_time = $msg->{data}->{pong_time};
-				my $delta = $pong_time - $start_time;
+				#my $delta = $pong_time - $start_time;
+				my $delta = $msg->{_rx_time} - $start_time;
 
 				my $out =
 				{
@@ -1097,6 +1286,8 @@ use common::sense;
 				push @output, $out;
 				info "SocketWorker: Broadcast Ping: ".sprintf('%.03f', $delta)." sec to '$out->{node_info}->{name}' \t {$out->{node_info}->{uuid}} \n";
 			}
+
+			@output = sort { $a->{time} cmp $b->{time} } @output;
 
 			return @output;
 #		}
@@ -1628,14 +1819,16 @@ use common::sense;
 	{
 		my $self = shift;
 
-		trace "SocketWorker: Starting ping_loop\n";
+		trace "SocketWorker: Starting ping_loop, waiting 5 sec before first ping\n";
+		sleep 5;
+		
 		while(1)
 		{
 			local *@;
 			eval
 			{
 				#trace "MessageSocketBase: tx_loop: mark1\n";
-				my $ping_max_time = 5;
+				my $ping_max_time = 15;
 
 				# Do the real work
 				my $ping_uuid = $self->peer->uuid;
@@ -1650,7 +1843,9 @@ use common::sense;
 				{
 					trace "SocketWorker: ping_loop: Ping failed: ".$self->peer->{name}."{$ping_uuid} did not respond within $ping_max_time seconds, exiting threads\n";
 					$self->shutdown(0);
-					kill 15, $self->{ping_loop_parent_pid};
+					trace "SocketWorker: ping_loop: Killing parent ID: $self->{ping_loop_parent_pid}\n";
+					kill 15, $self->{ping_loop_parent_pid} if $self->{ping_loop_parent_pid};
+					last;
 				}
 				else
 				{
@@ -1664,11 +1859,11 @@ use common::sense;
 
 			unless(kill 0, $self->{ping_loop_parent_pid})
 			{
-				trace "SocketWorker: ping_loop; Parent pid $self->{ping_loop_parent_pid} gone away, not listening anymore\n";
+				trace "SocketWorker: ping_loop: Parent pid $self->{ping_loop_parent_pid} gone away, not listening anymore\n";
 				last;
 			}
 
-			sleep 15;
+			sleep 15; #60 * 16;
 		}
 		trace "SocketWorker: Leaving ping_loop\n";
 	}

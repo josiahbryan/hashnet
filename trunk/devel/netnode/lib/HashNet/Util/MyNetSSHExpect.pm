@@ -527,6 +527,12 @@ sub close {
 	return 1;
 }
 
+sub DESTROY
+{
+	my $self = shift;
+	eval { $self->close(); }
+}
+
 
 # returns
 #	reference: the internal Expect object used to manage the ssh connection.

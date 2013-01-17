@@ -388,7 +388,7 @@
 		$self->disconnect_handler();
 		
 		debug "MessageSocketBase: process_loop: Killing tx_pid $self->{tx_pid}\n";
-		kill 15, $self->{tx_pid};
+		kill 15, $self->{tx_pid} if $self->{tx_pid};
 		
 		die "Quitting process due to error above" if $die_please;
 	}

@@ -565,6 +565,7 @@ package HashNet::MP::GlobalDB;
 	{
 		my $self = shift;
 		if($self->{rx_pid} &&
+		   $self->{rx_pid}->{pid} &&
 		   $self->{rx_pid}->{started_from} == $$)
 		{
 			trace "GlobalDB: DESTROY: Killing rx_pid $self->{rx_pid}->{pid}\n";
