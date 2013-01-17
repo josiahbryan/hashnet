@@ -330,14 +330,14 @@
 	sub is_sw_dead
 	{
 		my $self = shift;
-		return ! (kill 0, $self->{sw}->{child_pid});
+		return ! (kill 0, $self->{sw}->{rx_pid});
 	}
 
 	sub kill_sw
 	{
 		my $self = shift;
 		# Kill both threads of the socketworker incase just the primary went away
-		kill 15, $self->{sw}->{child_pid};
+		kill 15, $self->{sw}->{rx_pid};
 		kill 15, $self->{sw}->state_handle->{tx_loop_pid};
 		delete $self->{sw};
 	}

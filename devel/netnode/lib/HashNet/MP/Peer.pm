@@ -9,7 +9,7 @@
 	use HashNet::MP::SocketWorker;
 	use HashNet::Util::Logging;
 	use HashNet::Util::MyNetSSHExpect; # for ssh tunnels
-	
+
 	our $LOCALPORT_DB = ".sshtun.portnums";
 	
 	sub from_hash
@@ -80,7 +80,7 @@
 		
 		return $self;
 	}
-	
+
 	sub _open_tunnel
 	{
 		my ($self, $host) = @_;
@@ -91,7 +91,7 @@
 		if($host =~ /^sshtun:(.*?):(.*?)@(.*?)\/(.*?):(.*)$/)
 		{
 			my $orighost = $host;
-			
+
 			my %args = (
 				user 	=> $1,
 				pass	=> $2,
@@ -109,11 +109,11 @@
 			}
 
 			my $local_port = 0;
-			
+
 			my $shref = HashNet::MP::SharedRef->new($LOCALPORT_DB);
 			$shref->lock_file;
 			$shref->update_begin;
-			
+
 			for my $port (3729 .. 65536)
 			{
 				next if qx{ lsof -i :$port };
@@ -122,32 +122,35 @@
 					my $other_peer = HashNet::MP::PeerList->get_peer_by_id($data->{id});
 					if($other_peer)
 					{
-						my $min_check_time = 60; # # seconds
-						if(time - $data->{timestamp} < $min_check_time)
+						if($other_peer->{id} != $self->{id})
 						{
-							debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is within the safety window for this port\n";
-							next;  
+							my $min_check_time = 60; # # seconds
+							if(time - $data->{timestamp} < $min_check_time)
+							{
+								debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is within the safety window for this port\n";
+								next;
+							}
+
+							if($other_peer->is_online) # is_online() checks PID as well
+							{
+								debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is online\n";
+								next;
+							}
 						}
-						
-						if($other_peer->is_online) # is_online() checks PID as well
-						{
-							debug "Peer: _open_tunnel: Port $port open, but other peer '$other_peer->{name}' (ID $data->{id}) is online\n";
-							next;
-						}
-						
+
 						# Port was marked as inuse, but didnt pass checks, so delete data and we'll use it
 						delete $shref->{inuse}->{$port};
 					}
 				}
-				
+
 				debug "Peer: _open_tunnel: Found open local port $port, using for tunnel\n";
-				
+
 				$local_port = $port;
 				$shref->{inuse}->{$port} = { id=> $self->{id}, timestamp => time() };
-				
+
 				last;
 			}
-			
+
 			#trace "Peer: _open_tunnel: Writing data to ".$shref->file.": ".Dumper($shref)."\n";
 			$shref->update_end;
 			$shref->unlock_file;
@@ -157,15 +160,28 @@
 			{
 				die "Peer: _open_tunnel: sshtun: Cannot find an open port for the local end of the tunnel";
 			}
-			
+
 			# This is the host:port we return to the caller, _open_socket,
 			# so it can connect to the local side of the tunnel
 			$host = "localhost:${local_port}";
-			
+
 			my $ssh_tun_arg = "-L $local_port:$args{host}:$args{port}";
 
 			trace "Peer: _open_tunnel: Opening SSH tunnel via $args{tunhost} to $args{host}:$args{port}, local port $local_port\n";
 			#debug "Peer: _open_socket: \$ssh_tun_arg: '$ssh_tun_arg'\n";
+
+			$shref->lock_file;
+			$shref->load_changes;
+			if($shref->{tunnel_pids}->{$orighost})
+			{
+				trace "Peer: _open_tunnel: Previous PID for host: $shref->{tunnel_pids}->{$orighost} for '$orighost', killing with sig 15\n";
+				kill 15, $shref->{tunnel_pids}->{$orighost} if $shref->{tunnel_pids}->{$orighost};
+				delete $shref->{tunnel_pids}->{$orighost};
+
+				$shref->save_data;
+			}
+			$shref->unlock_file;
+			
 
 			my $pid = fork();
 			if(!$pid)
@@ -173,7 +189,11 @@
 				# Isolate the Expect process in its own fork so that
 				# if the process that called _open_tunnel dies (e.g. when called in a fork from MessageHub)
 				# the tunnel stays up.
-				
+
+				$shref->update_begin;
+				$shref->{tunnel_pids}->{$orighost} = $$;
+				$shref->update_end;
+
 				$0 = "$0 [Tunnel to $args{host}:$args{port} via $args{tunhost}]";
 				my $ssh = Net::SSH::Expect->new (
 					host		=> $args{tunhost},
@@ -182,7 +202,7 @@
 					raw_pty		=> 1,
 					ssh_option	=> $ssh_tun_arg,
 				);
-	
+
 				$ssh->login();
 				sleep 60 *  60 # minutes
 					 *  24 # hours
@@ -195,21 +215,21 @@
 				$self->{tunnel_pid} = $pid;
 				HashNet::MP::PeerList->update_peer($self);
 			}
-			
+
 			my $timeout = 30;
 			my $time = time();
 			my $speed = 0.5;
-			# Wawit for max $timeout seconds if $local_port is not open 
+			# Wawit for max $timeout seconds if $local_port is not open
 			sleep $speed while time - $time < $timeout and not qx{ lsof -i :${local_port} };
 			if(!qx{ lsof -i :${local_port} })
 			{
-				warn "Peer: _open_tunnel: Local port $local_port for SSH tunnel never opened";	
+				warn "Peer: _open_tunnel: Local port $local_port for SSH tunnel never opened";
 			}
 		}
-		
+
 		return $host;
 	}
-	
+
 	sub has_tunnel
 	{
 		my $self = shift;
@@ -217,39 +237,39 @@
 		return $self->{tunnel_pid} if $self->{tunnel_pid} && kill(0, $self->{tunnel_pid});
 		return 0;
 	}
-	
+
 	sub close_tunnel
 	{
 		my $self = shift;
 		if($self->has_tunnel())
 		{
 			trace "Peer: close_tunnel: Closing tunnel thread $self->{tunnel_pid}\n";
-			kill 15, $self->{tunnel_pid};
-			
+			kill 15, $self->{tunnel_pid} if $self->{tunnel_pid};
+
 			delete $self->{tunnel_pid};
 		}
 	}
-	
+
 	sub _open_socket
 	{
 		my $self = shift;
-		
+
 		# Make sure we reflect our state correctly
 		$self->set_online(0);
-		
+
 		my $host = $self->{host};
 		return undef if !$host;
 
 		$host = $self->_open_tunnel($host)
 			if $host =~ /^sshtun:/;
-		
+
 		my $port = 8031;
 		if($host =~ /^(.*?):(\d+)$/)
 		{
 			$host = $1;
 			$port = $2;
 		}
-		
+
 		# create a tcp connection to the specified host and port
 		my $handle = IO::Socket::INET->new(Proto  => "tcp",
 						PeerAddr  => $host,
@@ -259,9 +279,9 @@
 			error "Peer: _open_socket: Can't connect to port $port on $host: $!\n";
 			return undef;
 		}
-		
+
 		$handle->autoflush(1); # so output gets there right away
-		
+
 		return $handle;
 	}
 

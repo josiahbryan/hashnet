@@ -7,7 +7,7 @@
 	use YAML::Tiny; # for load_config/save_config
 	use UUID::Generator::PurePerl; # for node_info
 
-	our $VERSION = 0.0326;
+	our $VERSION = 0.033;
 	
 	use HashNet::MP::SocketWorker;
 	use HashNet::MP::LocalDB;
@@ -28,6 +28,8 @@
 	use File::Path qw/mkpath/;
 
 	sub MSG_CLIENT_RECEIPT { 'MSG_CLIENT_RECEIPT' }
+
+	$SIG{CHLD} = 'IGNORE';
 
 	our $CONFIG_FILE = [qw#hashnet-hub.conf /etc/hashnet-hub.conf#];
 	our $DEFAULT_CONFIG =
@@ -76,7 +78,7 @@
 		$self->connect_remote_hubs();
 
 		# Start timer loop to watch for dead connections
-		$self->start_timer_loop();
+		$self->start_reconnect_loop();
 		
 		# NOTE Disabling router because moving route_message() to a SocketWorker message handler plugin
 		# Start the router
@@ -96,7 +98,7 @@
 		);
 	}
 	
-	sub start_timer_loop
+	sub start_reconnect_loop
 	{
 		my $self = shift;
 		
@@ -105,18 +107,19 @@
 		die "Fork failed" unless defined($kid);
 		if ($kid == 0)
 		{
-			$0 = "$0 [Timer Event Loop]";
-			
+			my $orig_app = $0;
+			$0 = "$0 [Reconnect Loop]";
+
 			info "MessageHub: Timer Event Loop PID $$ running as '$0'\n";
-			RESTART_TIMER_LOOP:
+			RESTART_reconnect_loop:
 			eval
 			{
-				$self->timer_loop();
+				$self->reconnect_loop($orig_app);
 			};
 			if($@)
 			{
-				error "MessageHub: timer_loop() crashed: $@";
-				goto RESTART_TIMER_LOOP;
+				error "MessageHub: reconnect_loop() crashed: $@";
+				goto RESTART_reconnect_loop;
 			}
 			info "Timer PID $$ complete, exiting\n";
 			exit 0;
@@ -173,22 +176,15 @@
 		return $code_sub;
 	}
 	
-	sub timer_loop
+	sub reconnect_loop
 	{
 		my $self = shift;
-		
-		use AnyEvent;
-		use AnyEvent::Impl::Perl; # explicitly include this so it's included when we buildpacked.pl
-		use AnyEvent::Loop;
-		
-		# Every 15 minutes, update time via SNTP
-		set_repeat_timeout 60.0 * 15.0, sub
-		{
-			HashNet::Util::SNTP->sync_time();
-		};
-		
-		# Every X seconds, try to reconnect to a hub that is offline
-		set_repeat_timeout 15.0, sub
+		my $orig_app = shift;
+		sleep 15;
+
+		logmsg "TRACE", "MessageHub: Starting reconnect loop...\n";
+	
+		while(1)
 		{
 			my @list = $self->build_hub_list();
 		
@@ -198,96 +194,25 @@
 			{
 				next if !$peer || !$peer->host;
 				next if $peer->is_online;
-
-				trace "MessageHub: Reconnect Check: Attempting to reconnect to remote hub '$peer->{host}'\n";
-				my $worker = $peer->open_connection($self->node_info);
-				if(!$worker)
+				if(!fork)
 				{
-					error "MessageHub: Reconnect Check: Error reconnecting to hub '$peer->{host}'\n";
-				}
-				else
-				{
-					trace "MessageHub: Reconnect Check: Connection reestablished to hub '$peer->{host}'\n";
+					$0 = "$orig_app [Reconnect: $peer->{host}]";
+					trace "MessageHub: Reconnect Check: Attempting to reconnect to remote hub '$peer->{host}'\n";
+					my $worker = $peer->open_connection($self->node_info);
+					if(!$worker)
+					{
+						error "MessageHub: Reconnect Check: Error reconnecting to hub '$peer->{host}'\n";
+					}
+					else
+					{
+						trace "MessageHub: Reconnect Check: Connection reestablished to hub '$peer->{host}'\n";
+					}
+					exit;
 				}
 			}
+
+			sleep 15;
 		};
-		
-# 		# NOTE DisabledForTesting
-# 		my $check_sub = set_repeat_timeout 60.0, sub
-# 		#my $check_sub = set_repeat_timeout 1.0, sub
-# 		#my $check_sub = sub
-# 		{
-# 			logmsg "INFO", "PeerServer: Checking status of peers\n";
-# 	
-# 			my @peers = @{ $engine->peers };
-# 			#@peers = (); # TODO JUST FOR DEBUGGING
-# 	
-# 			$self->engine->begin_batch_update();
-# 	
-# 			foreach my $peer (@peers)
-# 			{
-# 				$peer->load_changes();
-# 	
-# 				#logmsg "DEBUG", "PeerServer: Peer check: $peer->{url}: Locked, checking ...\n";
-# 	
-# 				# Make sure the peer is online, check latency, etc
-# 	
-# 				# NOTE DisabledForTesting
-# 				$peer->update_distance_metric();
-# 	
-# 				# Polling moved above
-# 				#$peer->poll();
-# 	
-# 				# NOTE DisabledForTesting
-# 				$peer->put_peer_stats(); #$engine);
-# 	
-# 				# NOTE DisabledForTesting
-# 				# Do the update after pushing off any pending transactions so nothing gets 'stuck' here by a failed update
-# 				#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - checking software versions.\n";
-# 				$self->update_software($peer);
-# 				#logmsg "INFO", "PeerServer: Peer check: $peer->{url} - version check done.\n";
-# 			}
-# 	
-# 			# NOTE DisabledForTesting
-# 			{
-# 				my $inf  = $self->{node_info};
-# 				my $uuid = $inf->{uuid};
-# 				my $key_path = '/global/nodes/'. $uuid;
-# 	
-# 				if(-f $self->{node_info_changed_flag_file})
-# 				{
-# 					unlink $self->{node_info_changed_flag_file};
-# 					#logmsg "DEBUG", "PeerServer: key_path: '$key_path'\n";
-# 					foreach my $key (keys %$inf)
-# 					{
-# 						my $put_key = $key_path . '/' . $key;
-# 						my $val = $inf->{$key};
-# 						#logmsg "DEBUG", "PeerServer: Putting '$put_key' => '$val'\n";
-# 						$self->engine->put($put_key, $val);
-# 					}
-# 				}
-# 	
-# 				my $db = $engine->tx_db;
-# 				my $cur_tx_id = $db->length() -1;
-# 	
-# 				$self->engine->put("$key_path/cur_tx_id", $cur_tx_id)
-# 					if ($self->engine->get("$key_path/cur_tx_id")||0) != ($cur_tx_id||0);
-# 			}
-# 	
-# 			$self->engine->end_batch_update();
-# 	
-# 			logmsg "INFO", "PeerServer: Peer check complete\n\n";
-# 		};
-# 	
-# 		$check_sub->();
-		
-		logmsg "TRACE", "MessageHub: Starting timer event loop...\n";
-	
-		# run the event loop, (should) never return
-		AnyEvent::Loop::run();
-		
-		# we're in a fork, so exit
-		exit(0);
 	}
 	
 	sub check_config_items
@@ -355,6 +280,19 @@
 			
 			#push @list, @peers;
 		}
+
+		my %peers_by_host = ();
+		my @tmp;
+		foreach my $peer (@list)
+		{
+			if(!$peers_by_host{$peer->{host}})
+			{
+				$peers_by_host{$peer->{host}} = 1;
+				push @tmp, $peer;
+			}
+		}
+		@list = @tmp;
+		
 		
 		return @list;
 	}
@@ -657,13 +595,14 @@
 # 		
 # 	}
 	
-	sub stop_timer_loop
+	sub stop_reconnect_loop
 	{
 		my $self = shift;
 		if($self->{timer_pid} &&
+		   $self->{timer_pid}->{pid} && 
 		   $self->{timer_pid}->{started_from} == $$)
 		{
-			trace "MessageHub: stop_timer_loop(): Killing timer loop pid $self->{timer_pid}->{pid}\n";
+			trace "MessageHub: stop_reconnect_loop(): Killing timer loop pid $self->{timer_pid}->{pid}\n";
 			kill 15, $self->{timer_pid}->{pid};
 		}
 	}
@@ -672,7 +611,7 @@
 	{
 		my $self = shift;
 		#$self->stop_router();
-		$self->stop_timer_loop();
+		$self->stop_reconnect_loop();
 	}
 	
 	sub route_table
@@ -1009,7 +948,9 @@
 		}
 		elsif($msg->{to} eq $self_uuid)
 		{
-			debug "MessageHub: route_message: ".$msg->{type}."{$msg->{uuid}} - destined for this hub, evaporating\n";
+			my $peer = HashNet::MP::PeerList->get_peer_by_uuid($msg->{curhop});
+			my $cname = $peer ? $peer->{name} : '?';
+			debug "MessageHub: route_message: [evaporating] ".$msg->{type}."{$msg->{uuid}}: '$msg->{data}' (lasthop: ${cname}{$msg->{curhop}}  destined for this hub, evaporating\n";
 		}
 		else
 		{
