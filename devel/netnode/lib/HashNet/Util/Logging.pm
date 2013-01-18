@@ -291,38 +291,22 @@ package HashNet::Util::Logging;
 		unlink($file.'.lock');
 	}
 
-#	sub can_signal { kill 0, shift() }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	sub log_kill($)
+	sub can_signal { kill 0, shift }
+	
+	sub log_kill
 	{
 		my $pid = shift;
+		my $msg = shift;
 		my $sig = 15; #shift || 15;
 		my ($package) = caller(0);
 		my ($base,$name) = $package =~ /^(.*?::)?([^\:]+)$/;
-		trace "$name: log_kill: Killing '$pid', called from: ".called_from()."\n";
-		warn "log_kill: Killing pid '$pid', called from: ".called_from()."\n";
+		#trace "$name: log_kill: Killing '$pid', called from: ".called_from()."\n";
+		$pid = int($pid);
+		return if !$pid;
+# 		my $ps_info = `ps --no-headers -o command $pid`;
+# 		$ps_info =~ s/[\r\n]//g;
+# 		warn "log_kill: Killing pid '$pid'".($msg?" ($msg)":"").", \"$ps_info\", called from: ".called_from()."\n";
 		return kill $sig, $pid;
 	}
-
-# 	sub can_signal
-# 	{
-# 		my $pid = shift;
-# 		return kill 0, $pid;
-# 	}
 };
 1
