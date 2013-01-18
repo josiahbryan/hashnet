@@ -77,12 +77,11 @@
 		# Connect to remote hubs
 		$self->connect_remote_hubs();
 
-		# Start timer loop to watch for dead connections
+		# Start reconnect loop to watch for dead connections
 		$self->start_reconnect_loop();
 		
-		# NOTE Disabling router because moving route_message() to a SocketWorker message handler plugin
 		# Start the router
-		#$self->start_router() if $opts{auto_start};
+		$self->start_router() if $opts{auto_start};
 
 		# Start the server process
 		$self->start_server() if $opts{auto_start};
@@ -102,7 +101,7 @@
 	{
 		my $self = shift;
 		
-		# Fork timer loop
+		# Fork reconnect loop
 		my $kid = fork();
 		die "Fork failed" unless defined($kid);
 		if ($kid == 0)
@@ -110,7 +109,7 @@
 			my $orig_app = $0;
 			$0 = "$0 [Reconnect Loop]";
 
-			info "MessageHub: Timer Event Loop PID $$ running as '$0'\n";
+			info "MessageHub: Reconnect Loop PID $$ running as '$0'\n";
 			RESTART_reconnect_loop:
 			eval
 			{
@@ -442,7 +441,7 @@
 
 		return if ! $self->{node_info_changed_flag_file};
 
-		# The timer loop will check for the existance of this file and push the node info into the storage engine
+		# The reconnect loop will check for the existance of this file and push the node info into the storage engine
 		#open(FILE,">$self->{node_info_changed_flag_file}") || warn "Unable to write to $self->{node_info_changed_flag_file}: $!";
 		#print FILE "1\n";
 		#close(FILE);
@@ -560,62 +559,62 @@
 		#exit();
 	}
 
-# 	sub start_router
-# 	{
-# 		my $self = shift;
-# 		my $no_fork = shift || 0;
-# 		if($no_fork)
-# 		{
-# 			$self->router_process_loop();
-# 		}
-# 		else
-# 		{
-# 			# Fork processing thread
-# 			my $kid = fork();
-# 			die "Fork failed" unless defined($kid);
-# 			if ($kid == 0)
-# 			{
-# 				$0 = "$0 [Message Router]";
-# 				
-# 				info "MessageHub: Router PID $$ running as '$0'\n";
-# 				RESTART_PROC_LOOP:
-# 				eval
-# 				{
-# 					$self->router_process_loop();
-# 				};
-# 				if($@)
-# 				{
-# 					error "MessageHub: router_process_loop() crashed: $@";
-# 					goto RESTART_PROC_LOOP;
-# 				}
-# 				info "MessageHub: Router PID $$ complete, exiting\n";
-# 				exit 0;
-# 			}
-# 
-# 			# Parent continues here.
-# 			while ((my $k = waitpid(-1, WNOHANG)) > 0)
-# 			{
-# 				# $k is kid pid, or -1 if no such, or 0 if some running none dead
-# 				my $stat = $?;
-# 				debug "Reaped $k stat $stat\n";
-# 			}
-# 
-# 			$self->{router_pid} = { pid => $kid, started_from => $$ };
-# 		}
-# 	}
-# 	
-# 	sub stop_router
-# 	{
-# 		my $self = shift;
-# 		if($self->{router_pid} &&
-# 		   $self->{router_pid}->{started_from} == $$)
-# 		{
-# 			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}->{pid}\n";
-# 			kill 15, $self->{router_pid}->{pid};
-# 		}
-# 		
-# 		
-# 	}
+	sub start_router
+	{
+		my $self = shift;
+		my $no_fork = shift || 0;
+		if($no_fork)
+		{
+			$self->router_process_loop();
+		}
+		else
+		{
+			# Fork processing thread
+			my $kid = fork();
+			die "Fork failed" unless defined($kid);
+			if ($kid == 0)
+			{
+				$0 = "$0 [Message Router]";
+
+				info "MessageHub: Router PID $$ running as '$0'\n";
+				RESTART_PROC_LOOP:
+				eval
+				{
+					$self->router_process_loop();
+				};
+				if($@)
+				{
+					error "MessageHub: router_process_loop() crashed: $@";
+					goto RESTART_PROC_LOOP;
+				}
+				info "MessageHub: Router PID $$ complete, exiting\n";
+				exit 0;
+			}
+
+			# Parent continues here.
+			while ((my $k = waitpid(-1, WNOHANG)) > 0)
+			{
+				# $k is kid pid, or -1 if no such, or 0 if some running none dead
+				my $stat = $?;
+				debug "Reaped $k stat $stat\n";
+			}
+
+			$self->{router_pid} = { pid => $kid, started_from => $$ };
+		}
+	}
+
+	sub stop_router
+	{
+		my $self = shift;
+		if($self->{router_pid} &&
+		   $self->{router_pid}->{started_from} == $$)
+		{
+			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}->{pid}\n";
+			kill 15, $self->{router_pid}->{pid};
+		}
+
+
+	}
 	
 	sub stop_reconnect_loop
 	{
@@ -624,7 +623,7 @@
 		   $self->{timer_pid}->{pid} && 
 		   $self->{timer_pid}->{started_from} == $$)
 		{
-			trace "MessageHub: stop_reconnect_loop(): Killing timer loop pid $self->{timer_pid}->{pid}\n";
+			trace "MessageHub: stop_reconnect_loop(): Killing reconnect loop pid $self->{timer_pid}->{pid}\n";
 			kill 15, $self->{timer_pid}->{pid};
 		}
 	}
@@ -632,7 +631,7 @@
 	sub DESTROY
 	{
 		my $self = shift;
-		#$self->stop_router();
+		$self->stop_router();
 		$self->stop_reconnect_loop();
 	}
 	
@@ -645,50 +644,51 @@
 		return $ref;
 	}
 	
-# 	sub router_process_loop
-# 	{
-# 		my $self = shift;
-# 
-# 		#trace "MessageHub: Starting router_process_loop()\n";
-# 		my $self_uuid  = $self->node_info->{uuid};
-# 		
-# 		while(1)
-# 		{
-# 			#my @list = $self->pending_messages;
-# 
-# 			my @list;
-# 
-# 			#$self->incoming_queue->lock_file;
-# 			#exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
-# 			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid ) } );
-# 			
-# 			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
-# 
-# 			if(@list)
-# 			{
-# 				if($self->outgoing_queue->begin_batch_update)
-# 				{
-# 					
-# 					foreach my $msg (@list)
-# 					{
-# 						local *@;
-# 						eval { $self->route_message($msg); };
-# 						trace "MessageHub: Error in route_message(): $@" if $@;
-# 					}
-# 		
-# 					#$self->incoming_queue->del_batch(\@list);
-# 					#$self->incoming_queue->unlock_file;
-# 					$self->outgoing_queue->end_batch_update;
-# 				}
-# 				else
-# 				{
-# 					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()\n";
-# 				}
-# 			}
-# 
-# 			sleep 0.1;
-# 		}
-# 	}
+	sub router_process_loop
+	{
+		my $self = shift;
+
+		#trace "MessageHub: Starting router_process_loop()\n";
+		my $self_uuid  = $self->node_info->{uuid};
+
+		while(1)
+		{
+			#my @list = $self->pending_messages;
+
+			my @list;
+
+			$self->incoming_queue->lock_file;
+			exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid, no_del => 1) } );
+			#exec_timeout( 3.0, sub { @list = pending_messages(incoming, nxthop => $self_uuid ) } );
+
+			#trace "MessageHub: router_process_loop: ".scalar(@list)." message to process\n";
+
+			if(@list)
+			{
+				if($self->outgoing_queue->begin_batch_update)
+				{
+
+					foreach my $msg (@list)
+					{
+						local *@;
+						eval { push @del_batch, $msg if $self->route_message($msg); };
+						trace "MessageHub: Error in route_message(): $@" if $@;
+					}
+
+					$self->incoming_queue->del_batch(\@list);
+					$self->incoming_queue->unlock_file;
+					
+					$self->outgoing_queue->end_batch_update;
+				}
+				else
+				{
+					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()\n";
+				}
+			}
+
+			sleep 1.0;
+		}
+	}
 
 	sub register_router
 	{
@@ -708,10 +708,13 @@
 			#trace "MessageHub: catch all handler: Received message ${type}{$msg->{uuid}}\n";
 			
 			return 0 if $type eq 'MSG_NODE_INFO';
-			
-			$self->route_message($msg);
 
-			return 1;
+			# If route_message failes to lock outgoing queue, it
+			# will return 0, allowing the msg to fall into the
+			# incoming_queue, which will then be picked up by the router_process_loop
+			return 1 if $self->route_message($msg);
+
+			return 0;
 		});
 	}
 	
@@ -1058,53 +1061,66 @@
 			@recip_list = grep { $_->{online} } @recip_list;
 		}
 
-		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
-		#	if @recip_list;
+		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+		;#	if @recip_list;
 
 		#debug Dumper $msg, \@peers;
 
-		foreach my $peer (@recip_list)
+		if($self->outgoing_queue->begin_batch_update)
 		{
-			next if !defined $peer->uuid;
-			
-			my $dest_uuid = $msg->{bcast} ? $peer->uuid : $msg->{to};
-# 			if(check_route_hist($msg->{hist}, $dest_uuid))
-# 			{
-# 				info "MessageHub: route_message: NOT creating envelope to $dest_uuid, history says it was already sent there.\n"; #: ".Dumper($envelope);
-# 				next;
-# 			}
-			
-			my @args =
-			(
-				$msg->{data},
-				uuid	=> $msg->{uuid},
-				hist	=> clean_ref($msg->{hist}),
+		
+			foreach my $peer (@recip_list)
+			{
+				next if !defined $peer->uuid;
 
-				curhop	=> $self_uuid,
-				nxthop	=> $peer->uuid,
+				my $dest_uuid = $msg->{bcast} ? $peer->uuid : $msg->{to};
+	# 			if(check_route_hist($msg->{hist}, $dest_uuid))
+	# 			{
+	# 				info "MessageHub: route_message: NOT creating envelope to $dest_uuid, history says it was already sent there.\n"; #: ".Dumper($envelope);
+	# 				next;
+	# 			}
 
-				# Rewrwite the 'to' address if the msg is a broadcast msg AND the next hop is a 'client' because
-				# clients just check the 'to' field to pickup messages
-				# Clients do NOT check 'nxthop', just 'to' when picking up messages from the queue because
-				# msgs could reach the client that are not broadcast and not to the client - they just
-				# got sent to the client because the hub didn't know where the client was
-				# connected - so we dont want the client to work with those messages.
-				#to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
-				to	=> $dest_uuid,
-				from	=> $msg->{from},
+				my @args =
+				(
+					$msg->{data},
+					uuid	=> $msg->{uuid},
+					hist	=> clean_ref($msg->{hist}),
 
-				bcast	=> $msg->{bcast},
-				sfwd	=> $msg->{sfwd},
-				type	=> $msg->{type},
+					curhop	=> $self_uuid,
+					nxthop	=> $peer->uuid,
 
-				_att	=> $msg->{_att} || undef,
-			);
-			
-			my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
+					# Rewrwite the 'to' address if the msg is a broadcast msg AND the next hop is a 'client' because
+					# clients just check the 'to' field to pickup messages
+					# Clients do NOT check 'nxthop', just 'to' when picking up messages from the queue because
+					# msgs could reach the client that are not broadcast and not to the client - they just
+					# got sent to the client because the hub didn't know where the client was
+					# connected - so we dont want the client to work with those messages.
+					#to	=> $msg->{bcast} && $peer->{type} eq 'client' ? $peer->uuid : $msg->{to},
+					to	=> $dest_uuid,
+					from	=> $msg->{from},
 
-			# TODO Rewrite for custom SW outgoing queue
-			$self->outgoing_queue->add_row($new_env);
-			#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+					bcast	=> $msg->{bcast},
+					sfwd	=> $msg->{sfwd},
+					type	=> $msg->{type},
+
+					_att	=> $msg->{_att} || undef,
+				);
+
+				my $new_env = HashNet::MP::SocketWorker->create_envelope(@args);
+
+				# TODO Rewrite for custom SW outgoing queue
+				$self->outgoing_queue->add_row($new_env);
+				#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': Next envelope: ".Dumper($new_env);
+			}
+
+			$self->outgoing_queue->end_batch_update;
+
+			return 1;
+		}
+		else
+		{
+			info "MessageHub: route_message: Failed to lock outgoing_queue, failling thru\n";
+			return 0;
 		}
 	}
 };

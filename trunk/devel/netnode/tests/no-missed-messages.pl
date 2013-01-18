@@ -59,11 +59,13 @@ else
 	
 	$ch->wait_for_start;
 
-	my $num_msgs = $HashNet::Util::Logging::LEVEL ? 1000 : 100;
+	my $num_msgs = 100; #$HashNet::Util::Logging::LEVEL ? 1000 : 100;
+	my $att_size = 1024 * 8;
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
 	$ch->sw->outgoing_queue->begin_batch_update;
-	$ch->send($_, bcast => 1, flush => 0, _att => $_) for 1..$num_msgs;
+	$ch->send($_, bcast => 1, flush => 0, _att => $_ x $att_size) for 1..$num_msgs;
+	#$ch->send($_, bcast => 1, flush => 0, _att => $_) for 1..$num_msgs;
 
 	trace "$0: Unlock outgoing queue\n";
 	$ch->sw->outgoing_queue->end_batch_update;
@@ -79,12 +81,13 @@ else
 		info "$0: Received msg '$_->{data}'\n" foreach @msgs;
 		
 		@msgs = sort { $a->{data} <=> $b->{data} } @msgs;
-		my $msg = pop @msgs;
+		my $msg = $msgs[$#msgs];
 		
-		is($msg->{data},    $num_msgs, "Received proper data");
-		is($msg->{_att},    $num_msgs, "Received proper attachment");
-		print STDERR Dumper $msg->{data} if ref $msg->{data};
-		is(scalar(@msgs)+1, $num_msgs, "Received correct numer of messages");
+		is($msg->{data},   $num_msgs, "Received proper data");
+		is($msg->{_att},   $num_msgs x $att_size, "Received proper attachment");
+		warn Dumper($msg->{data}) if ref $msg->{data}; # last test would have failed if ref, so add debug info
+		
+		is(scalar(@msgs), $num_msgs, "Received correct numer of messages");
 	}
 	else
 	{
