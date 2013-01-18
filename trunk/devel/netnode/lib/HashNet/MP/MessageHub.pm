@@ -667,7 +667,7 @@
 			{
 				if($self->outgoing_queue->begin_batch_update)
 				{
-
+					my @del_batch;
 					foreach my $msg (@list)
 					{
 						local *@;
@@ -675,7 +675,7 @@
 						trace "MessageHub: Error in route_message(): $@" if $@;
 					}
 
-					$self->incoming_queue->del_batch(\@list);
+					$self->incoming_queue->del_batch(\@del_batch);
 					$self->incoming_queue->unlock_file;
 					
 					$self->outgoing_queue->end_batch_update;
