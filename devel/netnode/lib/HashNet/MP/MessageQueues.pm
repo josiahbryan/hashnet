@@ -27,12 +27,13 @@ use common::sense;
 		#trace "SocketWorker: msg_queue($queue): (re)creating queue in pid $$\n";
 		my $ref = HashNet::MP::LocalDB->indexed_handle('/queues/'.$queue);
 
-		$ref->lock_file;
+		if($ref->lock_file)
+		{
+			# Setup the index as needed
+			$ref->add_index_key(qw/uuid nxthop to type/);
 
-		# Setup the index as needed
-		$ref->add_index_key(qw/uuid nxthop to type/);
-		
-		$ref->unlock_file;
+			$ref->unlock_file;
+		}
 		
 		$self->{queues}->{$queue} = $ref; #{ ref => $ref, pid => $$ };
 		return $ref;

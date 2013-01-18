@@ -569,7 +569,7 @@ use common::sense;
 				
 				trace "SocketWorker: update_node_info(): Looking up WAN IP ...\n";
 				#$external_ip = `wget -q -O - "http://checkip.dyndns.org"`;
-				$external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`;
+				exec_timeout 1.0, sub { $external_ip = `wget -q -O - http://dnsinfo.net/cgi-bin/ip.cgi`; };
 				if($external_ip =~ m/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/) {
 					$external_ip = $1;
 				}
@@ -578,7 +578,14 @@ use common::sense;
 				trace "SocketWorker: update_node_info(): WAN IP is: '$external_ip'\n";
 				
 				# Cache IP
-				store({ wan_ip => $external_ip, timestamp => time() }, $wan_cache_file);
+				if(!$external_ip)
+				{
+					unlink($wan_cache_file);
+				}
+				else
+				{
+					store({ wan_ip => $external_ip, timestamp => time() }, $wan_cache_file);
+				}
 			}
 			else
 			{
@@ -658,7 +665,7 @@ use common::sense;
 				eval {
 					my $gi = Geo::IP->open($ip_data_file, GEOIP_STANDARD);
 					my $record = $gi->record_by_addr($inf->{wan_ip});
-					my $geo_info = join(', ',
+					my $geo_info = !$record ? '' : join(', ',
 						$record->city || '',
 						$record->region || '',
 						$record->country_code || '',
@@ -1134,7 +1141,7 @@ use common::sense;
 		$self->state_update(1);
 
 		# (undef, 1) tells sync_time() to only get the offset, not to try and adjust the time
-		exec_timeout 1, sub { $self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1); };
+		exec_timeout 1.0, sub { $self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1); };
 		
 		$self->state_update(0);
 	}

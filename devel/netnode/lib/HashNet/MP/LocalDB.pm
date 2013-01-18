@@ -577,6 +577,7 @@ use common::sense;
 	{
 		my $self = shift;
 		my $id = shift;
+		$self->shared_ref->load_changes;
 		return $self->data->{$id};
 	}
 	
@@ -689,6 +690,11 @@ use common::sense;
 	{
 		my $self = shift;
 
+		# Rather than possibly return incorrect data or damage the file,
+		# return a "not found" result if lock fails
+		#return wantarray ? () : undef if ! $self->lock_file;
+		$self->lock_file;
+
 # 		if(@_ == 2)
 # 		{
 # 			my ($key, $val) = @_;
@@ -743,6 +749,8 @@ use common::sense;
 		#print STDERR "\@id_list: ".Dumper(\@id_list);
 		#print STDERR "\%pairs: ".Dumper(\%pairs);
 		#print STDERR "\$self->shared_ref: ".Dumper($self->shared_ref);
+
+		$self->unlock_file;
 		
 		# Convert @id_list to actual stored data
 		return $self->_id_list_to_data(@id_list);
