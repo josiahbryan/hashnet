@@ -34,6 +34,12 @@
 		return map { HashNet::MP::Peer->from_hash($_) } @list;
 	}
 
+	sub has_external_changes
+	{
+		my $db = HashNet::MP::LocalDB->indexed_handle('/peers');
+		return $db->has_external_changes;
+	}
+
 	sub hubs    { shift->peers_by_type('hub',    @_) }
 	sub clients { shift->peers_by_type('client', @_) }
 	

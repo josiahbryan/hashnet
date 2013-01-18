@@ -81,7 +81,7 @@
 		{
 			my $ref = HashNet::MP::SharedRef->new($file);
 			# kil 0 returns false if the PID given is NOT 'allive' (e.g. kill is unable to send any signals to that PID)
-			if(!(kill 0, $ref->{started_from}))
+			if(!can_signal($ref->{started_from}))
 			{
 				trace "MessageSocketBase: _remove_old_pid_ipc_ref: Removing stale PID IPC file: $file\n";
 				$ref->delete_file;
@@ -225,13 +225,13 @@
 		if($self->{rx_pid})
 		{
 			debug "MessageSocketBase: stop: Killing rx_pid $self->{rx_pid}\n";
-			kill 15, $self->{rx_pid};
+			log_kill($self->{rx_pid});
 		}
 
 		if($self->{tx_pid})
 		{
 			debug "MessageSocketBase: stop: Killing tx_pid $self->{tx_pid}\n";
-			kill 15, $self->{tx_pid};
+			log_kill($self->{tx_pid});
 		}
 
 		$self->pid_ipc_ref->delete_file;
@@ -259,7 +259,7 @@
 		my $pid_ipc = $self->pid_ipc_ref;
 		$pid_ipc->lock_file;
 		$pid_ipc->load_changes;
-		unless(!(kill 0, $pid_ipc->{rx_pid}))
+		unless(!can_signal($pid_ipc->{rx_pid}))
 		{
 			$pid_ipc->{rx_pid} = 0;
 			$pid_ipc->save_data;
@@ -283,7 +283,7 @@
 
 			$pid_ipc->load_changes if !$pid_ipc->{rx_pid};
 
-			unless(kill 0, $pid_ipc->{rx_pid})
+			unless(can_signal($pid_ipc->{rx_pid}))
 			{
 				trace "SocketWorker: tx_loop; Parent pid $pid_ipc->{rx_pid} gone away, not listening anymore\n";
 				last;
@@ -369,7 +369,7 @@
 				$self->{in_bulk_read} = 0;
 
 				# Restart tx loop if it dies
-# 				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
+# 				if($self->{tx_pid} && ! (can_signal($self->{tx_pid})))
 # 				{
 # 					debug "MessageSocketBase: process_loop: Can't talk to tx_pid $self->{tx_pid}, restarting\n";
 # 					$self->start_tx_loop();
@@ -388,7 +388,7 @@
 		$self->disconnect_handler();
 		
 		debug "MessageSocketBase: process_loop: Killing tx_pid $self->{tx_pid}\n";
-		kill 15, $self->{tx_pid} if $self->{tx_pid};
+		log_kill($self->{tx_pid}) if $self->{tx_pid};
 		
 		die "Quitting process due to error above" if $die_please;
 	}

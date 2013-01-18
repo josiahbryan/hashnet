@@ -34,14 +34,56 @@
 		$self->load_changes;
 		return 1 if $self->{worker_pid} &&
 		            $self->{online}     &&
-			    kill(0, $self->{worker_pid});
-		return $self->{online};
+			    can_signal($self->{worker_pid});
+
+		# Keep state consitent
+		if($self->{worker_pid})
+		{
+			$self->close_tunnel();
+			log_kill($self->{worker_pid});
+		}
+		
+		return 0;
+	}
+
+	sub is_connecting
+	{
+		my $self = shift;
+		$self->load_changes;
+
+		if($self->{connecting_pid} &&
+		   $self->{connecting} &&
+		   can_signal($self->{connecting_pid}))
+		{
+			# Connecting is VALID, but check for timeout
+			if(time - $self->{connecting_time} > 60) # arbitrary time
+			{
+				# No effect if no tun
+				$self->close_tunnel();
+
+				# No return here, fall thru to the log_kill(...) below
+			}
+			else
+			{
+				return 1;
+			}	
+		}
+
+		# Keep state consitent
+		if($self->{connecting_pid} &&
+		  !$self->is_online)
+		{
+			log_kill($self->{connecting_pid});
+		}
+		
+		return 0;
 	}
 	
 	sub load_changes
 	{
 		my $self = shift;
 		
+		return if !HashNet::MP::PeerList->has_external_changes;
 		my $data = HashNet::MP::PeerList->get_peer_data_by_uuid($self->uuid);
 		$self->merge_keys($data, 1); # 1 = dont re-update database because we just got $data from the DB!
 	}
@@ -53,6 +95,7 @@
 		my $pid   = shift;
 		
 		$self->{online} = $value;
+		$self->{connecting} = 0;
 		
 		$self->{worker_pid} = $pid if $pid;
 		delete $self->{worker_pid} if !$pid;
@@ -62,6 +105,25 @@
 		return $value;
 	}
 	
+	sub set_connecting
+	{
+		my $self  = shift;
+		my $value = shift;
+		my $pid   = shift;
+
+		$self->{online} = 0;
+		$self->{connecting} = $value;
+
+		$self->{connecting_time} = time if $value;
+		
+		$self->{connecting_pid} = $pid if $pid;
+		delete $self->{connecting_pid} if !$pid;
+
+		HashNet::MP::PeerList->update_peer($self);
+
+		return $value;
+	}
+
 	sub merge_keys
 	{
 		my $self = shift;
@@ -170,19 +232,6 @@
 			trace "Peer: _open_tunnel: Opening SSH tunnel via $args{tunhost} to $args{host}:$args{port}, local port $local_port\n";
 			#debug "Peer: _open_socket: \$ssh_tun_arg: '$ssh_tun_arg'\n";
 
-			$shref->lock_file;
-			$shref->load_changes;
-			if($shref->{tunnel_pids}->{$orighost})
-			{
-				trace "Peer: _open_tunnel: Previous PID for host: $shref->{tunnel_pids}->{$orighost} for '$orighost', killing with sig 15\n";
-				kill 15, $shref->{tunnel_pids}->{$orighost} if $shref->{tunnel_pids}->{$orighost};
-				delete $shref->{tunnel_pids}->{$orighost};
-
-				$shref->save_data;
-			}
-			$shref->unlock_file;
-			
-
 			my $pid = fork();
 			if(!$pid)
 			{
@@ -191,6 +240,8 @@
 				# the tunnel stays up.
 
 				$shref->update_begin;
+				trace "Peer: _open_tunnel: Stored tunnel pid $$ for $orighost\n";
+				log_kill($shref->{tunnel_pids}->{$orighost}) if $shref->{tunnel_pids}->{$orighost};
 				$shref->{tunnel_pids}->{$orighost} = $$;
 				$shref->update_end;
 
@@ -234,7 +285,7 @@
 	{
 		my $self = shift;
 		$self->load_changes();
-		return $self->{tunnel_pid} if $self->{tunnel_pid} && kill(0, $self->{tunnel_pid});
+		return $self->{tunnel_pid} if $self->{tunnel_pid} && can_signal($self->{tunnel_pid});
 		return 0;
 	}
 
@@ -244,7 +295,7 @@
 		if($self->has_tunnel())
 		{
 			trace "Peer: close_tunnel: Closing tunnel thread $self->{tunnel_pid}\n";
-			kill 15, $self->{tunnel_pid} if $self->{tunnel_pid};
+			log_kill($self->{tunnel_pid}) if $self->{tunnel_pid};
 
 			delete $self->{tunnel_pid};
 		}
@@ -256,6 +307,7 @@
 
 		# Make sure we reflect our state correctly
 		$self->set_online(0);
+		$self->set_connecting(1, $$);
 
 		my $host = $self->{host};
 		return undef if !$host;
@@ -298,7 +350,7 @@
 	{
 		my $self = shift;
 		my $node_info = shift || undef;
-		
+
 		my $sock = $self->_open_socket();
 		if($sock)
 		{

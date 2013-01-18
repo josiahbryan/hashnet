@@ -63,7 +63,7 @@ else
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
 	$ch->sw->outgoing_queue->begin_batch_update;
-	$ch->send($_, bcast => 1, flush => 0) for 1..$num_msgs;
+	$ch->send($_, bcast => 1, flush => 0, _att => $_) for 1..$num_msgs;
 
 	trace "$0: Unlock outgoing queue\n";
 	$ch->sw->outgoing_queue->end_batch_update;
@@ -82,6 +82,8 @@ else
 		my $msg = pop @msgs;
 		
 		is($msg->{data},    $num_msgs, "Received proper data");
+		is($msg->{_att},    $num_msgs, "Received proper attachment");
+		print STDERR Dumper $msg->{data} if ref $msg->{data};
 		is(scalar(@msgs)+1, $num_msgs, "Received correct numer of messages");
 	}
 	else

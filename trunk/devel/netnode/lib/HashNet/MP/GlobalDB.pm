@@ -569,7 +569,7 @@ package HashNet::MP::GlobalDB;
 		   $self->{rx_pid}->{started_from} == $$)
 		{
 			trace "GlobalDB: DESTROY: Killing rx_pid $self->{rx_pid}->{pid}\n";
-			kill 15, $self->{rx_pid}->{pid};
+			log_kill($self->{rx_pid}->{pid});
 		}
 	}
 	
@@ -1598,7 +1598,7 @@ package HashNet::MP::GlobalDB;
 				{
 					# Check to see if that PID is still up before declaring lock stale
 					my $stale = 0;
-					if(!kill(0, $hashref->{locking_pid}))
+					if(!can_signal($hashref->{locking_pid}))
 					{
 						$stale = 1;
 					}

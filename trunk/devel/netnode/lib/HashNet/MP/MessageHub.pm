@@ -180,20 +180,41 @@
 	{
 		my $self = shift;
 		my $orig_app = shift;
-		sleep 15;
+
+		sleep 3;
 
 		logmsg "TRACE", "MessageHub: Starting reconnect loop...\n";
 	
 		while(1)
 		{
+			trace "MessageHub: reconnect_loop(): building hub list...\n";
 			my @list = $self->build_hub_list();
+			trace "MessageHub: reconnect_loop(): have ".scalar(@list)." hubs to check...\n";
 		
 			#trace "MessageHub: Final \@list: ".Dumper(\@list);
 			
 			foreach my $peer (@list)
 			{
+				trace "MessageHub: Reconnect Check: Checking hub '$peer->{host}'...\n";
 				next if !$peer || !$peer->host;
 				next if $peer->is_online;
+				#next if $peer->is_connecting;
+				if($peer->is_connecting)
+				{
+					trace "MessageHub: Reconnect Check: Hub '$peer->{host}' is not online, but it is connecting, skipping for now\n";
+					next;
+				}
+
+				my $time = time - $peer->{last_reconnect_time};
+				if($time < 30)
+				{
+					trace "MessageHub: Reconnect Check: Hub '$peer->{host}' is not online, not connecting, but within the 30sec window ($time sec), waiting to see if state changes to connecting\n";
+					next;
+				}
+
+				$peer->{last_reconnect_time} = time;
+				HashNet::MP::PeerList->update_peer($peer);
+				
 				if(!fork)
 				{
 					$0 = "$orig_app [Reconnect: $peer->{host}]";
@@ -211,7 +232,7 @@
 				}
 			}
 
-			sleep 15;
+			sleep 5;
 		};
 	}
 	
@@ -589,7 +610,7 @@
 # 		   $self->{router_pid}->{started_from} == $$)
 # 		{
 # 			trace "MessageHub: stop_router(): Killing router pid $self->{router_pid}->{pid}\n";
-# 			kill 15, $self->{router_pid}->{pid};
+# 			log_kill($self->{router_pid}->{pid});
 # 		}
 # 		
 # 		
@@ -603,7 +624,7 @@
 		   $self->{timer_pid}->{started_from} == $$)
 		{
 			trace "MessageHub: stop_reconnect_loop(): Killing timer loop pid $self->{timer_pid}->{pid}\n";
-			kill 15, $self->{timer_pid}->{pid};
+			log_kill($self->{timer_pid}->{pid});
 		}
 	}
 	

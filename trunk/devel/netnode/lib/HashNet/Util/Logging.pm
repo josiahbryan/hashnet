@@ -10,7 +10,7 @@ package HashNet::Util::Logging;
 	our @ISA = qw(Exporter);
 	
 	# Exporting by default
-	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper);
+	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper log_kill can_signal);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 	
@@ -290,5 +290,39 @@ package HashNet::Util::Logging;
 		#stdout::debug("Util: -UNlocking $file\n");
 		unlink($file.'.lock');
 	}
+
+#	sub can_signal { kill 0, shift() }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	sub log_kill($)
+	{
+		my $pid = shift;
+		my $sig = 15; #shift || 15;
+		my ($package) = caller(0);
+		my ($base,$name) = $package =~ /^(.*?::)?([^\:]+)$/;
+		trace "$name: log_kill: Killing '$pid', called from: ".called_from()."\n";
+		warn "log_kill: Killing pid '$pid', called from: ".called_from()."\n";
+		return kill $sig, $pid;
+	}
+
+# 	sub can_signal
+# 	{
+# 		my $pid = shift;
+# 		return kill 0, $pid;
+# 	}
 };
 1
