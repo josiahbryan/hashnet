@@ -522,7 +522,7 @@ use common::sense;
 		# Therefore, if it rewturns false, we can assume to process that locked
 		# $file is gone away and we can say the lock is indeed stale
 		my $stale = 0;
-		if(!can_signal($pid))
+		if(!kill(0, $pid))
 		{
 			$stale = 1;
 		}

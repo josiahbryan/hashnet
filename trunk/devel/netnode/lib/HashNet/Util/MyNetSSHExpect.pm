@@ -241,6 +241,7 @@ sub login {
 		[ timeout		=> sub
 			{
 				my $peek = $self->peek();
+				info "SSH ($self->{user}\@$self->{host}): [peek] \"$peek\"\n" if $peek;
 				if($peek =~ /.*?@.*?'s password:/)
 				{
 					$exp->send("$password$t") if $password;
@@ -264,6 +265,9 @@ sub login {
 	
 	info "SSH ($self->{user}\@$self->{host}): Connection opened\n";
 
+	my $peek = $self->peek();
+	info "SSH ($self->{user}\@$self->{host}): [peek] \"$peek\"\n" if $peek;
+
 	# verifying if we failed to logon
 	if ($test_success) {
 		$self->_sec_expect($timeout,
@@ -277,7 +281,9 @@ sub login {
 	}
 
    	# swallows any output the server wrote to my input stream after loging in
-	return $self->read_all();
+	my $read = $self->read_all() || '';
+	info "SSH ($self->{user}\@$self->{host}): [read] \"$read\"\n" if $read;
+	return $read;
 }
 
 

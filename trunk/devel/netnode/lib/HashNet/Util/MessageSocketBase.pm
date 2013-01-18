@@ -81,7 +81,7 @@
 		{
 			my $ref = HashNet::MP::SharedRef->new($file);
 			# kil 0 returns false if the PID given is NOT 'allive' (e.g. kill is unable to send any signals to that PID)
-			if(!can_signal($ref->{started_from}))
+			if(!(kill 0, $ref->{started_from}))
 			{
 				trace "MessageSocketBase: _remove_old_pid_ipc_ref: Removing stale PID IPC file: $file\n";
 				$ref->delete_file;
@@ -225,13 +225,13 @@
 		if($self->{rx_pid})
 		{
 			debug "MessageSocketBase: stop: Killing rx_pid $self->{rx_pid}\n";
-			log_kill($self->{rx_pid});
+			log_kill($self->{rx_pid}, "rx_pid");
 		}
 
 		if($self->{tx_pid})
 		{
 			debug "MessageSocketBase: stop: Killing tx_pid $self->{tx_pid}\n";
-			log_kill($self->{tx_pid});
+			log_kill($self->{tx_pid}, "tx_pid");
 		}
 
 		$self->pid_ipc_ref->delete_file;
@@ -257,9 +257,10 @@
 		$self->tx_loop_start_hook();
 
 		my $pid_ipc = $self->pid_ipc_ref;
+
 		$pid_ipc->lock_file;
 		$pid_ipc->load_changes;
-		unless(!can_signal($pid_ipc->{rx_pid}))
+		if(!can_signal($pid_ipc->{rx_pid}))
 		{
 			$pid_ipc->{rx_pid} = 0;
 			$pid_ipc->save_data;
@@ -268,6 +269,7 @@
 
 		trace "MessageSocketBase: Starting tx_loop\n";
 		#warn "Start tx loop $$ [$0]\n";
+		my $rx_pid_mon_start_time = 0;
 		while(1)
 		{
 			local *@;
@@ -283,10 +285,44 @@
 
 			$pid_ipc->load_changes if !$pid_ipc->{rx_pid};
 
-			unless(can_signal($pid_ipc->{rx_pid}))
+			# No rx_pid after load, wait 30 sec or so for RX loop to come online...
+			if(!$pid_ipc->{rx_pid})
 			{
+				$rx_pid_mon_start_time = time if !$rx_pid_mon_start_time;
+				my $max   = 5.0; # sec
+				my $speed = 0.1; # sec
+				my $delta = time - $rx_pid_mon_start_time;
+
+				# Do a sleep/next so we still send_pending_messages() while waiting for rx_loop to come online
+				if($delta < $max)
+				{
+					#warn "SocketWorker: tx_loop: No rx_pid, waiting ".($max - $delta)." more sec...\n" if $delta > $max / 2;
+					sleep $speed;
+					next;
+				}
+
+				# If we fall thru to here from above, then we have problems....
+				if(!$pid_ipc->{rx_pid})
+				{
+					#if($0 =~ /test/)
+					{
+						$@ = "SocketWorker: tx_loop: No rx_pid ever appeared, not risking leaving a tx_loop hanging\n"; # in a test\n";
+						#warn $@;
+						return;
+					}
+				}
+			}
+
+			# Monitor the RX loop so we die when they die
+			if(!can_signal($pid_ipc->{rx_pid}))
+			{
+				#warn "[$0] SocketWorker: tx_loop; Parent pid $pid_ipc->{rx_pid} gone away, not listening anymore\n";
 				trace "SocketWorker: tx_loop; Parent pid $pid_ipc->{rx_pid} gone away, not listening anymore\n";
 				last;
+			}
+			else
+			{
+				#warn "[$0] tx_loop: $pid_ipc->{rx_pid} still online\n";
 			}
 
 			sleep 0.1;
@@ -369,7 +405,7 @@
 				$self->{in_bulk_read} = 0;
 
 				# Restart tx loop if it dies
-# 				if($self->{tx_pid} && ! (can_signal($self->{tx_pid})))
+# 				if($self->{tx_pid} && ! (kill 0, $self->{tx_pid}))
 # 				{
 # 					debug "MessageSocketBase: process_loop: Can't talk to tx_pid $self->{tx_pid}, restarting\n";
 # 					$self->start_tx_loop();
@@ -388,7 +424,7 @@
 		$self->disconnect_handler();
 		
 		debug "MessageSocketBase: process_loop: Killing tx_pid $self->{tx_pid}\n";
-		log_kill($self->{tx_pid}) if $self->{tx_pid};
+		log_kill($self->{tx_pid}, "tx_pid") if $self->{tx_pid};
 		
 		die "Quitting process due to error above" if $die_please;
 	}
