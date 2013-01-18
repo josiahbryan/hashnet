@@ -154,7 +154,7 @@
 # 		if($self->{watcher_pid} &&
 # 		   $self->{watcher_pid}->{started_from} == $$)
 # 		{
-# 			kill 15, $self->{watcher_pid}->{pid};
+# 			log_kill($self->{watcher_pid}->{pid});
 # 		}
 	}
 	
@@ -314,7 +314,7 @@
 # 		my $sw = $self->sw;
 # 		while(1)
 # 		{
-# 			unless(kill 0, $sw->{child_pid})
+# 			if(!can_signal($sw->{child_pid}))
 # 			{
 # 				error "ClientHandle: SocketWorker went away (was in PID $sw->{child_pid}), attempting reconnect\n";
 # 			}
@@ -330,15 +330,15 @@
 	sub is_sw_dead
 	{
 		my $self = shift;
-		return ! (kill 0, $self->{sw}->{rx_pid});
+		return can_signal($self->{sw}->{rx_pid});
 	}
 
 	sub kill_sw
 	{
 		my $self = shift;
 		# Kill both threads of the socketworker incase just the primary went away
-		kill 15, $self->{sw}->{rx_pid};
-		kill 15, $self->{sw}->state_handle->{tx_loop_pid};
+		log_kill($self->{sw}->{rx_pid}) if $self->{sw}->{rx_pid};
+		log_kill($self->{sw}->state_handle->{tx_loop_pid}) if $self->{sw}->state_handle->{tx_loop_pid};
 		delete $self->{sw};
 	}
 	

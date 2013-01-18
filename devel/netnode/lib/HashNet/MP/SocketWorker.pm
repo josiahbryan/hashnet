@@ -256,7 +256,7 @@ use common::sense;
 # 	{
 # 		my $self = shift;
 # 		$self->load_changes();
-# 		return $self->{tunnel_pid} if $self->{tunnel_pid} && kill(0, $self->{tunnel_pid});
+# 		return $self->{tunnel_pid} if $self->{tunnel_pid} && can_signal($self->{tunnel_pid});
 # 		return 0;
 # 	}
 # 
@@ -266,7 +266,7 @@ use common::sense;
 # 		if($self->has_tunnel())
 # 		{
 # 			trace "SocketWorker: close_tunnel: Closing tunnel thread $self->{tunnel_pid}\n";
-# 			kill 15, $self->{tunnel_pid};
+# 			log_kill($self->{tunnel_pid});
 # 
 # 			delete $self->{tunnel_pid};
 # 		}
@@ -432,12 +432,12 @@ use common::sense;
 		{
 			#warn "killing read $pid from $$";
 			trace "SocketWorker: DESTROY: Killing read_loop_pid $pid\n";
-			kill 15, $pid;
+			log_kill($pid);
 		}
 
 # 		$pid = $self->state_handle->{tx_loop_pid};
 # 		#warn "killing tx $pid from $$";
-# 		kill 15, $pid;
+# 		log_kill($pid);
 
 		# Remove the state data from the database
 		$ref->update_begin;
@@ -447,7 +447,7 @@ use common::sense;
 
 		# Kill any receiver forks
 # 		my @fork_pids = @{ $self->{receiver_forks} || [] };
-# 		kill 15, $_ foreach @fork_pids;
+# 		log_kill($_) foreach @fork_pids;
 
 		#trace "SocketWorker: DESTROY: Shutting down\n";
 		#trace "SocketWorker: DESTROY: Callstack: ".get_stack_trace();
@@ -905,7 +905,7 @@ use common::sense;
 		if(!$no_kill_ping_loop &&
 		    $self->{ping_loop_pid})
 		{
-			kill 15, $self->{ping_loop_pid};
+			log_kill($self->{ping_loop_pid});
 		}
 	}
 
@@ -1377,7 +1377,7 @@ use common::sense;
 				$cnt = scalar ( $queue->all_by_key(to => $uuid) );
 			}
 			
-			unless(kill 0, $self->state_handle->{read_loop_pid})
+			unless(can_signal($self->state_handle->{read_loop_pid}))
 			{
 				error "SocketWorker: wait_for_receive: SocketWorker read loop PID ".$self->state_handle->{read_loop_pid}." gone away, not waiting anymore\n";
 				return $cnt;
@@ -1514,7 +1514,7 @@ use common::sense;
 		my ($self, $msg_name, $pid) = @_;
 		
 		# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
-		return 1 if kill 0, $pid;
+		return 1 if can_signal($pid);
 
 		$self->_rx_deregister_listener($msg_name, $pid);
 		return 0;
@@ -1679,7 +1679,7 @@ use common::sense;
 					$queue->unlock_file;
 	
 					# See http://perldoc.perl.org/functions/kill.html "If SIGNAL is zero..." for why this works
-					unless(kill 0, $parent_pid)
+					if(!can_signal($parent_pid))
 					{
 						#trace "SocketWorker: fork_receiver/$msg_name: Parent pid $parent_pid gone away, not listening anymore\n";
 						last;
@@ -1844,7 +1844,7 @@ use common::sense;
 					trace "SocketWorker: ping_loop: Ping failed: ".$self->peer->{name}."{$ping_uuid} did not respond within $ping_max_time seconds, exiting threads\n";
 					$self->shutdown(0);
 					trace "SocketWorker: ping_loop: Killing parent ID: $self->{ping_loop_parent_pid}\n";
-					kill 15, $self->{ping_loop_parent_pid} if $self->{ping_loop_parent_pid};
+					log_kill($self->{ping_loop_parent_pid}) if $self->{ping_loop_parent_pid};
 					last;
 				}
 				else
@@ -1857,7 +1857,7 @@ use common::sense;
 				trace "SocketWorker: ping_loop: Error in pinging: $@\n";
 			}
 
-			unless(kill 0, $self->{ping_loop_parent_pid})
+			if(!can_signal($self->{ping_loop_parent_pid}))
 			{
 				trace "SocketWorker: ping_loop: Parent pid $self->{ping_loop_parent_pid} gone away, not listening anymore\n";
 				last;

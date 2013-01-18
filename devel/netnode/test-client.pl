@@ -69,8 +69,8 @@ if(!$ch)
 
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
-my $msg_size = 1024 * 1024 * 8; #16;# * 2;
-my $max_msgs = 8; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
+my $msg_size = 1024 * 512; #16;# * 2;
+my $max_msgs = 16; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
 
 
 my $total_msgs = 0;

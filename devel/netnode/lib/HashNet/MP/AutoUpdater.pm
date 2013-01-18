@@ -244,7 +244,7 @@
 		my @pids = grep { $_ != $$ && $_ != $self->{master_pid} } _get_kids($self->{master_pid});
 		
 		trace "AutoUpdater: kill_children(): Master PID: $self->{master_pid}, found children PIDs: @pids\n";
-		kill 15, $_ foreach grep { $_ } @pids;
+		log_kill($_) foreach grep { $_ } @pids;
 		
 		trace "AutoUpdater: kill_children(): Kids killed\n";
 	}
@@ -277,10 +277,10 @@
 			
 			# Kill the master process
 			info "AutoUpdater: request_restart(): Killing master process $self->{master_pid}\n";
-			kill 15, $self->{master_pid} if $self->{master_pid}; # 15 = SIGTERM
+			log_kill($self->{master_pid}) if $self->{master_pid}; # 15 = SIGTERM
 			
 			info "AutoUpdater: request_restart(): Killing self $$\n";
-			kill 15, $$;
+			log_kill($$);
 		}
 	};
 	
