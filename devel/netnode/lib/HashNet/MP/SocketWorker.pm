@@ -940,7 +940,7 @@ use common::sense;
 		my $msg_type = $envelope->{type};
 		#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}', from {$envelope->{from}}, to {$envelope->{to}}\n";
 		#info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, from {$envelope->{from}}, to {$envelope->{to}}\n";
-		info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}\n";
+		info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, data: '$envelope->{data}'\n";
 
 		if($msg_type eq MSG_PING)
 		{
@@ -1041,7 +1041,7 @@ use common::sense;
 
 			$self->_rx_copy_to_listen_queues($envelope);
 
-			$self->start_ping_loop();
+			$self->start_ping_loop() if $node_info->{type} eq 'hub' && $self->node_info->{type} eq 'hub';
 
 			#trace "SocketWorker: state_handle: ".Dumper($self);
 
