@@ -10,7 +10,7 @@ package HashNet::Util::Logging;
 	our @ISA = qw(Exporter);
 	
 	# Exporting by default
-	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper log_kill can_signal);
+	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from called_from_smart get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper log_kill can_signal);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 	
@@ -150,6 +150,32 @@ package HashNet::Util::Logging;
 		$filename =~ s/.*\/([^\/]+)$/$1/g;
 		
 		"$filename:$line / $subroutine()";
+	}
+
+	sub called_from_smart
+	{
+		my $ignore_until = shift;
+		my $offset = 0;
+		
+		my $done = 0;
+		my $found_ignore = 0;
+		my $cf = '(unknown)';
+		while(!$done)
+		{
+			last if !scalar(caller($offset));
+			$cf = called_from($offset);
+			if(!$found_ignore)
+			{
+				$found_ignore = 1 if $cf =~ /^$ignore_until/;
+			}
+			else
+			{
+				$done = 1 if $cf !~ /^$ignore_until/;
+			}
+			$offset ++;
+		}
+
+		return $cf;
 	}
 	
 	sub get_stack_trace

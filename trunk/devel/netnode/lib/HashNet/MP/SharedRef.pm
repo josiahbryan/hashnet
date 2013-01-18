@@ -12,6 +12,10 @@ use common::sense;
 	use Carp;
 
 	sub DEBUG { 0 }
+	sub DEBUG_LOCK { 0 }
+	sub DEBUG_SAVE_LOAD { 0 }
+
+	sub DEBUG_CALLER_OFFSET { "LocalDB.pm" }
 
 	use Tie::RefHash;
 	my %ClassData;
@@ -19,7 +23,7 @@ use common::sense;
 
 	my %Counts;
 	
-	our $LOCK_DEBUGOUT_PREFIX = "\t\t ";
+	our $LOCK_DEBUGOUT_PREFIX = ""; #\t\t ";
 
 	sub new
 	{
@@ -273,10 +277,10 @@ use common::sense;
 
 		$self->data_loaded_hook();
 
-		trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n"  if DEBUG;
+		trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in), called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if DEBUG || DEBUG_SAVE_LOAD;
 		#trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n" if $self->file =~ /_queues_listeners_/;
-		#trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Data] ".scalar(keys(%{$data->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
-		#trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Self] ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
+# 		trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Data] ".scalar(keys(%{$data->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing/;
+# 		trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Self] ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing/;
 		
 		return $data;
 	}
@@ -334,10 +338,10 @@ use common::sense;
 		my $self = shift;
 		my $file = $self->file;
 
-		trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if DEBUG;
+		trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out), called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if DEBUG || DEBUG_SAVE_LOAD;
 
 		#trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if $self->file =~ /_queues_listeners_/;
-		#trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_listeners_/;
+		trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing_/;
 		#trace "SharedRef: ", $self->file, ": save_data():  data: ".Dumper($self);
 		#print_stack_trace();
 
@@ -387,6 +391,17 @@ use common::sense;
 
 			debug "SharedRef: ", $self->file, ": save_data: cache mtime/size: ".$self->_d->{cache_mtime}.", ".$self->_d->{cache_size}.".".(stat(_))[1]."\n" if DEBUG;
 		}
+
+# 		trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))." [confirm 1]\n" if $self->file =~ /_queues_outgoing/;
+# 
+# 		my $old = $HashNet::Util::Logging::LEVEL;
+# 		$HashNet::Util::Logging::LEVEL = 0;
+# 		{
+# 			$self->load_data;
+# 		}
+# 		$HashNet::Util::Logging::LEVEL = $old;
+# 
+# 		trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))." [confirm 2]\n" if $self->file =~ /_queues_outgoing/;
 	}
 
 	sub lock_file
@@ -397,10 +412,10 @@ use common::sense;
 		#debug "SharedRef: ", $self->file, ": _lock_state():    ",$self->url," (...)  [$$]\n"; #: ", $self->file,"\n";
 		#print_stack_trace();
 		
-		$self->_d->{locked} = 0 if !$self->_d->{locked};
+		$self->_d->{locked} = 0 if $self->_d->{locked} < 0;
 		$self->_d->{locked} ++;
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."]\n" if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."],            called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if DEBUG || DEBUG_LOCK;
 		#if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1; # if DEBUG;
 		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1;
 
@@ -430,7 +445,7 @@ use common::sense;
 			return 0;
 		}
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock, called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';
 
 		
 
@@ -449,12 +464,12 @@ use common::sense;
 
 		$self->_d->{locked} --;
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."]\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."],          called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
 		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->_d->{locked} <= 0;
-
+ 
 		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
 
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() -\n"  if DEBUG; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() -,              called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
 
 		if($self->gdb)
 		{

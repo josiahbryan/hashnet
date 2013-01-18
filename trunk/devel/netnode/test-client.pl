@@ -70,7 +70,7 @@ if(!$ch)
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
 my $msg_size = 1024 * 512; #16;# * 2;
-my $max_msgs = 32; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
+my $max_msgs = 64; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
 
 
 my $total_msgs = 0;
@@ -128,7 +128,7 @@ my $res = $ch->wait_for_send(300, 1);
 #sleep 30;
 
 trace "$0: Wait for receive\n";
-$res = $ch->wait_for_receive(msgs => $max_msgs, timeout => 300, speed => 1);
+$res = $ch->wait_for_receive(msgs => $max_msgs, timeout => 60 * 2, speed => 1);
 #trace "$0: Wait res: $res\n";
 
 sleep 1;
