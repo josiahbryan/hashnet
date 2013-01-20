@@ -166,6 +166,7 @@
 		if($self->{no_fork})
 		{
 			$0 = "$0 [RX]";
+			debug "MessageSocketBase: start(): Entering read loop in '$0' ($$)\n"; 
 			$self->process_loop();
 		}
 		else
@@ -378,7 +379,9 @@
 					my $done_reading = 0;
 					while(!$done_reading)
 					{
+						#trace "MessageSocketBase: Calling read_msg() + \n";
 						my $ret = $self->read_message();
+						#trace "MessageSocketBase: Done in read_msg() - \n";
 
 						# read_message() returns -1 if fatal
 						#last PROCESS_LOOP if $ret < 0;
@@ -394,6 +397,8 @@
 						# is data to read and read_message() can gracefully
 						# timeout if there really isn't data there.
 						$done_reading = $sel->can_read(0.01) ? 0 : 1;
+						
+						#trace "MessageSocketBase: Returning to top of loop\n";
 					}
 				};
 				if($@)

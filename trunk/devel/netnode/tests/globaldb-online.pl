@@ -30,7 +30,7 @@ HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
 HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 # The tests use this shared ref to sync testing
@@ -41,6 +41,7 @@ my $test_key = '/test/server_pid';
 my $server_pid = fork;
 if(!$server_pid)
 {
+	$0 = "$0 [Server]";
 	trace "$0: Starting server thread\n";
 	$HashNet::MP::LocalDB::DBFILE = $db_server_file;
 	HashNet::MP::MessageHub->new(
@@ -52,8 +53,9 @@ if(!$server_pid)
 my $client_pid = fork;
 if(!$client_pid)
 {
+	$0 = "$0 [Put]";
 	trace "$0: Locking $lock_ref (", $lock_ref->file, ")\n";
-	$lock_ref->lock_file;
+	$lock_ref->lock_file(30);
 	#trace "$0: Lock acquired on $lock_ref\n";
 	
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
@@ -98,6 +100,7 @@ if(!$client_pid)
 
 
 {
+	$0 = "$0 [Test]";
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
 	sleep 2.0;
 	#print STDERR "# Proceeding with test...\n";
@@ -110,7 +113,7 @@ if(!$client_pid)
 		type => 'client',
 	};
 
-	$lock_ref->lock_file;
+	$lock_ref->lock_file(30);
 	
 	my $db = HashNet::MP::GlobalDB->new();
 
