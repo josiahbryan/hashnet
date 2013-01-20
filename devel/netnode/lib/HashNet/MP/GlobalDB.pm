@@ -841,7 +841,7 @@ package HashNet::MP::GlobalDB;
 			my $new_env = $self->sw->create_envelope(@args);
 			$self->sw->outgoing_queue->add_row($new_env);
 
-			trace "GlobalDB: _push_tr: new_env to nxthop {$new_env->{nxthop}}\n";
+			trace "GlobalDB: _push_tr: new_env to nxthop {$new_env->{nxthop}} (\$no_flush=$no_flush)\n";
 			#trace "GlobalDB: _push_tr: new_env dump: ".Dumper($new_env,$self->sw->outgoing_queue);
 			$self->sw->wait_for_send() unless $no_flush; # Make sure the data gets off this node
 			#trace "GlobalDB: _push_tr: final queue: ".Dumper($self->sw->outgoing_queue);

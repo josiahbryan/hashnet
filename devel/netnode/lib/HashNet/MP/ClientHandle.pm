@@ -78,6 +78,8 @@
 		$eng->set_client_handle($ch);
 		$ch->{globaldb} = $eng;
 		
+		$ch->wait_for_start;
+		
 		return $ch;
 	}
 	
