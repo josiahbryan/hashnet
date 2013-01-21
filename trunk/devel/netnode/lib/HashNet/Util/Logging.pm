@@ -76,6 +76,8 @@ package HashNet::Util::Logging;
 	
 	sub logmsg
 	{
+		return if !$LEVEL;
+		
 		my $level = uc(shift);
 		
 		my $int = $INT_LEVELS{$level};

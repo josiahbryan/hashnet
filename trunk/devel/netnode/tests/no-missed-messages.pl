@@ -22,7 +22,7 @@ HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my $pid = fork;
@@ -55,11 +55,11 @@ else
 	                !($ch = HashNet::MP::ClientHandle->connect('localhost:'.$test_port, $node_info));
 
 	# We're not testing anything that needs MSG_CLIENT_RECEIPTs right now, so turn them off just to clean up debugging output
-	$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
+	#$ch->{send_receipts} = 0 if $HashNet::Util::Logging::LEVEL;
 	
 	$ch->wait_for_start;
 
-	my $num_msgs = 80; #$HashNet::Util::Logging::LEVEL ? 1000 : 100;
+	my $num_msgs = 100; #$HashNet::Util::Logging::LEVEL ? 1000 : 100;
 	my $att_size = 1024; #024 * 8;
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
@@ -72,7 +72,8 @@ else
 	#$ch->sw->outgoing_queue->unlock_file;
 	
 	$ch->wait_for_send;
-	$ch->wait_for_receive(msgs => $num_msgs, timeout => $num_msgs); # 2nd arg is seconds, 1 sec per msg
+	#warn "All sent, waiting for rx";
+	$ch->wait_for_receive(msgs => $num_msgs, timeout => $num_msgs / 10); # 2nd arg is seconds, .1 sec per msg
 
 	my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pass a false argument to not block
 
@@ -98,6 +99,7 @@ else
 	$ch->stop();
 }
 
+#warn "Test done";
 done_testing();
 
 #END {
