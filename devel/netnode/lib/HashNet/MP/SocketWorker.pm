@@ -1405,7 +1405,7 @@ use common::sense;
 		my $type  = $opts{type}    ||                 undef;
 		my $uuid  = $opts{uuid}    ||                 $self->uuid;
 		
-		#trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
+		trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
 		my $queue = incoming_queue();
 		my $time  = time;
 		
@@ -1436,7 +1436,7 @@ use common::sense;
 				return $cnt;
 			}
 
-			#trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
+			trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
 			last if $cnt >= $count;
 			sleep $speed;
 		}
@@ -1452,7 +1452,7 @@ use common::sense;
 			$res = scalar $queue->all_by_key(to => $uuid);
 		}
 		
-		#trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
+		trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
 		return $res;
@@ -1488,10 +1488,8 @@ use common::sense;
 		# Check envelope history on this side so as to not cause unecessary traffice
 		# if this envelope would just be rejected by the check_env_hist() above on the receiving side 
 		#@res = grep { !check_env_hist($_, $uuid) } @res;
+		msg_queue('ack')->begin_batch_update;
 
-		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
-		msg_queue('ack')->add_batch(\@res);
-		
 		return @res;
 	}
 
@@ -1501,6 +1499,11 @@ use common::sense;
 		my $batch = shift;
 		# TODO Rewrite for custom SW outgoing queue
 		$self->outgoing_queue->del_batch($batch);
+
+		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
+		#msg_queue('ack')->add_batch(\@res);
+		msg_queue('ack')->add_batch($batch);
+		msg_queue('ack')->end_batch_update;
 	}
 
 	# NOTE: This only works BEFORE
