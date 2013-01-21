@@ -1210,58 +1210,68 @@ package HashNet::MP::GlobalDB;
 		my $key_meta = undef;
 		
 		debug "GlobalDB: get_meta(): key:'$key', \$key_meta_file: '$key_meta_file'\n";
+
+		if(-f $key_meta_file)
+		{
+			return $self->_safe_retrieve($key_meta_file);
+		}
+
+		error "GlobalDB: get_meta(): Meta for '$key' not found\n";
+		$@ = "Meta for '$key' not found";
+		return undef;
 		
-		# Lock data queue so we know that the fork_listener() process is not in the middle of processing while we're trying to get_meta()
-		my $sw = $self->sw;
-		my $sw_handle = $self->sw_handle;
-		my $queue = $sw_handle->rx_listen_queue($self->{rx_pid}->{pid});
-		
-		# TODO: Handle failure to lock
-		if(defined $queue)
-		{
-			trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
-			$queue->lock_file();
-		}
-		
-		$key_meta = $self->_safe_retrieve($key_meta_file);
-		if(!$key_meta && $@)
-		{
-			logmsg "WARN", "GlobalDB: get_meta(): Error reading '$key' from disk: $@ - will try to get from peers\n";
-		}
-		elsif($key_meta->{timestamp} > 0)
-		{
-			if(defined $queue)
-			{
-				trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
-				$queue->unlock_file();
-			}
-			
-			#trace "GlobalDB: get_meta(): Returning meta for key '$key' '$key_meta'\n";
-			return $key_meta;
-		}
-		
-		error "GlobalDB: get_meta(): Error while trying to retrieve '$key': $@\n" if $@;
-		if(defined $queue)
-		{
-			trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
-			$queue->unlock_file();
-		}
-		
-		undef $@;
-		my $found_data = $self->_query_hubs($key, %opts);
-		if($@)
-		{
-			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, error: \"$@\", returning\n";
-			return undef;
-		}
-		elsif(!$found_data)
-		{
-			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, returning\n";
-			$@ = "Key '$key' not found";
-			return undef;
-		}
- 			
- 		return $self->_safe_retrieve($key_meta_file);
+# 
+# 		# Lock data queue so we know that the fork_listener() process is not in the middle of processing while we're trying to get_meta()
+# 		my $sw = $self->sw;
+# 		my $sw_handle = $self->sw_handle;
+# 		my $queue = $sw_handle->rx_listen_queue($self->{rx_pid}->{pid});
+# 
+# 		# TODO: Handle failure to lock
+# 		if(defined $queue)
+# 		{
+# 			trace "GlobalDB: get(): Locking listen queue for worker $self->{rx_pid}->{pid}\n";
+# 			$queue->lock_file();
+# 		}
+# 
+# 		$key_meta = $self->_safe_retrieve($key_meta_file);
+# 		if(!$key_meta && $@)
+# 		{
+# 			logmsg "WARN", "GlobalDB: get_meta(): Error reading '$key' from disk: $@ - will try to get from peers\n";
+# 		}
+# 		elsif($key_meta->{timestamp} > 0)
+# 		{
+# 			if(defined $queue)
+# 			{
+# 				trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+# 				$queue->unlock_file();
+# 			}
+# 
+# 			#trace "GlobalDB: get_meta(): Returning meta for key '$key' '$key_meta'\n";
+# 			return $key_meta;
+# 		}
+# 
+# 		error "GlobalDB: get_meta(): Error while trying to retrieve '$key': $@\n" if $@;
+# 		if(defined $queue)
+# 		{
+# 			trace "GlobalDB: get_meta(): Unlocking listen queue for worker $self->{rx_pid}->{pid}\n";
+# 			$queue->unlock_file();
+# 		}
+# 
+# 		undef $@;
+# 		my $found_data = $self->_query_hubs($key, %opts);
+# 		if($@)
+# 		{
+# 			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, error: \"$@\", returning\n";
+# 			return undef;
+# 		}
+# 		elsif(!$found_data)
+# 		{
+# 			error "GlobalDB: get_meta(): Could not get meta for '$key' from any hub, returning\n";
+# 			$@ = "Key '$key' not found";
+# 			return undef;
+# 		}
+# 
+#  		return $self->_safe_retrieve($key_meta_file);
 	}
 	
 	sub _query_hubs
@@ -1313,7 +1323,7 @@ package HashNet::MP::GlobalDB;
 		my $sw = $self->sw;
 		my $sw_handle = $self->sw_handle;
 		
-		trace "GlobalDB: _query_hubs(): Checking hubs for '$key'\n";
+		#trace "GlobalDB: _query_hubs(): Checking hubs for '$key'\n";
 		
 		my $found_data = 0;
 		
@@ -1321,10 +1331,12 @@ package HashNet::MP::GlobalDB;
 		my @list = HashNet::MP::PeerList->peers_by_type('hub');
 		if(!@list)
 		{
-			trace "GlobalDB: _query_hubs(): No hubs in database, cant get '$key'\n";
+			#trace "GlobalDB: _query_hubs(): No hubs in database, cant get '$key'\n";
 		}
 		else
 		{
+			#trace "GlobalDB: _query_hubs(): Checking hubs for '$key'\n";
+			
 			foreach my $hub (@list)
 			{
 				next if !$hub->is_online ||

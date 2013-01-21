@@ -22,7 +22,7 @@ HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
 
 # Mute logging output
-$HashNet::Util::Logging::LEVEL = 0;
+#$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 my $pid = fork;
@@ -59,12 +59,12 @@ else
 	
 	$ch->wait_for_start;
 
-	my $num_msgs = 100; #$HashNet::Util::Logging::LEVEL ? 1000 : 100;
-	my $att_size = 1024 * 8;
+	my $num_msgs = 80; #$HashNet::Util::Logging::LEVEL ? 1000 : 100;
+	my $att_size = 1024; #024 * 8;
 	trace "$0: Lock outgoing queue\n";
 	#$ch->sw->outgoing_queue->lock_file;
 	$ch->sw->outgoing_queue->begin_batch_update;
-	$ch->send($_, bcast => 1, flush => 0, _att => $_ x $att_size) for 1..$num_msgs;
+	$ch->send($_, bcast => 1, flush => 0, _att => $_ x ( $att_size / length($_) ) ) for 1..$num_msgs;
 	#$ch->send($_, bcast => 1, flush => 0, _att => $_) for 1..$num_msgs;
 
 	trace "$0: Unlock outgoing queue\n";
@@ -84,7 +84,7 @@ else
 		my $msg = $msgs[$#msgs];
 		
 		is($msg->{data},   $num_msgs, "Received proper data");
-		is($msg->{_att},   $num_msgs x $att_size, "Received proper attachment");
+		is($msg->{_att},   $num_msgs x ( $att_size / length($num_msgs) ), "Received proper attachment");
 		warn Dumper($msg->{data}) if ref $msg->{data}; # last test would have failed if ref, so add debug info
 		
 		is(scalar(@msgs), $num_msgs, "Received correct numer of messages");

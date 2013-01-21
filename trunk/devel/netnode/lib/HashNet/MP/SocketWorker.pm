@@ -366,6 +366,8 @@ use common::sense;
 
 		# Allow the caller to call start() if desired
 		$self->start_tx_loop();
+
+		trace "SocketWorker: new(): Setup complete, calling MessageSocketBase::start()\n";
 		$self->start unless defined $old_auto_start && !$old_auto_start;
 		 
 		return $self;
@@ -1006,11 +1008,21 @@ use common::sense;
 		if($consumed)
 		{
 			trace "SocketWorker: dispatch_msg: Custom coderef consumed message ${msg_type}{$envelope->{uuid}}, not enqueing\n";
+			$self->_rx_copy_to_listen_queues($envelope);
+			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
 		}
 		elsif($msg_type eq MSG_ACK)
 		{
-			# Just ignore ACKs for now
-			return;
+			my $ack = $envelope->{data};
+			my $ack_queue = msg_queue('ack');
+			$ack_queue->begin_batch_update;
+			eval{
+				my $msg = $ack_queue->by_field(uuid => $ack);
+				$ack_queue->del_row($msg);
+				#die "No msg in ACK queue for uuid {$ack}";
+			};
+			$ack_queue->end_batch_update;
+			die "Error processing ACK for msg {$ack}: $@" if $@;
 		}
 		elsif($msg_type eq MSG_NODE_INFO)
 		{
@@ -1066,6 +1078,7 @@ use common::sense;
 				}
 				
 				$self->_rx_copy_to_listen_queues($envelope);
+				$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
 
 				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
 				#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
@@ -1306,7 +1319,7 @@ use common::sense;
 	sub wait_for_start
 	{
 		my $self = shift;
-		my $max   = shift || 4;
+		my $max   = shift || 15;
 		my $speed = shift || 0.1;
 		#trace "SocketWorker: wait_for_start: Enter: ".$self->state_handle->{started}."\n";
 		my $time  = time;
@@ -1328,7 +1341,9 @@ use common::sense;
 
 		# TODO Rewrite for custom SW outgoing queue
 		my $queue = outgoing_queue();
-		my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		#my $res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		my @pending = $queue->all_by_key(nxthop => $uuid);
+		my $res = @pending ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
 		#trace "SocketWorker: wait_for_send: Enter ($uuid), res: $res\n";
 		my $time  = time;
@@ -1338,7 +1353,38 @@ use common::sense;
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		$res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
+		#sleep 10;
+		#trace "SocketWorker: wait_for_send: Done looping ($uuid), res: $res, acking...\n";
+
+		$self->wait_for_ack($_) foreach @pending;
+		
 		#trace "SocketWorker: wait_for_send: Exit ($uuid), res: $res\n";
+
+		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
+		return $res;
+	}
+
+	sub wait_for_ack
+	{
+		my $self  = shift;
+		my $uuid  = shift;
+		my $max   = shift || 4;
+		my $speed = shift || 0.1;
+		$uuid = $uuid->{uuid} if ref $uuid eq 'HASH';
+
+		# TODO Rewrite for custom SW outgoing queue
+		my $queue = msg_queue('ack');
+		my $res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
+		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
+		#trace "SocketWorker: wait_for_ack: Enter ($uuid), res: $res\n";
+		my $time  = time;
+		sleep $speed while time - $time < $max
+			       #and !$queue->has_external_changes # check is_changed first to prevent having to re-load data every time if nothing changed
+		               and defined $queue->by_field(uuid => $uuid);
+		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
+		$res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
+		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
+		#trace "SocketWorker: wait_for_ack: Exit ($uuid), res: $res\n";
 		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
 	}
@@ -1442,6 +1488,9 @@ use common::sense;
 		# Check envelope history on this side so as to not cause unecessary traffice
 		# if this envelope would just be rejected by the check_env_hist() above on the receiving side 
 		#@res = grep { !check_env_hist($_, $uuid) } @res;
+
+		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
+		msg_queue('ack')->add_batch(\@res);
 		
 		return @res;
 	}

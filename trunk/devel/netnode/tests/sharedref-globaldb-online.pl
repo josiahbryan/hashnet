@@ -47,7 +47,7 @@ $HashNet::MP::SharedRef::LOCK_DEBUGOUT_PREFIX = "";
 
 
 # The tests use this shared ref to sync testing
-my $lock_ref = HashNet::MP::SharedRef->new();
+my $lock_ref = HashNet::MP::SharedRef->new(".test.synclock");
 
 my $test_key = '/test/server_pid';
 
@@ -66,7 +66,7 @@ my $client_pid = fork;
 if(!$client_pid)
 {
 	trace "$0: Locking $lock_ref (", $lock_ref->file, ")\n";
-	$lock_ref->lock_file;
+	$lock_ref->lock_file(30);
 	#trace "$0: Lock acquired on $lock_ref\n";
 	
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
@@ -103,13 +103,16 @@ if(!$client_pid)
 	
 	my $shref = HashNet::MP::SharedRef->new($sh_key, gdb => $db);
 
-	trace "$0: Client: putting /test/server_pid => $server_pid\n"; 
+	trace "$0: Client: putting /test/server_pid => $server_pid\n";
+
+	trace "$0\n\n\n\n\n\n";
 	
 	$shref->update_begin;
 	$shref->{$test_key} = $server_pid;
 	$shref->update_end;
 	
 	trace "$0: Client put done, exiting\n";
+	trace "$0\n\n\n\n\n\n";
 
 	$lock_ref->unlock_file;
 	
@@ -130,7 +133,7 @@ if(!$client_pid)
 		type => 'client',
 	};
 
-	$lock_ref->lock_file;
+	$lock_ref->lock_file(30);
 
 	my $db = HashNet::MP::GlobalDB->new();
 	

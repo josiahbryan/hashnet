@@ -30,7 +30,7 @@ HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);
 HashNet::MP::GlobalDB->delete_disk_cache($db_server_file);
 
 # Mute logging output
-#$HashNet::Util::Logging::LEVEL = 0;
+$HashNet::Util::Logging::LEVEL = 0;
 $HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
 # The tests use this shared ref to sync testing
@@ -114,6 +114,9 @@ if(!$client_pid)
 	};
 
 	$lock_ref->lock_file(30);
+
+	trace "\n\n\n\n\n\n\n";
+	trace "$0: Starting test routines\n";
 	
 	my $db = HashNet::MP::GlobalDB->new();
 
@@ -135,39 +138,39 @@ if(!$client_pid)
 	trace "$0: Get finished, result: '$pid_t', expected: '$server_pid', match? ".($pid_t == $server_pid ? "Yes" : "No")."\n";
 	
 	is($pid_t, $server_pid, "Data retrieval");
-	
+
 	# Make sure server has our test key
 	is($db->_query_hubs($test_key), 1, "_query_hubs() works online");
-	
-	
+
+
 	# Check the offline functionality of _push_Tr
 	$db->put($test_key => rand());
 	my $tr_table_handle = $db->{offline_tr_db};
 	is($tr_table_handle->size, 0, "_push_tr did not add to offline_tr_db");
-	 
+
 	# Test _setup_message_listeners setup the fork
 # 	my $pid_data = $db->{rx_pid};
 # 	is( (kill 0, $pid_data->{pid}) ? 1 :0, 1, "listener fork running");
 # 	is( $pid_data->{started_from}, $$, "started_from value for listner fork is correct");
-	
+
 	is( $db->client_handle, $ch, "client_handle() returns $ch");
 	is( $db->sw, $ch->sw, "sw() returns ".$ch->sw);
-	
+
 	# Easier for copying code from globaldb-basic.pl
 	my $gdb = $db;
-	
+
 	# Test locking
 	is($gdb->lock_key($test_key, timeout => 10., speed => 0.5), 1, "lock_key('$test_key') correctly locks");
 	is($gdb->lock_key($test_key, timeout => 0.5, speed => 0.1), 0, "lock_key('$test_key') correctly fails to lock");
-	
+
 	my $lock_data = $gdb->get($test_key.'.lock');
 	is($lock_data->{locking_pid}, $$, "lock data for lock on '$test_key' returns pid $$");
 	is($lock_data->{locking_uuid}, $ch->sw->uuid, "UUID in locking data defined is ".$ch->sw->uuid);
-	
+
 	is($gdb->is_lock_stale($test_key), 0, "lock for '$test_key' not stale");
 	is($gdb->unlock_if_stale($test_key), 0, "unlock_if_stale('$test_key') fails because lock not stale");
 	is($gdb->unlock_key($test_key), 1, "unlock_key('$test_key')");
-	
+
 	# This fork test doesnt work right now - correctly so - need to move the lock up to the other fork (other client uuid)
 # 	if(!fork)
 # 	{
@@ -175,10 +178,10 @@ if(!$client_pid)
 # 		exit(0);
 # 	}
 # 	sleep 0.5;
-# 	
+#
 # 	is($gdb->is_lock_stale($test_key), 1, "lock for '$test_key' IS stale");
 # 	is($gdb->unlock_if_stale($test_key), 1, "unlock_if_stale('$test_key')");
-	
+
 	# Test get failure
 	my $undef_key = 'foobar123';
 	my $bad_get = $gdb->get($undef_key);
