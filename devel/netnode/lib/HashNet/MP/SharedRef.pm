@@ -23,7 +23,7 @@ use common::sense;
 
 	my %Counts;
 	
-	our $LOCK_DEBUGOUT_PREFIX = ""; #\t\t ";
+	our $LOCK_DEBUGOUT_PREFIX = "\t\t ";
 
 	sub new
 	{
@@ -560,9 +560,11 @@ use common::sense;
 		#$file = abs_path($file);
 
 		#stdout::debug("Util: +++locking $file\n");
+		#print STDERR "+++locking $file: $max\n"  if $file eq '.test.synclock';
 		sleep $speed while time-$time < $max &&
 			!( $result = sysopen($fh, $file.'.lock', O_WRONLY|O_EXCL|O_CREAT));
 		#stdout::debug("Util: lock wait done on $file, result='$result'\n");
+		#print STDERR "+++locking $file: wait done, max: $max, result: '$result'\n"  if $file eq '.test.synclock';
 		
 		print $fh $$, "\n" if $result;
 

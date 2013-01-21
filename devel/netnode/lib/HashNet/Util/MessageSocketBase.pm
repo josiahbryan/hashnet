@@ -52,9 +52,9 @@
 
 	sub DEBUG { 0 }
 
-	sub DEBUG_TX { 0 } # yes, this is used
+	sub DEBUG_TX { 0 }
 
-	sub DEBUG_RX { 1 }  # not used (commented out below)
+	sub DEBUG_RX { 0 }
 
 	sub new
 	{
@@ -379,9 +379,9 @@
 					my $done_reading = 0;
 					while(!$done_reading)
 					{
-						#trace "MessageSocketBase: Calling read_msg() + \n";
+						trace "MessageSocketBase: Calling read_msg() + \n" if  DEBUG_RX;
 						my $ret = $self->read_message();
-						#trace "MessageSocketBase: Done in read_msg() - \n";
+						trace "MessageSocketBase: Done in read_msg() - \n" if  DEBUG_RX;
 
 						# read_message() returns -1 if fatal
 						#last PROCESS_LOOP if $ret < 0;
@@ -398,7 +398,7 @@
 						# timeout if there really isn't data there.
 						$done_reading = $sel->can_read(0.01) ? 0 : 1;
 						
-						#trace "MessageSocketBase: Returning to top of loop\n";
+						trace "MessageSocketBase: Returning to top of loop\n" if DEBUG_RX;
 					}
 				};
 				if($@)
@@ -519,7 +519,7 @@
 			# Trim newline and pass text to process_message()
 			$first_line =~ s/[\r\n]$//g;
 
-			#trace "MessageSocketBase: Non-integer first line, '$first_line'\n";
+			trace "MessageSocketBase: Non-integer first line, '$first_line'\n" if DEBUG_RX;
 
 			$self->process_message($first_line);
 
@@ -529,7 +529,7 @@
 		#print STDERR "Debug: First line: '$first_line'\n";
 		my $bytes_expected = int($first_line);
 
-		#trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n";# if DEBUG_RX;
+		trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n" if DEBUG_RX;
 
 		if($bytes_expected <= 0)
 		{
@@ -596,7 +596,7 @@
 		#print STDERR "Final answer: len:$len/$bytes_expected, data: '$data'\n";
 		#print STDERR "Data: '$data'\n";
 
-		#trace "MessageSocketBase: Data: '$data'\n";# if DEBUG_RX;
+		trace "MessageSocketBase: Data: '$data'\n" if DEBUG_RX;
 
 		$self->process_message($data);
 
@@ -811,6 +811,10 @@
 			my $sock = $self->{sock};
 			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
 			print $sock $msg;
+
+			my $oldfh = select $sock;
+			$| ++;
+			select $oldfh;
 		}
 
 		#trace "MessageSocketBase: send_message: print() done\n";

@@ -330,7 +330,8 @@ use common::sense;
 		$self->add_row($row);
 		return $self;
 	}
-	
+
+	sub delete { shift->del_row(@_) }
 	sub del_row
 	{
 		my $self = shift;
