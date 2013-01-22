@@ -135,7 +135,7 @@ foreach my $res (@results)
 	#next if $delta < 0;
 
 	#print "$res->{node_info}->{name} - ".sprintf('%.03f', $delta)." sec\n";
-	print ON_WHITE.BLACK.sprintf('%.03f', $delta)." sec".CLEAR." - ".ON_RED.WHITE.$res->{node_info}->{name}.CLEAR."\n";
+	print ON_WHITE.BLACK.sprintf('%.03f', $delta)." sec".CLEAR." - ".ON_RED.BOLD.WHITE.$res->{node_info}->{name}.CLEAR."\n";
 	
 	next if !$complex_route && !$simple_route;
 

@@ -977,6 +977,12 @@
 			my $cname = $peer ? $peer->{name} : '?';
 			debug "MessageHub: route_message: [evaporating] ".$msg->{type}."{$msg->{uuid}}: '$msg->{data}' (lasthop: ${cname}{$msg->{curhop}}  destined for this hub, evaporating\n";
 		}
+		elsif(!$msg->{to})
+		{
+			my $peer = HashNet::MP::PeerList->get_peer_by_uuid($msg->{curhop});
+			my $cname = $peer ? $peer->{name} : '?';
+			debug "MessageHub: route_message: [evaporating] ".$msg->{type}."{$msg->{uuid}}: '$msg->{data}' (lasthop: ${cname}{$msg->{curhop}} - no destination, not broadcast, evaporating\n";
+		}
 		else
 		{
 			my $to = $msg->{to};
@@ -1061,7 +1067,8 @@
 			@recip_list = grep { $_->{online} } @recip_list;
 		}
 
-		debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
+		debug "MessageHub: route_message: [recip_list]  ".$msg->{type}."{$msg->{uuid}}: '$msg->{data}' recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n";
+		#debug "MessageHub: route_message: Msg $msg->{type} UUID {$msg->{uuid}} for data '$msg->{data}': recip_list: {".join(' | ', map { $_->{name}.'{'.$_->{uuid}.'}' } @recip_list)."}\n"
 		;#	if @recip_list;
 
 		#debug Dumper $msg, \@peers;

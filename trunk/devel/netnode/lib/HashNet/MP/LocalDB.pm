@@ -287,7 +287,11 @@ use common::sense;
 			return $row;
 		}
 
-		$self->update_begin;
+		if(!$self->update_begin)
+		{
+			error "LocalDB: ".$self->shared_ref->file.": Failed to lock file, refusing to add more data because it might corrupt database\n";
+			return 0;
+		}
 		
 		$row->{id} = $self->next_id;
 		

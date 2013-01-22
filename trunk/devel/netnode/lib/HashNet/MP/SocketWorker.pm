@@ -461,7 +461,7 @@ use common::sense;
 		my $bad_msg = shift;
 		my $error   = shift;
 		
-		print STDERR "bad_message_handler: '$error' (bad_msg: $bad_msg)\n";
+		print STDERR "bad_message_handler: '$error' (bad_msg: ".substr($bad_msg,0,256).(length($bad_msg) > 256 ? '...':'').")\n";
 		$self->send_message({ msg => MSG_INTERNAL_ERROR, error => $error, bad_msg => $bad_msg });
 	}
 
@@ -933,7 +933,107 @@ use common::sense;
 		$self->state_handle->{read_loop_pid} = $$;
 		$self->state_update(0);
 	}
-	
+
+	sub _handle_msg_node_info
+	{
+		my ($self, $envelope) = @_;
+
+		my $node_info = $envelope->{data};
+		info "SocketWorker: _handle_msg_node_info: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
+
+		my $peer;
+		if(!$self->{peer} &&
+			$self->{peer_host})
+		{
+			$self->{peer} = HashNet::MP::PeerList->get_peer_by_host($self->{peer_host});
+		}
+
+		if($self->{peer})
+		{
+			$peer = $self->peer;
+			$peer->merge_keys(clean_ref($node_info));
+		}
+		else
+		{
+			$peer = HashNet::MP::PeerList->get_peer_by_uuid(clean_ref($node_info));
+			$self->{peer} = $peer;
+		}
+
+		#print STDERR Dumper $peer, $node_info;
+
+		$peer->set_online(1, $$);
+
+		#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
+
+		$self->state_update(1);
+		$self->state_handle->{remote_node_info} = $node_info;
+		$self->state_handle->{online} = 1;
+		$self->state_update(0);
+
+		$self->_rx_copy_to_listen_queues($envelope);
+
+		$self->_call_msg_handlers($envelope, '*')
+			if !$self->_call_msg_handlers($envelope, $envelope->{type});
+
+		$self->start_ping_loop() if $node_info->{type} eq 'hub' && $self->node_info->{type} eq 'hub';
+
+		return 1;
+	}
+
+	sub _handle_msg_ack
+	{
+		my ($self, $envelope) = @_;
+		my $ack = $envelope->{data};
+		my $ack_queue = msg_queue('ack');
+		$ack_queue->begin_batch_update;
+		eval{
+			my $msg = $ack_queue->by_field(uuid => $ack);
+			$ack_queue->del_row($msg);
+			#die "No msg in ACK queue for uuid {$ack}";
+		};
+		$ack_queue->end_batch_update;
+		die "SocketWorker: _handle_msg_ack: Error processing ACK for msg {$ack}: $@" if $@;
+		return 1;
+	}
+
+	sub _handle_msg_ping
+	{
+		my ($self, $envelope) = @_;
+
+		if(check_env_hist($envelope, $self->uuid))
+		{
+			info "SocketWorker: _handle_msg_ping: MSG_PING: Ignoring this ping, it's been here before\n";
+		}
+		else
+		{
+			my @args =
+			(
+				{
+					msg_uuid    => $envelope->{uuid},
+					msg_hist    => $envelope->{hist},
+					node_info   => $self->node_info,
+					pong_time   => $self->sntp_time(),
+				},
+				type	=> MSG_PONG,
+				nxthop	=> $self->peer_uuid,
+				curhop	=> $self->uuid,
+				to	=> $envelope->{from},
+				bcast	=> 0,
+				sfwd	=> 0,
+			);
+			my $new_env = $self->create_envelope(@args);
+			#trace "ClientHandle: incoming_messages: Created MSG_PONG for {$envelope->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
+			my $delta = $new_env->{data}->{pong_time} - $envelope->{data}->{ping_time};
+			info "SocketWorker: _handle_msg_ping: MSG_PING{$envelope->{uuid}}, sending MSG_PONG to ".$envelope->{data}->{node_info}->{name}."{$envelope->{from}}, ".sprintf('%.03f', $delta)." sec\n";
+
+			#use Data::Dumper;
+			#print STDERR Dumper $envelope;
+
+			$self->send_message($new_env);
+		}
+		return 1;
+	}
+
 	sub dispatch_message
 	{
 		my $self = shift;
@@ -949,145 +1049,59 @@ use common::sense;
 		my $msg_type = $envelope->{type};
 		#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}', from {$envelope->{from}}, to {$envelope->{to}}\n";
 		#info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, from {$envelope->{from}}, to {$envelope->{to}}\n";
-		info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, data: '$envelope->{data}'\n";
+		#info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}, data: '$envelope->{data}'\n";
+		info "SocketWorker: dispatch_msg: New incoming ",$envelope->{type}."{$envelope->{uuid}}: '$envelope->{data}'\n";
 
-		if($msg_type eq MSG_PING)
+		if($msg_type eq MSG_NODE_INFO)
 		{
-			if(check_env_hist($envelope, $self->uuid))
-			{
-				info "SocketWorker: dispatch_msg: MSG_PING: Ignoring this ping, it's been here before\n";
-			}
-# 			elsif($envelope->{from} eq $self->uuid)
-# 			{
-# 				info "SocketWorker: dispatch_msg: MSG_PING: Not responding to self-ping\n";
-# 			}
-			else
-			{
-				my @args =
-				(
-					{
-						msg_uuid    => $envelope->{uuid},
-						msg_hist    => $envelope->{hist},
-						node_info   => $self->node_info,
-						pong_time   => $self->sntp_time(),
-					},
-					type	=> MSG_PONG,
-					nxthop	=> $self->peer_uuid,
-					curhop	=> $self->uuid,
-					to	=> $envelope->{from},
-					bcast	=> 0,
-					sfwd	=> 0,
-				);
-				my $new_env = $self->create_envelope(@args);
-				#trace "ClientHandle: incoming_messages: Created MSG_PONG for {$envelope->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
-				my $delta = $new_env->{data}->{pong_time} - $envelope->{data}->{ping_time};
-				info "SocketWorker: dispatch_msg: MSG_PING{$envelope->{uuid}}, sending MSG_PONG to ".$envelope->{data}->{node_info}->{name}."{$envelope->{from}}, ".sprintf('%.03f', $delta)." sec\n";
-
-				#use Data::Dumper;
-				#print STDERR Dumper $envelope;
-
-				$self->send_message($new_env);
-			}
-		}
-		# We let MSG_PINGs fall thru to be dropped in the incoming queue as well so they can be processed by the MessageHub
-
-		# Store return value of check_env_hist() for use later in adding envelope to queue 
-		my $check_hist = check_env_hist($envelope, $self->uuid);
-		
-		# Hook for custom message handlers to be called based on the type of message
-		my $consumed = 0;
-		if(!$check_hist)
-		{
-			$consumed = $self->_call_msg_handlers($envelope, $msg_type);
-		}
-		else
-		{
-			debug "SocketWorker: dispatch_msg: Not calling custom handlers (if any) for '$msg_type' because history says it was already here\n";
-		}
-		
-		if($consumed)
-		{
-			trace "SocketWorker: dispatch_msg: Custom coderef consumed message ${msg_type}{$envelope->{uuid}}, not enqueing\n";
-			$self->_rx_copy_to_listen_queues($envelope);
-			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
+			$self->_handle_msg_node_info($envelope);
+			return 1;
 		}
 		elsif($msg_type eq MSG_ACK)
 		{
-			my $ack = $envelope->{data};
-			my $ack_queue = msg_queue('ack');
-			$ack_queue->begin_batch_update;
-			eval{
-				my $msg = $ack_queue->by_field(uuid => $ack);
-				$ack_queue->del_row($msg);
-				#die "No msg in ACK queue for uuid {$ack}";
-			};
-			$ack_queue->end_batch_update;
-			die "Error processing ACK for msg {$ack}: $@" if $@;
+			$self->_handle_msg_ack($envelope);
+			return 1;
 		}
-		elsif($msg_type eq MSG_NODE_INFO)
+		elsif($msg_type eq MSG_PING)
 		{
-			my $node_info = $envelope->{data};
-			info "SocketWorker: dispatch_msg: Received MSG_NODE_INFO for remote node '$node_info->{name}'\n";
+			$self->_handle_msg_ping($envelope);
+			# We let MSG_PINGs fall thru to be dropped in the incoming queue as well so they can be processed by the MessageHub
+		}
 
-			my $peer;
-			if(!$self->{peer} &&
-			    $self->{peer_host})
-			{
-				$self->{peer} = HashNet::MP::PeerList->get_peer_by_host($self->{peer_host});
-			}
-			
-			if($self->{peer})
-			{
-				$peer = $self->peer;
-				$peer->merge_keys(clean_ref($node_info));
-			}
-			else
-			{
-				$peer = HashNet::MP::PeerList->get_peer_by_uuid(clean_ref($node_info));
-				$self->{peer} = $peer;
-			}
-
-			#print STDERR Dumper $peer, $node_info;
-			
-			$peer->set_online(1, $$);
-
-			#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
-
-			$self->state_update(1);
-			$self->state_handle->{remote_node_info} = $node_info;
-			$self->state_handle->{online} = 1;
-			$self->state_update(0);
-
+		if(!check_env_hist($envelope, $self->uuid))
+		{
+			# Copy to anyone listning for this message type
 			$self->_rx_copy_to_listen_queues($envelope);
 
-			$self->start_ping_loop() if $node_info->{type} eq 'hub' && $self->node_info->{type} eq 'hub';
+			my $send_ack = 0;
+			
+			if($self->_call_msg_handlers($envelope, $msg_type))
+			{
+				# Specific msg type consumed
+				$send_ack = 1;
+			}
+			elsif($self->_call_msg_handlers($envelope, '*'))
+			{
+				# Catchall consumed
+				$send_ack = 1;
+			}
+			elsif(incoming_queue()->add_row($envelope))
+			{
+				# add_row() successful
+				$send_ack = 1;
+			}
+			else	
+			{
+				error "SocketWorker: LocalDB::add_row() failed when trying to add msg to incoming_queue() and noone else consumed message - not sending ACK so remote end will resend\n";
+				$send_ack = 0;
+			}
 
-			#trace "SocketWorker: state_handle: ".Dumper($self);
-
+			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack;
 		}
 		else
 		{
-			#if($check_hist) #check_env_hist($envelope, $self->uuid))
-			if(!$check_hist)
-			{
-				my $consumed = $self->_call_msg_handlers($envelope, '*');
-
-				if(!$consumed)
-				{
-					incoming_queue()->add_row($envelope);
-				}
-				
-				$self->_rx_copy_to_listen_queues($envelope);
-				$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
-
-				#info "SocketWorker: dispatch_msg: New incoming envelope added to queue: ".Dumper($envelope);
-				#info "SocketWorker: dispatch_msg: New incoming $envelope->{type} envelope, UUID {$envelope->{uuid}}, Data: '$envelope->{data}'\n";
-				#print STDERR Dumper $envelope;
-			}
-			else
-			{
-				info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
-			}
+			info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
+			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
 		}
 	}
 

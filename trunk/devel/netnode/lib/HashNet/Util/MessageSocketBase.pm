@@ -575,7 +575,12 @@
 				push @buffer, $data;
 				$bytes_rxd += $res;
 
-				last BUFRD if $bytes_rxd >= $bytes_expected;
+				last BUFRD if $bytes_rxd == $bytes_expected;
+
+				if($bytes_rxd > $bytes_expected)
+				{
+					die "Read $bytes_rxd, but only should have read $bytes_expected";
+				}
 
 				alarm($timeout);
 			}
@@ -588,6 +593,10 @@
 		{
 			print STDERR "Timed Out.\r\n";
 			return -1;
+		}
+		else
+		{
+			die "Error in read: $@" if $@;
 		}
 
 
