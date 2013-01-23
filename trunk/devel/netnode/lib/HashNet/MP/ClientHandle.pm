@@ -111,11 +111,11 @@
 		}
 
 		my $self = bless {
-			sw   => $worker,
-			peer => $peer,
-			send_receipts => 1,
-			host => $host,
+			sw        => $worker,
+			peer      => $peer,
+			host      => $host,
 			node_info => $node_info,
+			send_receipts => 1,
 		}, $class;
 
 		#$self->start_watcher;

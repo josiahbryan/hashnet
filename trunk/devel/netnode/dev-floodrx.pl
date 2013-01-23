@@ -26,7 +26,7 @@ my $sock = $ch->sw->{sock};
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>2}, 'a' x (1024 * 1024));
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>3}, 'a' x (1024 * 1024));
 
-my $max = 3;
+my $max = 1;
 my $time = time();
 $ch->sw->send_message({uuid => $_.'.1-'.$time, "data" => $_}, '#' x (1024 * 1024)) for 1..$max;
 $ch->sw->wait_for_ack(         $_.'.1-'.$time) for 1..$max;
