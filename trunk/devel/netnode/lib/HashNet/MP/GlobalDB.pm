@@ -46,24 +46,6 @@ package HashNet::MP::GlobalDB;
 		return scalar(grep { $_ ne "." && $_ ne ".." } readdir($dh)) == 0;
 	}
 
-	sub elide_string
-	{
-		my $string = shift;
-		my $max_len = shift || 50;
-
-		my $len = length($string);
-		if($len > $max_len)
-		{
-			my $elide = '...';
-			my $buff  = ($max_len - length($elide)) / 2;
-			my $b1    = substr($string,      0, $buff);
-			my $b2    = substr($string, -$buff, $buff);
-			$string   = "${b1}...${b2}";
-		}
-		return $string;
-
-	}
-
 	sub discover_mimetype
 	{
 		shift if $_[0] eq __PACKAGE__ || ref($_[0]) eq __PACKAGE__;

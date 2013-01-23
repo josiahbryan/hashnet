@@ -54,6 +54,7 @@ my $test_key = '/test/server_pid';
 my $server_pid = fork;
 if(!$server_pid)
 {
+	$0 = "$0 [Server]";
 	trace "$0: Starting server thread\n";
 	$HashNet::MP::LocalDB::DBFILE = $db_server_file;
 	HashNet::MP::MessageHub->new(
@@ -65,6 +66,7 @@ if(!$server_pid)
 my $client_pid = fork;
 if(!$client_pid)
 {
+	$0 = "$0 [Put]";
 	trace "$0: Locking $lock_ref (", $lock_ref->file, ")\n";
 	$lock_ref->lock_file(30);
 	#trace "$0: Lock acquired on $lock_ref\n";
@@ -121,6 +123,7 @@ if(!$client_pid)
 
 
 {
+	$0 = "$0 [Test]";
 	#print STDERR "# Waiting for server to start in fork $pid...\n";
 	sleep 2.0;
 	#print STDERR "# Proceeding with test...\n";

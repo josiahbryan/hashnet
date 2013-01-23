@@ -5,7 +5,7 @@
 #-Add reconnect to CLientHandle
 
 -Optimizations:
-	-Move router into socketworker plugin
+	#-Move router into socketworker plugin
 	-Change SocketWorker in hub mode to use custom outgoing queue
 	-Add third mode to sharedref - shmem
 	
@@ -27,6 +27,7 @@
 -Add tests for routing edge cases
 -Add tests for globaldb: clone on rev 0
 -Add tests for ClientHandle reconnect
+-Add tests for LocalDB add/del batch both arrayrefs and @_
 -GlobalDB: Add partial-key search
 -Idea: Add web interface (.cgi?) for:
 	-viewing queues (client/hub)

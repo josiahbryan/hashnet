@@ -15,7 +15,17 @@ use common::sense;
 	sub DEBUG_LOCK { 0 }
 	sub DEBUG_SAVE_LOAD { 0 }
 
-	sub DEBUG_CALLER_OFFSET { "LocalDB.pm" }
+	sub DEBUG_CALLER_OFFSET { 'SharedRef.pm' }
+
+	#sub DEBUG_LOCK_FILE_REGEX { '(testdb_queues_outgoing|testdb_queues_ack)' }
+	sub DEBUG_LOCK_FILE_REGEX { '(testdb_queues_ack)' }
+	
+	sub _debug_file_matches
+	{
+		return 1 if ! DEBUG_LOCK_FILE_REGEX;
+		my $rx = DEBUG_LOCK_FILE_REGEX;
+		return shift =~ /$rx/;
+	}
 
 	use Tie::RefHash;
 	my %ClassData;
@@ -415,7 +425,7 @@ use common::sense;
 		$self->_d->{locked} = 0 if $self->_d->{locked} < 0;
 		$self->_d->{locked} ++;
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."],            called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if DEBUG || DEBUG_LOCK;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() + [".$self->_d->{locked}."],            called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if (DEBUG || DEBUG_LOCK) && _debug_file_matches($self->file);
 		#if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1; # if DEBUG;
 		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} < 1;
 
@@ -445,7 +455,7 @@ use common::sense;
 			return 0;
 		}
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock, called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": lock_file() * [".$self->_d->{locked}."] * got lock, called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if (DEBUG || DEBUG_LOCK) && _debug_file_matches($self->file);
 
 		
 
@@ -464,12 +474,14 @@ use common::sense;
 
 		$self->_d->{locked} --;
 		
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."],          called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() @ [".$self->_d->{locked}."],          called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if (DEBUG || DEBUG_LOCK) && _debug_file_matches($self->file);
+		# if $self->file eq 'db.test-basic-client_queues_outgoing';# if $self->_d->{locked} <= 0;;# if DEBUG;
 		#trace "${LOCK_DEBUGOUT_PREFIX}".get_stack_trace() if $self->_d->{locked} <= 0;
  
 		return $self->_d->{locked}+1 if $self->_d->{locked} > 0;
 
-		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() -,              called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if DEBUG || DEBUG_LOCK; # if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
+		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": unlock_file() -,              called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n"  if (DEBUG || DEBUG_LOCK) && _debug_file_matches($self->file);
+		# # if $self->file eq 'db.test-basic-client_queues_outgoing';# if DEBUG;
 
 		if($self->gdb)
 		{

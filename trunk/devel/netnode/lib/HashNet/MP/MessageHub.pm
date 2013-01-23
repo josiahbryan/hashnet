@@ -676,7 +676,6 @@
 					}
 
 					$self->incoming_queue->del_batch(\@del_batch);
-					$self->incoming_queue->unlock_file;
 					
 					$self->outgoing_queue->end_batch_update;
 				}
@@ -685,6 +684,9 @@
 					trace "MessageHub: router_process_loop: Error locking file in begin_batch_update()\n";
 				}
 			}
+			
+			$self->incoming_queue->unlock_file;
+			
 
 			sleep 1.0;
 		}

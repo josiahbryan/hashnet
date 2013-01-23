@@ -56,6 +56,8 @@
 
 	sub DEBUG_RX { 0 }
 
+	my $HEADER_LEN = 32;
+
 	sub new
 	{
 		my $class = shift;
@@ -342,8 +344,6 @@
 		#my $read_socket  = $socket eq '-' ? *STDIN  : $socket;
 		#my $write_socket = $socket eq '-' ? *STDOUT : $socket;
 		
-		$self->{zero_counter} = 0;
-		
 		my $sock = $self->{sock};
 
 		# IO::Socket has autoflush turned on by default
@@ -379,9 +379,9 @@
 					my $done_reading = 0;
 					while(!$done_reading)
 					{
-						trace "MessageSocketBase: Calling read_msg() + \n" if  DEBUG_RX;
+						#trace "MessageSocketBase: Calling read_msg() + \n" if  DEBUG_RX;
 						my $ret = $self->read_message();
-						trace "MessageSocketBase: Done in read_msg() - \n" if  DEBUG_RX;
+						#trace "MessageSocketBase: Done in read_msg() - \n" if  DEBUG_RX;
 
 						# read_message() returns -1 if fatal
 						#last PROCESS_LOOP if $ret < 0;
@@ -398,7 +398,7 @@
 						# timeout if there really isn't data there.
 						$done_reading = $sel->can_read(0.01) ? 0 : 1;
 						
-						trace "MessageSocketBase: Returning to top of loop\n" if DEBUG_RX;
+						#trace "MessageSocketBase: Returning to top of loop\n" if DEBUG_RX;
 					}
 				};
 				if($@)
@@ -443,7 +443,7 @@
 		
 		#trace "MessageSocketBase: send_pending_messages(): Trying to lock outgoing queue...\n";
 		
-		if($self->outgoing_queue->lock_file)
+		if($self->lock_pending_outgoing)
 		{
 		
 			#trace "MessageSocketBase: send_pending_messages(): Lock acquired, checking for pending messages\n";
@@ -460,7 +460,7 @@
 			@messages = @messages[0..$max_msg] if $msg_total != $max_msg;
 			foreach my $msg (@messages)
 			{
-				trace "MessageSocketBase: wait for can_write\n" if DEBUG_TX;
+				#trace "MessageSocketBase: wait for can_write\n" if DEBUG_TX;
 	
 				# Set a very low timeout to can_write() because we use this to detect when the socket buffer is full
 				# (eg waiting on the other side to process) - since we may hit can_write() several thousand times
@@ -483,7 +483,7 @@
 	
 			trace "MessageSocketBase: Sent $msg_counter messages out of $msg_total\n" if $msg_total && DEBUG_TX;
 			
-			$self->outgoing_queue->unlock_file;
+			$self->unlock_pending_outgoing;
 		}
 		else
 		{
@@ -491,126 +491,145 @@
 		}
 	}
 
+	sub lock_pending_outgoing
+	{
+		return 1;
+	}
+
+	sub unlock_pending_outgoing
+	{
+		return 1;
+	}
+
 	sub read_message
 	{
 		my $self = shift;
 		my $sock = $self->{sock};
 
-		my $first_line;
-		#print STDERR "\t mark1\n";
-		my $timed_out = exec_timeout 0.1, sub { $first_line = $sock->getline() };
-		#print STDERR "\t mark2\n";
+		my $buf = $self->{buf};
+		#trace "MessageSocketBase: read_message(): calling sysread: buf: '".elide_string($buf, 256)."'\n"  if length $buf && DEBUG_RX;
+		my $rv; exec_timeout 0.1, sub { $rv = sysread($sock, $buf, 64*1024, length($buf)) };
+		#trace "MessageSocketBase: read_message(): rv: $rv, buf: '".elide_string($buf, 256)."'\n" if length $buf && DEBUG_RX;
 
-		return 0 if $timed_out;
-
-		# line starts with anything but digits...
-		if($first_line =~ /^\D/)
+		if(length $buf)
 		{
-			# Assume client is lazy, speak only JSON with newlines encoded, don't prepend outgoing messages with byte counts
-			$self->{dialect} = 2;
-			# NOTE {dialect} not used anywhere yet...
+			# Reset disconnect counter
+			$self->{zeros_counter} = 0;
+			
+			$self->{buf} = $buf;
 
-			if($first_line =~ /^(GET|POST)\s+\//)
-			{
-				#print STDERR "Client speaking HTTP, not processing\n";
-				return -1;
-			}
-
-			# Trim newline and pass text to process_message()
-			$first_line =~ s/[\r\n]$//g;
-
-			trace "MessageSocketBase: Non-integer first line, '$first_line'\n" if DEBUG_RX;
-
-			$self->process_message($first_line);
+			#$self->parse_buffer() while length $self->{buf};
+			$self->parse_buffer() if length $self->{buf};
 
 			return 1;
 		}
-
-		#print STDERR "Debug: First line: '$first_line'\n";
-		my $bytes_expected = int($first_line);
-
-		trace "MessageSocketBase: First Line: '$first_line', int(): $bytes_expected\n" if DEBUG_RX;
-
-		if($bytes_expected <= 0)
-		{
-			if($self->{zero_counter} ++)
-			{
-				trace "MessageSocketBase: Client sending 0's for data, disconnecting\n";
-				return -1;
-			}
-
-			return 0;
-		}
-
-		$self->{zero_counter} = 0;
-
-		my $bytes_rxd = 0;
-		my @buffer;
-
-		#print STDERR "Expecting $bytes_expected bytes...\n";
-
-		# Add a timeout around the read loop because we want to prevent the the read loop getting
-		# hung up in the event of a corrupted value received for $bytes_expected
-		eval
-		{
-			# We're doing our own alarm() setup instead of using exec_timeout() because
-			# we reset the alarm each time they send a chunk of data instead of expecting it all in, for example, 30 sec
-
-			local $SIG{'ALRM'} = sub { die "Timed Out!\n" };
-			my $timeout = 30; # give the user 30 seconds to type some lines
-
-			my $previous_alarm = alarm($timeout);
-
-			BUFRD:
-			while (1)
-			{
-				$! = 0;
-				my $data;
-				my $res = $sock->read($data, $bytes_expected - $bytes_rxd);
-				# res: #chars, or 0 for EOF, or undef for error
-				die "read failed on $!" unless defined($res);
-				last BUFRD if $res == 0; # EOF
-
-				#print STDERR "Read($res, $bytes_rxd): $data\n";
-				push @buffer, $data;
-				$bytes_rxd += $res;
-
-				last BUFRD if $bytes_rxd == $bytes_expected;
-
-				if($bytes_rxd > $bytes_expected)
-				{
-					die "Read $bytes_rxd, but only should have read $bytes_expected";
-				}
-
-				alarm($timeout);
-			}
-
-			alarm($previous_alarm);
-
-		};
-
-		if ($@ =~ /timed out/i)
-		{
-			print STDERR "Timed Out.\r\n";
-			return -1;
-		}
 		else
 		{
-			die "Error in read: $@" if $@;
+			$self->{zeros_counter} ++;
+			if($self->{zeros_counter} > 10)
+			{
+				trace "MessageSocketBase: read_message: Client sending null data, disconnecting\n";
+				return -1;
+			}
 		}
 
+		return 0;
+	}
+	
+	sub parse_buffer
+	{
+		my $self = shift;
 
-		my $data = join '', @buffer;
-		#my $len = length $data;
-		#print STDERR "Final answer: len:$len/$bytes_expected, data: '$data'\n";
-		#print STDERR "Data: '$data'\n";
+		my $buf = $self->{buf};
 
-		trace "MessageSocketBase: Data: '$data'\n" if DEBUG_RX;
+		my $done = 0;
 
-		$self->process_message($data);
+		my $eol_len = length(CRLF);
+
+		while(!$done)
+		{
+			if(length $buf < $HEADER_LEN + $eol_len)
+			{
+				$done = 1;
+				last;
+			}
+
+			if($self->{bytes_expected} <= 0)
+			{
+				my $header = substr($buf, 0, $HEADER_LEN + $eol_len);
+				$buf = substr($buf, $HEADER_LEN + $eol_len);
+				$self->{buf} = $buf;
+
+				#print STDERR "Debug: First line: '$first_line'\n";
+				my $bytes_expected = int($header);
+				$self->{bytes_expected} = $bytes_expected;
+				$header =~ s/\s+[\r\n]+//g;
+
+				trace "MessageSocketBase: parse_buffer: head: '$header', int(): $bytes_expected\n" if DEBUG_RX;#, buf: '".elide_string($buf, 32)."'\n" if DEBUG_RX;
+				#trace "MessageSocketBase: parse_buffer: buf:  '".elide_string($buf,$HEADER_LEN)."' (len: ".length($buf).")\n" if DEBUG_RX && length($buf);
+
+				if($header =~/aaaa/)
+				{
+					warn "test failed";
+					exit;
+				}
+			}
+
+			if(length $buf < $self->{bytes_expected})
+			{
+				#warn "MessageSocketBase: parse_buffer: Last header said '$self->{bytes_expected}' bytes, only have ".length($buf)." so far\n";
+				$done = 1;
+				last;
+			}
+			else
+			{
+				trace "MessageSocketBase: parse_buffer: buf len before extract: ".length($buf)."\n" if DEBUG_RX;
+				trace "MessageSocketBase: parse_buffer: bytes expec: ".$self->{bytes_expected}."\n" if DEBUG_RX;
+				
+				my $data = substr($buf, 0, $self->{bytes_expected});
+				$buf = substr($buf, $self->{bytes_expected});
+
+				# for debugging
+				my $exp_len = $self->{bytes_expected};
+				
+				$self->{buf} = $buf;
+				$self->{bytes_expected} = 0;
+
+				trace "MessageSocketBase: parse_buffer: Data: '".elide_string($data,$HEADER_LEN)."'\n" if DEBUG_RX;
+				if(length $data)
+				{
+					trace "MessageSocketBase: parse_buffer: Calling process_message()\n" if DEBUG_RX;
+					$self->process_message($data);
+				}
+
+				if(length $buf)
+				{
+					my $buf_tmp = $buf;
+					$buf_tmp =~ s/(#+)/"('#'x".length($1).")"/seg;
+
+					my $data_tmp = $data;
+					$data_tmp =~ s/(#+)/"('#'x".length($1).")"/seg;
+					
+					trace "MessageSocketBase: parse_buffer: remaining in buffer:  '".elide_string($buf_tmp,$HEADER_LEN * 2)."' (len: ".length($buf).")\n" if DEBUG_RX && length($buf);
+
+					if($buf =~ /^[^0-9]/)
+					{
+						my $dlen = length($data);
+						my $lebn_match = $dlen == $exp_len ? 1:0;
+
+						warn "\$lebn_match: $lebn_match ($dlen / $exp_len)\n";
+						warn "data tmp: ".Dumper($data_tmp);
+						warn "Full buf: ".Dumper($buf);
+						warn "Buffer failure";
+						exit;
+					}
+				}
+			}
+		}
 
 		return 1;
 	}
+
 	
 	sub process_message
 	{
@@ -702,11 +721,18 @@
 
 		if(!$self->{in_bulk_read})
 		{
-			$self->bulk_read_start_hook();
+			if(!$self->bulk_read_start_hook())
+			{
+				error "MessageSocketBase: process_message(): bulk_read_start_hook() failed, not accepting message\n";
+				$self->bulk_read_start_hook_failure_handler();
+				return 0;
+			}
 			$self->{in_bulk_read} = 1;
 		}
 		
 		$self->dispatch_message($hash, $second_part);
+
+		return 1;
 	}
 	
 	# NOTE: May override in subclass, not required
@@ -716,8 +742,15 @@
 		my $bad_msg = shift;
 		my $error   = shift;
 		
-		print STDERR "bad_message_handler: '$error' (bad_msg: $bad_msg)\n";
-		$self->send_message({ type => "error", error => $error, bad_msg => $bad_msg });
+		print STDERR "bad_message_handler: '$error' (bad_msg: ".substr($bad_msg,0,256).(length($bad_msg) > 256 ? '...':'').")\n";
+		$self->send_message({ type => "MSG_INTERNAL_ERROR", data => $error, bad_msg => $bad_msg });
+	}
+
+	# NOTE: May override in subclass, not required
+	sub bulk_read_start_hook_failure_handler
+	{
+		my $self    = shift;
+		$self->send_message({ type => "MSG_INTERNAL_ERROR", data => "bulk_read_start_hook() failed" });
 	}
 	
 	# NOTE: Override in subclass
@@ -770,9 +803,9 @@
 			#warn "clean_ref that caused error: ".Dumper($clean_ref);
 			return;
 		}
-
-		if(defined $att)
-		{
+# 
+# 		if(defined $att)
+# 		{
 			#trace "MessageSocketBase: send_message: has att, generating output\n";
 			my $boundary = $UUID_GEN->generate_v1->as_string();
 
@@ -797,7 +830,7 @@
 
 			# This is the real code
 			#trace "MessageSocketBase: send_message: Sending '$buffer' [with att]\n";
-			print $sock $total_len.CRLF;
+			print $sock sprintf('%-'.$HEADER_LEN.'s',$total_len).CRLF;
 			print $sock $buffer;
 			print $sock $att;
 
@@ -813,18 +846,18 @@
 			#print $sock $att;
 			
 			# TODO: Write test for this functionality
-		}
-		else
-		{
-			my $msg  = $json.CRLF;
-			my $sock = $self->{sock};
-			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
-			print $sock $msg;
-
-			my $oldfh = select $sock;
-			$| ++;
-			select $oldfh;
-		}
+# 		}
+# 		else
+# 		{
+# 			my $msg  = $json.CRLF;
+# 			my $sock = $self->{sock};
+# 			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
+# 			print $sock $msg;
+# 
+# 			my $oldfh = select $sock;
+# 			$| ++;
+# 			select $oldfh;
+# 		}
 
 		#trace "MessageSocketBase: send_message: print() done\n";
 		

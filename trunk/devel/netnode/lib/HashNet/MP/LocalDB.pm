@@ -172,9 +172,12 @@ use common::sense;
 	sub end_batch_update
 	{
 		my $self = shift;
-		$self->{_updates_paused} = 0;
-		$self->update_end if $self->{_update_end_count_while_locked};
-		$self->unlock_file;
+		if($self->{_updates_paused})
+		{
+			$self->{_updates_paused} = 0;
+			$self->shared_ref->save_data if $self->{_update_end_count_while_locked};
+			$self->unlock_file;
+		}
 	}
 
 	sub update_begin
@@ -278,7 +281,7 @@ use common::sense;
 		my $self = shift;
 		my $row = shift;
 		
-		return undef if ! defined $row;
+		return 1 if ! defined $row;
 		
 		# Protection against idiot programmers (myself) trying to add a row twice - which messes up the index and del_row calls later
 		if($row->{id})
@@ -289,7 +292,7 @@ use common::sense;
 
 		if(!$self->update_begin)
 		{
-			error "LocalDB: ".$self->shared_ref->file.": Failed to lock file, refusing to add more data because it might corrupt database\n";
+			error "LocalDB: ".$self->shared_ref->file.": add_row(): Failed to lock file, refusing to add more data because it might corrupt database\n";
 			return 0;
 		}
 		
@@ -366,12 +369,25 @@ use common::sense;
 	sub add_batch
 	{
 		my $self = shift;
-		my $rows = shift;
-		
-		my @rows = @{$rows || []};
-		return undef if !@rows;
 
-		$self->update_begin;
+		my @rows;
+		if(ref $_[0] eq 'ARRAY')
+		{
+			@rows = @{$_[0] || []};
+		}
+		else
+		{
+			@rows = @_;
+		}
+		return 1 if !@rows;
+
+
+		if(!$self->update_begin)
+		{
+			error "LocalDB: ".$self->shared_ref->file.": add_batch(): Failed to lock file, refusing to add more data because it might corrupt database\n";
+			return 0;
+		}
+		
 		
 		my $data  = $self->data;
 		my $index = $self->index;
@@ -380,7 +396,6 @@ use common::sense;
 # 		use Data::Dumper;
 # 		print STDERR Dumper $rows;
 			
-		my @out;
 		foreach my $row (@rows)
 		{
 			my $id = $self->next_id;
@@ -395,21 +410,27 @@ use common::sense;
 				$index->{$key}->{$val} = {} if !$index->{$key}->{$val};
 				$index->{$key}->{$val}->{$id} = 1;
 			}
-			
-			push @out, $row;
 		}
 
 		$self->update_end;
 		
-		return \@out;
+		return 1; #\@rows;
 	}
 	
 	sub del_batch
 	{
 		my $self = shift;
-		my $rows = shift;
-		my @rows = @{$rows || []};
-		return if !@rows;
+
+		my @rows;
+		if(ref $_[0] eq 'ARRAY')
+		{
+			@rows = @{$_[0] || []};
+		}
+		else
+		{
+			@rows = @_;
+		}
+		return 1 if !@rows;
 
 		$self->update_begin;
 		
