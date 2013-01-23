@@ -807,8 +807,9 @@
 			return;
 		}
 
+		my $final_len = 0;
+
 		$self->_lock_socket;
-		
 
 		if(defined $att)
 		{
@@ -836,13 +837,16 @@
 
 			# This is the real code
 			#trace "MessageSocketBase: send_message: Sending '$buffer' [with att]\n";
-			print $sock sprintf('%-'.$HEADER_LEN.'s',$total_len).CRLF;
+			my $header = sprintf('%-'.$HEADER_LEN.'s',$total_len).CRLF;
+			print $sock $header;
 			print $sock $buffer;
 			print $sock $att;
 
 			my $oldfh = select $sock;
 			$| ++;
 			select $oldfh;
+
+			$final_len = length($header) + $total_len;
 			
 
 			# For debugging
@@ -858,8 +862,11 @@
 			my $msg  = $json.CRLF;
 			my $sock = $self->{sock};
 			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
-			print $sock sprintf('%-'.$HEADER_LEN.'s',length($msg)).CRLF;
+			my $header = sprintf('%-'.$HEADER_LEN.'s',length($msg)).CRLF;
+			print $sock $header;
 			print $sock $msg;
+
+			$final_len = length($header) + length($msg);
 
 			my $oldfh = select $sock;
 			$| ++;
@@ -868,6 +875,8 @@
 
 
 		$self->_unlock_socket;
+
+		return $final_len;
 		
 		#trace "MessageSocketBase: send_message: print() done\n";
 	}
