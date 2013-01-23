@@ -998,8 +998,8 @@ use common::sense;
 		$ack_queue->begin_batch_update;
 		eval{
 			my $msg = $ack_queue->by_field(uuid => $ack);
-			$ack_queue->del_row($msg);
-			#die "No msg in ACK queue for uuid {$ack}";
+			$ack_queue->del_row($msg) if $msg;
+			warn "No msg in ACK queue for uuid {$ack}" if !$msg;
 		};
 		$ack_queue->end_batch_update;
 		die "SocketWorker: _handle_msg_ack: Error processing ACK for msg {$ack}: $@" if $@;
@@ -1414,7 +1414,7 @@ use common::sense;
 	{
 		my $self  = shift;
 		my $uuid  = shift;
-		my $max   = shift || 4;
+		my $max   = shift || 2;
 		my $speed = shift || 0.1;
 		$uuid = $uuid->{uuid} if ref $uuid eq 'HASH';
 
@@ -1441,7 +1441,7 @@ use common::sense;
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		$res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
-		#trace "SocketWorker: wait_for_ack: Exit ($uuid), res: $res\n";
+		trace "SocketWorker: wait_for_ack: Exit ($uuid), res: $res\n";
 		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
 	}
