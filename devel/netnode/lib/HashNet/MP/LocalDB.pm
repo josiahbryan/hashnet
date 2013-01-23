@@ -169,6 +169,11 @@ use common::sense;
 		return 1;
 	}
 
+	sub in_batch_update
+	{
+		return shift->{_updates_paused};
+	}
+
 	sub end_batch_update
 	{
 		my $self = shift;
