@@ -10,7 +10,7 @@ package HashNet::Util::Logging;
 	our @ISA = qw(Exporter);
 	
 	# Exporting by default
-	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from called_from_smart get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper log_kill can_signal);
+	our @EXPORT = qw(debug info trace error logmsg print_stack_trace called_from called_from_smart get_stack_trace date rpad pad ifdef ifdefined lock_file unlock_file Dumper log_kill can_signal elide_string);
 	# Exporting on demand basis.
 	our @EXPORT_OK = qw();
 	
@@ -49,6 +49,9 @@ package HashNet::Util::Logging;
 	# Use this to add custom prefix right before user text or called_from (if $SHOW_FROM set)
 	our $CUSTOM_OUTPUT_PREFIX = '';
 
+	# If not set, auto-populated to 30char string from $0
+	our $LOG_APP_NAME = undef;
+
 	# Used for changing line color by PID if $ANSI_ENABLED
 	my %PidColorLut;
 	my @PidColorList = (ON_RED.BOLD.WHITE, ON_GREEN.BLACK, ON_YELLOW.BLACK, ON_MAGENTA.BLACK, ON_CYAN.BLACK, ON_WHITE.BLACK,
@@ -73,7 +76,8 @@ package HashNet::Util::Logging;
 		return "$date $time".substr(sprintf('%.09f', $dec_sec),1);
 		
 	}
-	
+
+	my $LOG_APP_NAME_AUTO_FOR = undef;
 	sub logmsg
 	{
 		return if !$LEVEL;
@@ -91,6 +95,14 @@ package HashNet::Util::Logging;
 		}
 		
 		lock_stdout;
+		if(!$LOG_APP_NAME || $LOG_APP_NAME_AUTO_FOR ne $0)
+		{
+			$LOG_APP_NAME_AUTO_FOR = $0;
+			my $app = $0;
+			(undef, $app) = $app =~ /^(.*?\/)?([^\/]+)$/;
+			$LOG_APP_NAME = sprintf('%30s', (length($app) > 27 ? '...' : ''). substr($app, -27));
+		}
+		
 		if($ANSI_ENABLED)
 		{
 			my $color_on = $PidColorLut{$$};
@@ -123,12 +135,12 @@ package HashNet::Util::Logging;
 				
 			}
 			#print STDERR $color_on, sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
-			print STDERR $color_on, logtime(), ' [', pad($level, 5, ' '), "] [PID ".rpad($$, 5, ' ')."]  $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
+			print STDERR $color_on, logtime(), ' [', pad($level, 5, ' '), "] $LOG_APP_NAME [".rpad($$, 5, ' ')."] $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_), CLEAR;
 		}
 		else
 		{
 			#print STDERR sprintf('%.09f',time()), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
-			print STDERR logtime(), ' [', pad($level, 5, ' '), "] [PID $$] \t$CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
+			print STDERR logtime(), ' [', pad($level, 5, ' '), "] $LOG_APP_NAME [".rpad($$, 5, ' ')."] $CUSTOM_OUTPUT_PREFIX", ($SHOW_FROM ? $called_from. "\t ":""), join('', @_);
 		}
 		unlock_stdout;
 	}
@@ -336,5 +348,24 @@ package HashNet::Util::Logging;
 # 		warn "log_kill: Killing pid '$pid'".($msg?" ($msg)":"").", \"$ps_info\", called from: ".called_from()."\n";
 		return kill $sig, $pid;
 	}
+
+	sub elide_string
+	{
+		my $string = shift;
+		my $max_len = shift || 50;
+
+		my $len = length($string);
+		if($len > $max_len)
+		{
+			my $elide = '...';
+			my $buff  = ($max_len - length($elide)) / 2;
+			my $b1    = substr($string,      0, $buff);
+			my $b2    = substr($string, -$buff, $buff);
+			$string   = "${b1}...${b2}";
+		}
+		return $string;
+
+	}
+
 };
 1

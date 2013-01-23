@@ -462,7 +462,13 @@ use common::sense;
 		my $error   = shift;
 		
 		print STDERR "bad_message_handler: '$error' (bad_msg: ".substr($bad_msg,0,256).(length($bad_msg) > 256 ? '...':'').")\n";
-		$self->send_message({ msg => MSG_INTERNAL_ERROR, error => $error, bad_msg => $bad_msg });
+		$self->send_message({ msg => MSG_INTERNAL_ERROR, data => $error, bad_msg => $bad_msg });
+	}
+
+	sub bulk_read_start_hook_failure_handler
+	{
+		my $self    = shift;
+		$self->send_message({ type => MSG_INTERNAL_ERROR, data => "bulk_read_start_hook() failed" });
 	}
 
 	sub node_info
@@ -1055,11 +1061,20 @@ use common::sense;
 		if($msg_type eq MSG_NODE_INFO)
 		{
 			$self->_handle_msg_node_info($envelope);
+			# _handle_msg_node_info calls _rx_copy_to... and calls _call_msg_handlers() itself
+			# because we dont want MSG_NODE_INFO falling thru and getting added to the incoming queue
 			return 1;
 		}
 		elsif($msg_type eq MSG_ACK)
 		{
 			$self->_handle_msg_ack($envelope);
+			# MSG_ACKs should not be processed by custom handlers (at least until I find a use-case for that)
+			return 1;
+		}
+		elsif($msg_type eq MSG_INTERNAL_ERROR)
+		{
+			error "SocketWorker: Internal Error in remote SocketWorker: $envelope->{data}\n";
+			# Internal errors dont need to be processed by custom handlers, etc
 			return 1;
 		}
 		elsif($msg_type eq MSG_PING)
@@ -1096,12 +1111,12 @@ use common::sense;
 				$send_ack = 0;
 			}
 
-			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack;
+			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack && $envelope->{uuid};
 		}
 		else
 		{
 			info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
-			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK));
+			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $envelope->{uuid};
 		}
 	}
 
@@ -1145,7 +1160,6 @@ use common::sense;
 		return $consumed;
 	}
 
-	# TODO: Update Message Socket Base to honor failure to lock
 	sub bulk_read_start_hook
 	{
 		my $self = shift;
@@ -1162,13 +1176,26 @@ use common::sense;
 		incoming_queue()->end_batch_update;
 	}
 
+	# lock/unlock_pending_outgoing hooks from MessageSocketBase
+	sub lock_pending_outgoing
+	{
+		return outgoing_queue()->lock_file;
+	}
+
+	sub unlock_pending_outgoing
+	{
+		outgoing_queue->unlock_file();
+	}
+
 	sub update_time_offset
 	{
 		my $self = shift;
 		$self->state_update(1);
-
-		# (undef, 1) tells sync_time() to only get the offset, not to try and adjust the time
-		exec_timeout 1.0, sub { $self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1); };
+		eval
+		{
+			# (undef, 1) tells sync_time() to only get the offset, not to try and adjust the time
+			exec_timeout 1.0, sub { $self->state_handle->{time_offset} = HashNet::Util::SNTP->sync_time(undef, 1); };
+		};
 		
 		$self->state_update(0);
 	}
@@ -1343,6 +1370,7 @@ use common::sense;
 		# Return 1 if started, or <1 if not yet completely started
 		my $res = $self->state_handle->{online};
 		#trace "SocketWorker: wait_for_start: Exit, res: $res\n";
+		logmsg "WARN", "SocketWorker: wait_for_start: Failed to start in $max seconds (\$res=$res)\n" if $res !=1;
 		return $res;
 	}
 
@@ -1363,9 +1391,9 @@ use common::sense;
 		my $time  = time;
 		sleep $speed while time - $time < $max
 			       #and !$queue->has_external_changes # check is_changed first to prevent having to re-load data every time if nothing changed
-		               and defined $queue->by_field(nxthop => $uuid);
+		               and defined $queue->by_key(nxthop => $uuid);
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
-		$res = defined $queue->by_field(nxthop => $uuid) ? 0 : 1;
+		$res = defined $queue->by_key(nxthop => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
 		#sleep 10;
 		#trace "SocketWorker: wait_for_send: Done looping ($uuid), res: $res, acking...\n";
@@ -1388,13 +1416,13 @@ use common::sense;
 
 		# TODO Rewrite for custom SW outgoing queue
 		my $queue = msg_queue('ack');
-		my $res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
+		my $res = defined $queue->by_key(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
 		#trace "SocketWorker: wait_for_ack: Enter ($uuid), res: $res\n";
 		my $time  = time;
 		sleep $speed while time - $time < $max
 			       #and !$queue->has_external_changes # check is_changed first to prevent having to re-load data every time if nothing changed
-		               and defined $queue->by_field(uuid => $uuid);
+		               and defined $queue->by_key(uuid => $uuid);
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		$res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
@@ -1415,11 +1443,12 @@ use common::sense;
 		
 		my $count = $opts{msgs}    || $opts{count} || 1;
 		my $max   = $opts{timeout} || $opts{max}   || 4;
-		my $speed = $opts{speed}   ||                 0.01;
+		my $speed = $opts{speed}   ||                 0.1;
 		my $type  = $opts{type}    ||                 undef;
 		my $uuid  = $opts{uuid}    ||                 $self->uuid;
+		my $debug = $opts{debug}   ||                 0;
 		
-		trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n";
+		trace "SocketWorker: wait_for_receive: Enter (to => $uuid), count: $count, max: $max, speed: $speed\n" if $debug;
 		my $queue = incoming_queue();
 		my $time  = time;
 		
@@ -1446,11 +1475,11 @@ use common::sense;
 			
 			unless(kill 0, $self->state_handle->{read_loop_pid})
 			{
-				error "SocketWorker: wait_for_receive: SocketWorker read loop PID ".$self->state_handle->{read_loop_pid}." gone away, not waiting anymore\n";
+				error "SocketWorker: wait_for_receive: SocketWorker read loop PID ".$self->state_handle->{read_loop_pid}." gone away, not waiting anymore\n" if $debug;
 				return $cnt;
 			}
 
-			trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n";
+			trace "SocketWorker: wait_for_receive: Have $cnt, want $count ...\n" if $debug;
 			last if $cnt >= $count;
 			sleep $speed;
 		}
@@ -1466,7 +1495,7 @@ use common::sense;
 			$res = scalar $queue->all_by_key(to => $uuid);
 		}
 		
-		trace "SocketWorker: wait_for_receive: Exit, res: $res\n";
+		trace "SocketWorker: wait_for_receive: Exit, res: $res\n" if $debug;
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
 		return $res;
@@ -1491,10 +1520,70 @@ use common::sense;
 		#trace "SocketWorker: pending_messages: uuid '$uuid' - querying...\n";
 		#trace Dumper $self->state_handle;
 
+		my $ack_queue = msg_queue('ack');
+
+		# end_batch_update is called on the ACK queue in messages_sent()
+		#trace "SocketWorker: [ACK LOCK] Lock   ACK queue in pending_messages()\n";
+		$ack_queue->begin_batch_update;
+
+		# Check ACK queue for any messages pending ACK for more than $max_ack_time seconds and
+		# add to the @res list for retransmission
+		my $max_ack_time     = 60; # seconds
+		my $cur_time         = $self->sntp_time();
+		my @ack_pending_list = @{ $ack_queue->list || {} };
+		my @ack_failed_list  = grep { $cur_time - $_->{_tx_time} > $max_ack_time } @ack_pending_list;
+		
+		trace "SocketWorker: pending_messages(): Found ".scalar(@ack_failed_list)." messages that failed ACK, retransmitting\n" if @ack_failed_list;
+
+		# Add messages that failed ACK to the outgoing queue again (if they are in the ACK queue,
+		# then by definition they would have been removed from the outgoing queue in messages_sent())
+		#outgoing_queue()->add_batch([ map { clean_ref($_) } @ack_failed_list ]);
+		if(@ack_failed_list)
+		{
+			# Clone the messages destined to be re-enqueued to the outgoing queue
+			# because add_batch() sets the {id} on each of the refs - if we did NOT
+			# clone the refs, the {id} set by add_batch() would not batch the original
+			# id from the ACK queue database, so the del_batch() call would
+			# fail to remove them from the ACK queue, causing the message to
+			# be duplicated - appearing in both the ACK and outgoing queue simultaneously
+			my @requeue_list = map { clean_ref($_) } @ack_failed_list;
+			
+			if($self->outgoing_queue->add_batch(\@requeue_list))
+			{
+				# NOTE: Only deleting from ack_queue IF add_batch on incoming queue succedes so that
+				# we 'guarantee' retransmisson - outgoing_queue could fail to lock queue (not likely)
+				# which would not add our ack_failed_list to the queue, causing us to loose data
+				# if we deleted the messages from the ACK queue if they didnt make it into the outgoing queue
+
+				# Remove failed messages from the ACK queue (because they are retransmitted - they will get
+				# readded to the ACK queue in messages_sent)
+				$ack_queue->del_batch(\@ack_failed_list);
+
+				#trace "SocketWorker: pending_messages(): Added ".scalar(@ack_failed_list)." to outgoing, deleted from ACK queue\n";#.Dumper($ack_queue->size ? $ack_queue : [],  $self->outgoing_queue);
+			}
+			else
+			{
+				error "SocketWorker: pending_messages(): Failed to add \@ack_failed_list to outgoing queue\n";
+			}
+		}
+
+# 		if(@ack_failed_list > 1)
+# 		{
+# 			warn "Wierd case, more than 1 msgs: ".Dumper($ack_queue, $self->outgoing_queue);
+# 			exit;
+# 		}
+
+
 		# TODO Rewrite for custom SW outgoing queue
+
+		# Now load any pending messages (both ACK retransmissions and other pending mesages)
 		my @res = HashNet::MP::MessageQueues->pending_messages(outgoing, nxthop => $uuid, no_del => 1);
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(\@res);# if @res;
 		#trace "SocketWorker: pending_messages: uuid: $uuid, ".Dumper(outgoing_queue());# if @res;
+
+		# NOTE: Messages not deleted from outgoing queue here - they are only deleted when actually transmitted
+		# because MessageSocketBase only calls messages_sent (which deletes the messages from the outgoing
+		# queue) when the messages actually are print()ed to the socket in MessageSocketBase::send_message()
 		
 		# Somehow, empty hashes are getting into the outgoing queue...need to track down...
 		@res = grep { $_->{uuid} } @res;
@@ -1502,8 +1591,12 @@ use common::sense;
 		# Check envelope history on this side so as to not cause unecessary traffice
 		# if this envelope would just be rejected by the check_env_hist() above on the receiving side 
 		#@res = grep { !check_env_hist($_, $uuid) } @res;
-		msg_queue('ack')->begin_batch_update;
 
+		# Add _tx_time to the result list for ACK time checking purposes
+		@res = map { $_->{_tx_time} = $cur_time; $_ } @res;
+
+		#trace "SocketWorker: pending_messages(): Found ".scalar(@res)." messages for transmission\n" if @res;
+		
 		return @res;
 	}
 
@@ -1511,13 +1604,15 @@ use common::sense;
 	{
 		my $self = shift;
 		my $batch = shift;
+		
 		# TODO Rewrite for custom SW outgoing queue
 		$self->outgoing_queue->del_batch($batch);
 
 		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
-		#msg_queue('ack')->add_batch(\@res);
-		msg_queue('ack')->add_batch($batch);
-		msg_queue('ack')->end_batch_update;
+		my $ack_queue = msg_queue('ack');
+		$ack_queue->add_batch($batch);
+		$ack_queue->end_batch_update;
+		#trace "SocketWorker: [ACK LOCK] Unlock ACK queue in messages_sent()\n";
 	}
 
 	# NOTE: This only works BEFORE
