@@ -426,7 +426,7 @@ use common::sense;
 # 						sfwd => 0,
 # 						bcast => 1,
 # 						type => MSG_OFFLINE);
-# 		$self->send_message($env);
+# 		$self->_send_message($env);
 		#print STDERR Dumper $env;
 
 		my $pid = $self->state_handle->{read_loop_pid};
@@ -462,13 +462,13 @@ use common::sense;
 		my $error   = shift;
 		
 		print STDERR "bad_message_handler: '$error' (bad_msg: ".substr($bad_msg,0,256).(length($bad_msg) > 256 ? '...':'').")\n";
-		$self->send_message({ msg => MSG_INTERNAL_ERROR, data => $error, bad_msg => $bad_msg });
+		$self->_send_message({ msg => MSG_INTERNAL_ERROR, data => $error, bad_msg => $bad_msg });
 	}
 
 	sub bulk_read_start_hook_failure_handler
 	{
 		my $self    = shift;
-		$self->send_message({ type => MSG_INTERNAL_ERROR, data => "bulk_read_start_hook() failed" });
+		$self->_send_message({ type => MSG_INTERNAL_ERROR, data => "bulk_read_start_hook() failed" });
 	}
 
 	sub node_info
@@ -883,7 +883,7 @@ use common::sense;
 		my $env = $self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO);
 		#use Data::Dumper;
 		#print STDERR Dumper $env;
-		$self->send_message($env);
+		$self->_send_message($env);
 
 		$self->state_update(1);
 		$self->state_handle->{online} = 0.5;
@@ -969,7 +969,7 @@ use common::sense;
 
 		$peer->set_online(1, $$);
 
-		#$self->send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
+		#$self->_send_message($self->create_envelope({ack_msg => MSG_NODE_INFO, text => "Hello, $node_info->{name}" }, type => MSG_ACK));
 
 		$self->state_update(1);
 		$self->state_handle->{remote_node_info} = $node_info;
@@ -1035,7 +1035,7 @@ use common::sense;
 			#use Data::Dumper;
 			#print STDERR Dumper $envelope;
 
-			$self->send_message($new_env);
+			$self->_send_message($new_env);
 		}
 		return 1;
 	}
@@ -1048,7 +1048,7 @@ use common::sense;
 		
 		#print STDERR "dispatch_message: envelope: ".Dumper($envelope)."\n";
 		
-		#$self->send_message({ received => $envelope });
+		#$self->_send_message({ received => $envelope });
 		$envelope->{_att} = $second_part if defined $second_part;
 		$envelope->{_rx_time} = $self->sntp_time();
 				
@@ -1111,12 +1111,12 @@ use common::sense;
 				$send_ack = 0;
 			}
 
-			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack && $envelope->{uuid};
+			$self->_send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack && $envelope->{uuid};
 		}
 		else
 		{
 			info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
-			$self->send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $envelope->{uuid};
+			$self->_send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $envelope->{uuid};
 		}
 	}
 
@@ -1141,7 +1141,7 @@ use common::sense;
 				{
 					my $flag = $coderef->($envelope, $self, $current_type);
 
-					$self->send_message($self->create_client_receipt($envelope))
+					$self->_send_message($self->create_client_receipt($envelope))
 						if $envelope->{type} ne 'MSG_CLIENT_RECEIPT' &&
 						   $self->peer &&
 						   $self->peer->{type} eq 'hub';
@@ -1233,7 +1233,7 @@ use common::sense;
 		my $uuid  = $self->uuid;
 		info "SocketWorker: send_ping: Sending MSG_PING" . ($uuid_to ? " to $uuid_to" : " as a broadcast ping"). " via hub ".$self->peer_uuid." (".$self->state_handle->{remote_node_info}->{name}.")\n"; # from $uuid\n";
 		
-		$self->send_message($new_env);
+		$self->_send_message($new_env);
 
 		# TODO Rewrite for custom SW outgoing queue
 		#$self->outgoing_queue->add_row($new_env);
@@ -1608,11 +1608,34 @@ use common::sense;
 		# TODO Rewrite for custom SW outgoing queue
 		$self->outgoing_queue->del_batch($batch);
 
+		$self->need_ack($batch);
+	}
+
+	sub need_ack
+	{
+		my ($self, $batch) = @_;
 		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
 		my $ack_queue = msg_queue('ack');
-		$ack_queue->add_batch($batch);
-		$ack_queue->end_batch_update;
+		$ack_queue->add_row($batch)    if ref $batch eq 'HASH';
+		$ack_queue->add_batch($batch)  if ref $batch eq 'ARRAY';
+		$ack_queue->end_batch_update() if $ack_queue->in_batch_update;
 		#trace "SocketWorker: [ACK LOCK] Unlock ACK queue in messages_sent()\n";
+	}
+
+	sub send_message
+	{
+		my $self = shift;
+		my $msg = shift;
+		$msg->{_tx_time} = $self->sntp_time();
+		$self->need_ack($msg);
+		#my $queue = msg_queue('ack');
+		#print STDERR Dumper($queue);
+		$self->_send_message($msg);
+	}
+
+	sub _send_message
+	{
+		shift->SUPER::send_message(@_);
 	}
 
 	# NOTE: This only works BEFORE

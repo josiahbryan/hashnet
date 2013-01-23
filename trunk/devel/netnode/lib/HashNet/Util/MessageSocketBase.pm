@@ -605,10 +605,10 @@
 				if(length $buf)
 				{
 					my $buf_tmp = $buf;
-					$buf_tmp =~ s/(#+)/"('#'x".length($1).")"/seg;
+					$buf_tmp =~ s/(#+)/"[#x".length($1)."]"/seg;
 
 					my $data_tmp = $data;
-					$data_tmp =~ s/(#+)/"('#'x".length($1).")"/seg;
+					$data_tmp =~ s/(#+)/"[#x".length($1)."]"/seg;
 					
 					trace "MessageSocketBase: parse_buffer: remaining in buffer:  '".elide_string($buf_tmp,$HEADER_LEN * 2)."' (len: ".length($buf).")\n" if DEBUG_RX && length($buf);
 
@@ -616,10 +616,13 @@
 					{
 						my $dlen = length($data);
 						my $lebn_match = $dlen == $exp_len ? 1:0;
-
+						warn "--\n";
 						warn "\$lebn_match: $lebn_match ($dlen / $exp_len)\n";
+						warn "--\n";
 						warn "data tmp: ".Dumper($data_tmp);
-						warn "Full buf: ".Dumper($buf);
+						warn "--\n";
+						warn "buf tmp: ".Dumper($buf_tmp);
+						warn "--\n";
 						warn "Buffer failure";
 						exit;
 					}
@@ -803,9 +806,12 @@
 			#warn "clean_ref that caused error: ".Dumper($clean_ref);
 			return;
 		}
-# 
-# 		if(defined $att)
-# 		{
+
+		$self->_lock_socket;
+		
+
+		if(defined $att)
+		{
 			#trace "MessageSocketBase: send_message: has att, generating output\n";
 			my $boundary = $UUID_GEN->generate_v1->as_string();
 
@@ -846,23 +852,36 @@
 			#print $sock $att;
 			
 			# TODO: Write test for this functionality
-# 		}
-# 		else
-# 		{
-# 			my $msg  = $json.CRLF;
-# 			my $sock = $self->{sock};
-# 			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
-# 			print $sock $msg;
-# 
-# 			my $oldfh = select $sock;
-# 			$| ++;
-# 			select $oldfh;
-# 		}
+		}
+		else
+		{
+			my $msg  = $json.CRLF;
+			my $sock = $self->{sock};
+			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
+			print $sock sprintf('%-'.$HEADER_LEN.'s',length($msg)).CRLF;
+			print $sock $msg;
 
-		#trace "MessageSocketBase: send_message: print() done\n";
+			my $oldfh = select $sock;
+			$| ++;
+			select $oldfh;
+		}
+
+
+		$self->_unlock_socket;
 		
-  
+		#trace "MessageSocketBase: send_message: print() done\n";
 	}
+
+	sub _lock_socket
+	{
+		shift->pid_ipc_ref->lock_file(30);
+	}
+
+	sub _unlock_socket
+	{
+		shift->pid_ipc_ref->unlock_file;
+	}
+	
 	
 	# TODO: Override in subclasses to return a list of pending messages to send using send_message() in process_loop
 	sub pending_messages
