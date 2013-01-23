@@ -335,6 +335,8 @@ use common::sense;
 		# start() at the end of our new()
 		my $old_auto_start = $opts{auto_start}; 
 		$opts{auto_start} = 0;
+
+		#trace "SocketWorker: new: \%opts: ".Dumper(\%opts);
 		
 		# Auto-generate node_info as needed
 		$opts{node_info} = $class->gen_node_info if !$opts{node_info};
@@ -880,7 +882,7 @@ use common::sense;
 		my $self = shift;
 		
 		trace "SocketWorker: Sending MSG_NODE_INFO\n";
-		my $env = $self->create_envelope($self->{node_info}, to => '*', type => MSG_NODE_INFO);
+		my $env = $self->create_envelope($self->node_info(), to => '*', type => MSG_NODE_INFO);
 		#use Data::Dumper;
 		#print STDERR Dumper $env;
 		$self->_send_message($env);
