@@ -19,6 +19,8 @@ use common::sense;
 	use Carp qw/carp croak/;
 	use POSIX qw( WNOHANG );
 
+	$SIG{CHLD} = 'IGNORE';
+
 	use Storable qw/store retrieve/; # WAN IP cache
 
 	use HashNet::MP::PeerList;
@@ -1420,11 +1422,22 @@ use common::sense;
 		my $queue = msg_queue('ack');
 		my $res = defined $queue->by_key(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
-		#trace "SocketWorker: wait_for_ack: Enter ($uuid), res: $res\n";
+		#trace "SocketWorker: wait_for_ack: Enter ($uuid), res: $res, pid mon:".$self->state_handle->{read_loop_pid}."\n";
 		my $time  = time;
-		sleep $speed while time - $time < $max
+		while(time - $time < $max
 			       #and !$queue->has_external_changes # check is_changed first to prevent having to re-load data every time if nothing changed
-		               and defined $queue->by_key(uuid => $uuid);
+		               and defined $queue->by_key(uuid => $uuid))
+		{
+
+			unless(kill 0, $self->state_handle->{read_loop_pid})
+			{
+				#error "SocketWorker: wait_for_ack: SocketWorker read loop PID ".$self->state_handle->{read_loop_pid}." gone away, not waiting anymore\n";
+				return $res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;;
+			}
+
+			sleep $speed;
+
+		}
 		# Returns 1 if all msgs sent by end of $max, or 0 if msgs still pending
 		$res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
