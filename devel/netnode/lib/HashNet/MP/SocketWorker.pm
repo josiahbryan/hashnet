@@ -1632,7 +1632,7 @@ use common::sense;
 		$self->need_ack($msg);
 		#my $queue = msg_queue('ack');
 		#print STDERR Dumper($queue);
-		$self->_send_message($msg);
+		return $self->_send_message($msg);
 	}
 
 	sub _send_message

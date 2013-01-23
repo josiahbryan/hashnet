@@ -134,7 +134,7 @@
 	sub peer		{ shift->{peer} }
 
 	sub send_ping		{ shift->sw->send_ping(@_) }
-	
+
 	sub wait_for_start	{ shift->sw->wait_for_start(@_)   }
 	sub wait_for_send	{ shift->sw->wait_for_send(@_)    }
 	sub wait_for_receive	{ shift->sw->wait_for_receive(@_) }
