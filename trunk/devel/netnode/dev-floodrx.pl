@@ -26,15 +26,15 @@ my $sock = $ch->sw->{sock};
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>2}, 'a' x (1024 * 1024));
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>3}, 'a' x (1024 * 1024));
 
-my $att_len = (1024 * 1024 * 8);
-my $max = 512;
+my $att_len = (1024 * 1024 *  512);
+my $max = 64;
 my $time = time();
 my $len = 0;
 $len += $ch->sw->send_message({uuid => $_.'.1-'.$time, "data" => $_}, '#' x $att_len) for 1..$max;
 
 $ch->sw->wait_for_ack($_.'.1-'.$time) for 1..$max;
 
-$len = $att_len * $max;# + length($_.'.1-'.$time.'data'.$_) * $max;
+#$len = $att_len * $max;# + length($_.'.1-'.$time.'data'.$_) * $max;
 
 my $time_d = time - $time;
 my $bytes_sec = $len / ($time_d <= 0 ? 1 : $time_d);
