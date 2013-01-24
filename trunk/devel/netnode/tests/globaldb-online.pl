@@ -17,9 +17,9 @@ $SIG{CHLD} = 'IGNORE';
 
 my $test_port = 82814;
 my $test_srv_cfg = 'test-basic-server.conf';
-my $db_client_file1 = 'db.test-client1';
-my $db_client_file2 = 'db.test-client2';
-my $db_server_file = 'db.test-basic-server';
+my $db_client_file1 = '/tmp/db.test-client1';
+my $db_client_file2 = '/tmp/db.test-client2';
+my $db_server_file = '/tmp/db.test-basic-server';
 
 HashNet::MP::LocalDB->dump_db($db_client_file1);
 HashNet::MP::LocalDB->dump_db($db_client_file2);
@@ -139,6 +139,12 @@ if(!$client_pid)
 	
 	is($pid_t, $server_pid, "Data retrieval");
 
+	if($pid_t != $server_pid)
+	{
+		use HashNet::Util::ANSIUtil;
+		print STDERR ON_RED.WHITE.BOLD."\n\n\n --- TEST FAILURE ---\n\n\n";
+	}
+
 	# Make sure server has our test key
 	is($db->_query_hubs($test_key), 1, "_query_hubs() works online");
 
@@ -186,7 +192,7 @@ if(!$client_pid)
 	my $undef_key = 'foobar123';
 	my $bad_get = $gdb->get($undef_key);
 	ok(!defined $bad_get, "get('$undef_key') not defined");
-
+# 
 	
 	$lock_ref->unlock_file;
 	$lock_ref->delete_file;
@@ -199,6 +205,10 @@ unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file1);
 HashNet::MP::LocalDB->dump_db($db_client_file2);
 HashNet::MP::LocalDB->dump_db($db_server_file);
+
+HashNet::MP::LocalDB->handle($db_client_file1)->delete_file;
+HashNet::MP::LocalDB->handle($db_client_file2)->delete_file;
+HashNet::MP::LocalDB->handle($db_server_file)->delete_file;
 
 HashNet::MP::GlobalDB->delete_disk_cache($db_client_file1);
 HashNet::MP::GlobalDB->delete_disk_cache($db_client_file2);

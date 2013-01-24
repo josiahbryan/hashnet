@@ -26,7 +26,7 @@ my $sock = $ch->sw->{sock};
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>2}, 'a' x (1024 * 1024));
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>3}, 'a' x (1024 * 1024));
 
-my $att_len = (1024 * 1024);
+my $att_len = (1024 * 1024 * 8);
 my $max = 512;
 my $time = time();
 my $len = 0;

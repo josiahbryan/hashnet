@@ -1340,9 +1340,26 @@ package HashNet::MP::GlobalDB;
 					to	=> $hub->uuid,
 					from	=> $uuid,
 				);
-				$sw_handle->outgoing_queue->add_row($env);
-				
-				if($sw_handle->wait_for_receive(timeout => 15, type => MSG_GLOBALDB_GET_REPLY))
+				#$sw_handle->outgoing_queue->add_row($env);
+				if($sw)
+				{
+					trace "GlobalDB: _query_hubs(): Sending query {$env->{uuid}} for '$key' immediately via $sw\n";
+					$sw->send_message($env);
+				}
+				else
+				{
+					trace "GlobalDB: _query_hubs(): No sw ref, logging ack need for {$env->{uuid}} for query for '$key'\n";
+					$sw_handle->need_ack($env);
+					
+					trace "GlobalDB: _query_hubs(): Adding query {$env->{uuid}} for '$key' to outgoing queue\n";
+					$sw_handle->outgoing_queue->add_row($env);
+				}
+
+				if(!$sw_handle->wait_for_ack($env))
+				{
+					trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' FAILED TO ACK query for '$key'\n";
+				}
+				elsif($sw_handle->wait_for_receive(timeout => 5, type => MSG_GLOBALDB_GET_REPLY))
 				{
 					my $queue = $sw_handle->incoming_queue();
 					my @messages;
@@ -1396,6 +1413,10 @@ package HashNet::MP::GlobalDB;
 						trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' replied FALSE for '$key'\n";
 						#trace "GlobalDB: _query_hubs(): Hub '".$hub->{name}."' false debug: ".Dumper($msg);
 					}
+				}
+				else
+				{
+					trace "GlobalDB: _query_hubs(): No response from '".$hub->{name}."' for '$key'\n";
 				}
 			}
 		}
