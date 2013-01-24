@@ -30,6 +30,14 @@
 {package HashNet::Util::MessageSocketBase;
 
 	use common::sense;
+
+	our @ISA = qw(Exporter);
+	
+	# Exporting by default
+	our @EXPORT = qw(read_att att_file);
+	# Exporting on demand basis.
+	our @EXPORT_OK = qw();
+	
 	use Data::Dumper;
 	use POSIX qw( WNOHANG );
 	use Time::HiRes qw/sleep time alarm/;
@@ -40,6 +48,7 @@
 	sub to_json   { encode_json(shift) } 
 	sub from_json { decode_json(shift) }	
 	use IO::Select; # for checking can_read/can_send
+	use File::Slurp;
 
 	use HashNet::Util::CleanRef;
 	use HashNet::Util::Logging;
@@ -806,6 +815,8 @@
 
 		$self->_lock_socket;
 
+		my $msg_len = 0;
+
 		if(defined $att)
 		{
 			#trace "MessageSocketBase: send_message: has att, generating output\n";
@@ -819,6 +830,17 @@
 			push @tmp,"Content-Type: multipart\/mixed; boundary=".$boundary.CRLF;
 			push @tmp, $json.CRLF;
 			push @tmp, $boundary;
+
+# 			# The attachment should only touch RAM (from us) in:
+# 			# send_message(), read_message(), and read_att()
+# 			# (Assuming its >1K) - e.g. as soon as user gives HashNet attachment,
+# 			# it should go to disk and stay there until transmission
+# 			if(_att_is_file($att))
+# 			{
+# 				# Att string:
+# 				# #!file:/tmp/foobar
+# 				$att = read_file(_att_filename($att));
+# 			}
 			
 			my $buffer    = join '', @tmp;
 			my $total_len = length($buffer) + length($att);
@@ -839,6 +861,8 @@
 			my $oldfh = select $sock;
 			$| ++;
 			select $oldfh;
+
+			$msg_len = length($total_len.CRLF) + $total_len;
 			
 
 			# For debugging
@@ -856,6 +880,8 @@
 			#trace "MessageSocketBase: send_message: Sending '$msg' [no att]\n";
 			print $sock $msg;
 
+			$msg_len = length($msg);
+
 			my $oldfh = select $sock;
 			$| ++;
 			select $oldfh;
@@ -863,6 +889,9 @@
 
 		$self->_unlock_socket;
 
+
+		return $msg_len;
+		
 		#trace "MessageSocketBase: send_message: print() done\n";
 		
   

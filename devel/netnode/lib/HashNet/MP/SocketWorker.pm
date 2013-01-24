@@ -3,7 +3,12 @@ use common::sense;
 
 	#use base qw/HashNet::Util::MessageSocketBase/;
 	use HashNet::Util::MessageSocketBase;
-	our @ISA = qw( HashNet::Util::MessageSocketBase );
+	our @ISA = qw(HashNet::Util::MessageSocketBase Exporter);
+
+	# Exporting by default
+	our @EXPORT = qw(read_att att_file); # provided by MessageSocketBase, re-exported here
+	# Exporting on demand basis.
+	our @EXPORT_OK = qw();
 	
 	#use JSON qw/to_json from_json/;
 	# For compat with older servers
@@ -1679,7 +1684,7 @@ use common::sense;
 		#$self->need_ack($msg);
 		#my $queue = msg_queue('ack');
 		#print STDERR Dumper($queue);
-		return $self->_send_message($msg);
+		return $self->_send_message($msg, @_);
 	}
 
 	sub _send_message
