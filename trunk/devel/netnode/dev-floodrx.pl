@@ -27,7 +27,7 @@ my $sock = $ch->sw->{sock};
 #$ch->sw->send_message({uuid => '3-'.time(), "data"=>3}, 'a' x (1024 * 1024));
 
 my $att_len = (1024 * 1024);
-my $max = 512;
+my $max = 1024 * 16;
 my $time = time();
 my $len = 0;
 $len += $ch->sw->send_message({uuid => $_.'.1-'.$time, "data" => $_}, '#' x $att_len) for 1..$max;
@@ -46,7 +46,8 @@ my $time = time();
 
 #$ch->sw->send_message({uuid => 'test', 'data'=>'hello'}, 'a' x 512);
 
-$ch->destroy_app;
+#$ch->destroy_app;
+$ch->stop;
 
 
 trace "$0: Done\n";

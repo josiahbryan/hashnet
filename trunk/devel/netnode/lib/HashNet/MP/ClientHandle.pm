@@ -127,7 +127,7 @@
 
 	sub sw			{
 		my $self = shift;
-		$self->reconnect_if_dead;
+		$self->reconnect_if_dead unless $self->{stopped};
 		return $self->{sw};
 	}
 	
@@ -140,8 +140,10 @@
 	sub wait_for_receive	{ shift->sw->wait_for_receive(@_) }
 	sub stop		{
 		my $self = shift;
+		$self->{stopped} = 1;
 		$self->sw->stop;
 		$self->peer->close_tunnel(); # noop if no tunnel
+		$self->{sw} = undef;
 	}
 
 	sub uuid 		{ shift->sw->node_info->{uuid} }

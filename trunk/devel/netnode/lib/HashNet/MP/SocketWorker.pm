@@ -998,8 +998,18 @@ use common::sense;
 		$ack_queue->begin_batch_update;
 		eval{
 			my $msg = $ack_queue->by_field(uuid => $ack);
-			$ack_queue->del_row($msg) if $msg;
-			warn "No msg in ACK queue for uuid {$ack}" if !$msg;
+			if($msg)
+			{	
+				$ack_queue->del_row($msg);
+				#trace "SocketWorker: _handle_msg_ack: Deleted msg {$ack} from ACK queue (e.g. received ACK), ack queue size now: ".$ack_queue->size."\n";
+				#my @keys = sort { $a <=> $b } map { $_->{uuid} } @{ $ack_queue->list || [] };
+				#trace "SocketWorker:               ack_queue: ".join(", ", map { /(\d+)\./ ? $1 : $_ } @keys), "\n";
+			}
+			else
+			{
+				warn "No msg in ACK queue for uuid {$ack}";
+			}
+			
 		};
 		$ack_queue->end_batch_update;
 		die "SocketWorker: _handle_msg_ack: Error processing ACK for msg {$ack}: $@" if $@;
@@ -1547,6 +1557,9 @@ use common::sense;
 		my $cur_time         = $self->sntp_time();
 		my @ack_pending_list = @{ $ack_queue->list || {} };
 		my @ack_failed_list  = grep { $cur_time - $_->{_tx_time} > $max_ack_time } @ack_pending_list;
+
+		# NOTE Only for debugging - NOT FOR PRODUCTION
+		@ack_failed_list = ();
 		
 		trace "SocketWorker: pending_messages(): Found ".scalar(@ack_failed_list)." messages that failed ACK, retransmitting\n" if @ack_failed_list;
 
@@ -1631,9 +1644,16 @@ use common::sense;
 		my ($self, $batch) = @_;
 		# Add these messages to the ack queue (queue for msgs pending MSG_ACK replies)
 		my $ack_queue = msg_queue('ack');
-		$ack_queue->add_row($batch)    if ref $batch eq 'HASH';
-		$ack_queue->add_batch($batch)  if ref $batch eq 'ARRAY';
-		$ack_queue->end_batch_update() if $ack_queue->in_batch_update;
+		if(ref $batch eq 'ARRAY' && !@$batch)
+		{
+			$ack_queue->end_batch_update() if $ack_queue->in_batch_update;
+			return;
+		}
+		
+		$ack_queue->begin_batch_update() if !$ack_queue->in_batch_update;
+		$ack_queue->add_row($batch)      if ref $batch eq 'HASH';
+		$ack_queue->add_batch($batch)    if ref $batch eq 'ARRAY';
+		$ack_queue->end_batch_update()   if $ack_queue->in_batch_update;
 		#trace "SocketWorker: [ACK LOCK] Unlock ACK queue in messages_sent()\n";
 	}
 
