@@ -80,6 +80,8 @@ my $step_size = 256;
 #while($total_msgs < $max_msgs)
 $step_size = $max_msgs;
 {
+	my $time = time();
+	
 	trace "$0: Calling begin_batch_update\n";
 	$ch->outgoing_queue->begin_batch_update;
 	for my $x (1..$step_size) #$max_msgs)
@@ -91,7 +93,7 @@ $step_size = $max_msgs;
 		$count += length($msg) + $msg_size;
 		#next;
 
-		if(!$ch->send($msg, _att => $att, bcast => 1, flush => 0))
+		if(!$ch->send($msg, uuid => $x.'.1-'.$time, _att => $att, bcast => 1, flush => 0, sfwd => 0))
 		{
 			die "Unable to send message";
 		}
@@ -137,7 +139,7 @@ my @msgs = $ch->messages(0); # blocks [default 4 sec] until messages arrive, pas
 
 my $t_end = time;
 my $t_diff = $t_end - $t_start;
-my $kb_sec = int(($count / 1024) / $t_diff);
+my $kb_sec = int(($count / 1024) / $t_diff) * 2; # bi directional
 
 use Data::Dumper;
 #print STDERR "Received: ".Dumper(\@msgs) if @msgs;
