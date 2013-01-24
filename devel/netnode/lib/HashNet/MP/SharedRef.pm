@@ -13,12 +13,12 @@ use common::sense;
 
 	sub DEBUG { 0 }
 	sub DEBUG_LOCK { 0 }
-	sub DEBUG_SAVE_LOAD { 0 }
+	sub DEBUG_SAVE_LOAD { 0  }
 
 	sub DEBUG_CALLER_OFFSET { 'LocalDB.pm' }
 
 	#sub DEBUG_LOCK_FILE_REGEX { '(testdb_queues_outgoing|testdb_queues_ack)' }
-	sub DEBUG_LOCK_FILE_REGEX { '.db.dev-floodrx_queues_ack' }
+	sub DEBUG_LOCK_FILE_REGEX { '.' }
 	
 	sub _debug_file_matches
 	{

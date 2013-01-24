@@ -1384,7 +1384,7 @@ use common::sense;
 		# Return 1 if started, or <1 if not yet completely started
 		my $res = $self->state_handle->{online};
 		#trace "SocketWorker: wait_for_start: Exit, res: $res\n";
-		logmsg "WARN", "SocketWorker: wait_for_start: Failed to start in $max seconds (\$res=$res)\n" if $res !=1;
+		logmsg "WARN", "SocketWorker: wait_for_start: Failed to start in $max seconds (\$res=$res), called from: ".called_from()."\n" if $res !=1;
 		return $res;
 	}
 
@@ -1452,6 +1452,7 @@ use common::sense;
 		$res = defined $queue->by_field(uuid => $uuid) ? 0 : 1;
 		#trace "SocketWorker: outgoing_queue dump ($uuid): ".Dumper($queue);
 		trace "SocketWorker: wait_for_ack: Exit ($uuid), res: $res\n";
+		logmsg "WARN", "SocketWorker: wait_for_ack: Failed to receive ack for {$uuid} in $max seconds (\$res=$res), called from: ".called_from()."\n" if $res !=1;
 		#trace "SocketWorker: wait_for_send: All messages sent.\n" if $res;
 		return $res;
 	}
@@ -1521,6 +1522,7 @@ use common::sense;
 		}
 		
 		trace "SocketWorker: wait_for_receive: Exit, res: $res\n" if $debug;
+		logmsg "WARN", "SocketWorker: wait_for_receive: Failed to receive msg for ($uuid,$type) in $max seconds (\$res=$res), called from: ".called_from()."\n" if $res !=1;
 		#print STDERR "ClientHandle: Dumper of queue: ".Dumper($queue);
 		#trace "SocketWorker: wait_for_receive: All messages received.\n" if $res;
 		return $res;
@@ -1661,7 +1663,8 @@ use common::sense;
 		}
 		
 		$ack_queue->begin_batch_update() if !$ack_queue->in_batch_update;
-		$ack_queue->add_row($batch)      if ref $batch eq 'HASH';
+		$ack_queue->add_row($batch)      if ref $batch eq 'HASH'
+		                                    && ! defined $ack_queue->by_field(uuid => $batch->{uuid});
 		$ack_queue->add_batch($batch)    if ref $batch eq 'ARRAY';
 		$ack_queue->end_batch_update()   if $ack_queue->in_batch_update;
 		#trace "SocketWorker: [ACK LOCK] Unlock ACK queue in messages_sent()\n";

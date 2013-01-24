@@ -8,7 +8,8 @@ use common::sense;
 
 	use HashNet::MP::SharedRef;
 	
-	our $DBFILE = '/var/lib/hashnet/localdb';
+	#our $DBFILE = '/var/lib/hashnet/localdb';
+	our $DBFILE = '/tmp/hashnet/localdb';
 	
 	my $ClassData = {};
 	

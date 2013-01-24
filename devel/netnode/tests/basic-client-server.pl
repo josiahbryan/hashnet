@@ -15,8 +15,8 @@ use HashNet::Util::Logging;
 
 my $test_port = 82814;
 my $test_srv_cfg = 'test-basic-server.conf';
-my $db_client_file = 'db.test-basic-client';
-my $db_server_file = 'db.test-basic-server';
+my $db_client_file = '/tmp/db.test-basic-client';
+my $db_server_file = '/tmp/db.test-basic-server';
 
 unlink($test_srv_cfg);
 HashNet::MP::LocalDB->dump_db($db_client_file);

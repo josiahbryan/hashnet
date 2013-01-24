@@ -19,7 +19,7 @@ $SIG{CHLD} = 'IGNORE';
 $HashNet::Util::Logging::LEVEL = 0;
 #$HashNet::Util::Logging::ANSI_ENABLED = 1 if $HashNet::Util::Logging::LEVEL;
 
-$HashNet::MP::LocalDB::DBFILE = "$0.db";
+$HashNet::MP::LocalDB::DBFILE = "/tmp/test-stale-locks.db";
 
 my $pid = fork;
 if(!$pid)

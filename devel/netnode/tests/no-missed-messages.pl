@@ -15,8 +15,8 @@ use HashNet::Util::Logging;
 
 my $test_port = 82814;
 my $test_srv_cfg = 'test-basic-server.conf';
-my $db_client_file = 'db.test-basic-client';
-my $db_server_file = 'db.test-basic-server';
+my $db_client_file = '/tmp/db.test-basic-client';
+my $db_server_file = '/tmp/db.test-basic-server';
 
 HashNet::MP::LocalDB->dump_db($db_client_file);
 HashNet::MP::LocalDB->dump_db($db_server_file);
@@ -79,11 +79,13 @@ else
 
 	if(@msgs)
 	{
-		info "$0: Received msg '$_->{data}'\n" foreach @msgs;
+		is($msgs[$_]->{data},  $_ + 1, "Msg ".($_+1)." OK") for 0..$#msgs;
+		is($msgs[$_]->{_att}, ($_ + 1) x ($att_size / length ($_ + 1)), "Attachment ".($_+1)." OK") for 0..$#msgs;
 		
+		info "$0: Received msg '$_->{data}'\n" foreach @msgs;
 		@msgs = sort { $a->{data} <=> $b->{data} } @msgs;
 		my $msg = $msgs[$#msgs];
-		
+
 		is($msg->{data},   $num_msgs, "Received proper data");
 		is($msg->{_att},   $num_msgs x ( $att_size / length($num_msgs) ), "Received proper attachment");
 		warn Dumper($msg->{data}) if ref $msg->{data}; # last test would have failed if ref, so add debug info

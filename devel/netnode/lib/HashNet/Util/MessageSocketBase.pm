@@ -76,7 +76,9 @@
 	{
 		my $self = shift;
 		my @files;
-		opendir(DIR,'.') || die "Cannot read dir '.': $!";
+		my ($dir, $name) = $HashNet::MP::LocalDB::DBFILE =~ /^(.*?\/)([^\/]+)$/;
+		$dir = '.' if !$dir;
+		opendir(DIR,$dir) || die "Cannot read dir '.': $!";
 		@files = grep { /^\.pid_ipc_ref\./ && !/\.counter/ } readdir(DIR);
 		closedir(DIR);
 		foreach my $file (@files)
@@ -99,7 +101,9 @@
 			$self->_remove_old_pid_ipc_ref;
 			my $class_string = "$self";
 			$class_string =~ s/[^A-Za-z0-9_\.]//g;
-			my $file = ".pid_ipc_ref.".$class_string;
+			my ($dir, $name) = $HashNet::MP::LocalDB::DBFILE =~ /^(.*?)\/?([^\/]+)$/;
+			$dir = '.' if !$dir;
+			my $file = "$dir/.pid_ipc_ref.".$class_string;
 			#warn "$self: Using IPC file: $file\n";
 			$self->{pid_ipc_ref} = HashNet::MP::SharedRef->new($file);
 			$self->{pid_ipc_ref}->{started_from} = $$;

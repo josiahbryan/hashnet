@@ -51,7 +51,7 @@
 		#$HashNet::MP::LocalDB::DBFILE = "$0.$$.db";
 		if(!$opts{use_default_db})
 		{
-			$HashNet::MP::LocalDB::DBFILE = ".db.".$opts{db_prefix};
+			$HashNet::MP::LocalDB::DBFILE = "/tmp/.db.".$opts{db_prefix};
 			trace "ClientHandle: setup(): Using DBFILE '$HashNet::MP::LocalDB::DBFILE'\n";
 		}
 	
