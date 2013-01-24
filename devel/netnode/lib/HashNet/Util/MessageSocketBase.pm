@@ -31,12 +31,12 @@
 
 	use common::sense;
 
-	our @ISA = qw(Exporter);
-	
-	# Exporting by default
-	our @EXPORT = qw(read_att att_file);
-	# Exporting on demand basis.
-	our @EXPORT_OK = qw();
+# 	our @ISA = qw(Exporter);
+# 	
+# 	# Exporting by default
+# 	our @EXPORT = qw(read_att att_file);
+# 	# Exporting on demand basis.
+# 	our @EXPORT_OK = qw();
 	
 	use Data::Dumper;
 	use POSIX qw( WNOHANG );
