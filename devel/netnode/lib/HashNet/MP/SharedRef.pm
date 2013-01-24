@@ -13,7 +13,7 @@ use common::sense;
 
 	sub DEBUG { 0 }
 	sub DEBUG_LOCK { 0 }
-	sub DEBUG_SAVE_LOAD { 1 }
+	sub DEBUG_SAVE_LOAD { 0 }
 
 	sub DEBUG_CALLER_OFFSET { 'LocalDB.pm' }
 
@@ -288,6 +288,13 @@ use common::sense;
 		$self->data_loaded_hook();
 
 		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in), called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if (DEBUG || DEBUG_SAVE_LOAD) && _debug_file_matches($self->file);
+
+# 		if((DEBUG || DEBUG_SAVE_LOAD) && _debug_file_matches($self->file))
+# 		{
+# 			my @keys = sort { $a <=> $b } map { $_->{uuid} } values %{ $self->{data} };
+# 			trace "SharedRef:                  ack_queue: ".join(", ", map { /(\d+)\./ ? $1 : $_ } @keys), "\n";
+# 		}
+				
 		#trace "SharedRef: ", $self->file, ": load_data():  ".$self->_d->{file}." \t (+in)\n" if $self->file =~ /_queues_listeners_/;
 # 		trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Data] ".scalar(keys(%{$data->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing/;
 # 		trace "SharedRef: ", $self->file, ": load_data():  [LocalDB Data Key Count]: [Self] ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing/;
@@ -349,6 +356,13 @@ use common::sense;
 		my $file = $self->file;
 
 		trace "${LOCK_DEBUGOUT_PREFIX}SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out), called from: ".called_from_smart(DEBUG_CALLER_OFFSET)."\n" if (DEBUG || DEBUG_SAVE_LOAD) && _debug_file_matches($self->file);
+
+# 		if((DEBUG || DEBUG_SAVE_LOAD) && _debug_file_matches($self->file))
+# 		{
+# 			my @keys = sort { $a <=> $b } map { $_->{uuid} } values %{ $self->{data} };
+# 			trace "SharedRef:                  ack_queue: ".join(", ", map { /(\d+)\./ ? $1 : $_ } @keys), "\n";
+# 			trace "SharedRef: save from: ".get_stack_trace();
+# 		}
 
 		#trace "SharedRef: ", $self->file, ": save_data():  ".$self->_d->{file}." \t (-out)\n" if $self->file =~ /_queues_listeners_/;
 		#trace "SharedRef: ", $self->file, ": save_data():  [LocalDB Data Key Count]: ".scalar(keys(%{$self->{data} || {}}))."\n" if $self->file =~ /_queues_outgoing_/;
