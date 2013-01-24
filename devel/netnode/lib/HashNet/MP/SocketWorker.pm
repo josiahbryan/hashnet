@@ -1007,7 +1007,7 @@ use common::sense;
 			}
 			else
 			{
-				warn "No msg in ACK queue for uuid {$ack}";
+				#warn "No msg in ACK queue for uuid {$ack}";
 			}
 			
 		};
@@ -1549,51 +1549,55 @@ use common::sense;
 
 		# end_batch_update is called on the ACK queue in messages_sent()
 		#trace "SocketWorker: [ACK LOCK] Lock   ACK queue in pending_messages()\n";
-		$ack_queue->begin_batch_update;
+		$ack_queue->lock_file;
+		#{
 
-		# Check ACK queue for any messages pending ACK for more than $max_ack_time seconds and
-		# add to the @res list for retransmission
-		my $max_ack_time     = 60; # seconds
-		my $cur_time         = $self->sntp_time();
-		my @ack_pending_list = @{ $ack_queue->list || {} };
-		my @ack_failed_list  = grep { $cur_time - $_->{_tx_time} > $max_ack_time } @ack_pending_list;
+			# Check ACK queue for any messages pending ACK for more than $max_ack_time seconds and
+			# add to the @res list for retransmission
+			my $max_ack_time     = 60; # seconds
+			my $cur_time         = $self->sntp_time();
+			my @ack_pending_list = @{ $ack_queue->list || {} };
+			$_->{_tx_time} ||= $cur_time foreach @ack_pending_list;
+			my @ack_failed_list  = grep { $cur_time - $_->{_tx_time} > $max_ack_time } @ack_pending_list;
 
-		# NOTE Only for debugging - NOT FOR PRODUCTION
-		@ack_failed_list = ();
-		
-		trace "SocketWorker: pending_messages(): Found ".scalar(@ack_failed_list)." messages that failed ACK, retransmitting\n" if @ack_failed_list;
+			# NOTE Only for debugging - NOT FOR PRODUCTION
+			#@ack_failed_list = ();
 
-		# Add messages that failed ACK to the outgoing queue again (if they are in the ACK queue,
-		# then by definition they would have been removed from the outgoing queue in messages_sent())
-		#outgoing_queue()->add_batch([ map { clean_ref($_) } @ack_failed_list ]);
-		if(@ack_failed_list)
-		{
-			# Clone the messages destined to be re-enqueued to the outgoing queue
-			# because add_batch() sets the {id} on each of the refs - if we did NOT
-			# clone the refs, the {id} set by add_batch() would not batch the original
-			# id from the ACK queue database, so the del_batch() call would
-			# fail to remove them from the ACK queue, causing the message to
-			# be duplicated - appearing in both the ACK and outgoing queue simultaneously
-			my @requeue_list = map { clean_ref($_) } @ack_failed_list;
-			
-			if($self->outgoing_queue->add_batch(\@requeue_list))
+			trace "SocketWorker: pending_messages(): Found ".scalar(@ack_failed_list)." messages that failed ACK, retransmitting\n" if @ack_failed_list;
+
+			# Add messages that failed ACK to the outgoing queue again (if they are in the ACK queue,
+			# then by definition they would have been removed from the outgoing queue in messages_sent())
+			#outgoing_queue()->add_batch([ map { clean_ref($_) } @ack_failed_list ]);
+			if(@ack_failed_list)
 			{
-				# NOTE: Only deleting from ack_queue IF add_batch on incoming queue succedes so that
-				# we 'guarantee' retransmisson - outgoing_queue could fail to lock queue (not likely)
-				# which would not add our ack_failed_list to the queue, causing us to loose data
-				# if we deleted the messages from the ACK queue if they didnt make it into the outgoing queue
+				# Clone the messages destined to be re-enqueued to the outgoing queue
+				# because add_batch() sets the {id} on each of the refs - if we did NOT
+				# clone the refs, the {id} set by add_batch() would not batch the original
+				# id from the ACK queue database, so the del_batch() call would
+				# fail to remove them from the ACK queue, causing the message to
+				# be duplicated - appearing in both the ACK and outgoing queue simultaneously
+				my @requeue_list = map { clean_ref($_) } @ack_failed_list;
 
-				# Remove failed messages from the ACK queue (because they are retransmitted - they will get
-				# readded to the ACK queue in messages_sent)
-				$ack_queue->del_batch(\@ack_failed_list);
+				if($self->outgoing_queue->add_batch(\@requeue_list))
+				{
+					# NOTE: Only deleting from ack_queue IF add_batch on incoming queue succedes so that
+					# we 'guarantee' retransmisson - outgoing_queue could fail to lock queue (not likely)
+					# which would not add our ack_failed_list to the queue, causing us to loose data
+					# if we deleted the messages from the ACK queue if they didnt make it into the outgoing queue
 
-				#trace "SocketWorker: pending_messages(): Added ".scalar(@ack_failed_list)." to outgoing, deleted from ACK queue\n";#.Dumper($ack_queue->size ? $ack_queue : [],  $self->outgoing_queue);
+					# Remove failed messages from the ACK queue (because they are retransmitted - they will get
+					# readded to the ACK queue in messages_sent)
+					$ack_queue->del_batch(\@ack_failed_list);
+
+					#trace "SocketWorker: pending_messages(): Added ".scalar(@ack_failed_list)." to outgoing, deleted from ACK queue\n";#.Dumper($ack_queue->size ? $ack_queue : [],  $self->outgoing_queue);
+				}
+				else
+				{
+					error "SocketWorker: pending_messages(): Failed to add \@ack_failed_list to outgoing queue\n";
+				}
 			}
-			else
-			{
-				error "SocketWorker: pending_messages(): Failed to add \@ack_failed_list to outgoing queue\n";
-			}
-		}
+		#}
+		$ack_queue->unlock_file;
 
 # 		if(@ack_failed_list > 1)
 # 		{
@@ -1636,7 +1640,13 @@ use common::sense;
 		# TODO Rewrite for custom SW outgoing queue
 		$self->outgoing_queue->del_batch($batch);
 
-		$self->need_ack($batch);
+		#$self->need_ack($batch);
+	}
+
+	sub pre_transmit_hook
+	{
+		my ($self, $msg) = @_;
+		$self->need_ack($msg);
 	}
 
 	sub need_ack
@@ -1662,7 +1672,8 @@ use common::sense;
 		my $self = shift;
 		my $msg = shift;
 		$msg->{_tx_time} = $self->sntp_time();
-		$self->need_ack($msg);
+		# _need_ack() call moved to pre_transmit_hook()
+		#$self->need_ack($msg);
 		#my $queue = msg_queue('ack');
 		#print STDERR Dumper($queue);
 		return $self->_send_message($msg);

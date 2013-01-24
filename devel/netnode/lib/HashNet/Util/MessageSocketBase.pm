@@ -753,6 +753,11 @@
 		shift->pid_ipc_ref->unlock_file;
 	}
 
+	sub pre_transmit_hook
+	{
+		# NOOP
+	}
+
 	# NOTE: Use in subclass
 	sub send_message
 	{
@@ -762,6 +767,9 @@
 		my $json = "";
 		my $clean_ref = undef;
 		return undef if !$hash;
+
+		$self->pre_transmit_hook($hash);
+
 		
 		trace "MessageSocketBase: send_message: $hash->{type}: '$hash->{data}'\n";#  if DEBUG;
 		undef $@;
