@@ -70,7 +70,7 @@ if(!$ch)
 #$ch->send("Bouncy Bouncy", to => $ch->uuid);
 
 my $msg_size = 1024 * 512; #16;# * 2;
-my $max_msgs = 64; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
+my $max_msgs = 1; #64 * 16 * 2; #64 * 16 * 2;# * 16 * 16; #64 * 16;
 
 
 my $total_msgs = 0;
@@ -158,5 +158,5 @@ info "$0: Sent ".sprintf('%.02f', $count/1024)." KB in ".sprintf('%.02f', $t_dif
 info "$0: Disconnect from $ENV{REMOTE_ADDR}\n\n\n";
 
 
-HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);
+#HashNet::MP::LocalDB->dump_db($HashNet::MP::LocalDB::DBFILE);
 

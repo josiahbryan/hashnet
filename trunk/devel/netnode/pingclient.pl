@@ -168,7 +168,7 @@ foreach my $res (@results)
 		else
 		{
 			print $info ? $info->{name} : $uuid2;
-			print ' (', sprintf('%.03f', $delta), 's)';
+			print ' (', sprintf('%.03f', $delta), 's' . ($info->{type} eq 'hub' ? ', hub ver '.$info->{hub_ver} : ', client'). ($print_uuids ? ', {'.$uuid2.'}' : ''). ')';
 			print " -> " unless $item->{last_item};
 		}
 		

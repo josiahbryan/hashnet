@@ -244,6 +244,7 @@
 
 				foreach my $msg (@msgs)
 				{
+					next if !$msg->{bcast};
 					my $new_env = $sw->create_client_receipt($msg);
 					#trace "ClientHandle: incoming_messages: Created MSG_CLIENT_RECEIPT for {$msg->{uuid}}\n";#, data: '$msg->{data}'\n"; #: ".Dumper($new_env, \@args)."\n";
 					$self->enqueue($new_env);

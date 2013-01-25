@@ -1004,7 +1004,8 @@ use common::sense;
 		eval{
 			my $msg = $ack_queue->by_field(uuid => $ack);
 			if($msg)
-			{	
+			{
+				trace "SocketWorker: _handle_msg_ack: Deleted msg ".$msg->{type}."{$msg->{uuid}}: '$msg->{data}',  from ACK queue (e.g. received ACK)\n";
 				$ack_queue->del_row($msg);
 				#trace "SocketWorker: _handle_msg_ack: Deleted msg {$ack} from ACK queue (e.g. received ACK), ack queue size now: ".$ack_queue->size."\n";
 				#my @keys = sort { $a <=> $b } map { $_->{uuid} } @{ $ack_queue->list || [] };
@@ -1013,6 +1014,7 @@ use common::sense;
 			else
 			{
 				#warn "No msg in ACK queue for uuid {$ack}";
+				trace "SocketWorker: _handle_msg_ack: No msg in ACK queue for uid {$ack}\n"; 
 			}
 			
 		};
@@ -1130,13 +1132,21 @@ use common::sense;
 				$send_ack = 0;
 			}
 
-			$self->_send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $send_ack && $envelope->{uuid};
+			$self->_send_ack($envelope) if $send_ack;
 		}
 		else
 		{
 			info "SocketWorker: dispatch_msg: NOT enquing envelope, history says it was already sent here.\n"; #: ".Dumper($envelope);
-			$self->_send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK)) if $envelope->{uuid};
+			$self->_send_ack($envelope);
 		}
+	}
+
+	sub _send_ack
+	{
+		my ($self, $envelope) = @_;
+		return if !$envelope || !$envelope->{uuid};
+		trace "SocketWorker: _send_ack: ACKing ".$envelope->{type}."{$envelope->{uuid}}: '$envelope->{data}'\n";
+		$self->_send_message($self->create_envelope($envelope->{uuid}, type => MSG_ACK))
 	}
 
 	sub _call_msg_handlers
@@ -1161,7 +1171,8 @@ use common::sense;
 					my $flag = $coderef->($envelope, $self, $current_type);
 
 					$self->_send_message($self->create_client_receipt($envelope))
-						if $envelope->{type} ne 'MSG_CLIENT_RECEIPT' &&
+						if $envelope->{bcast} &&
+						   $envelope->{type} ne 'MSG_CLIENT_RECEIPT' &&
 						   $self->peer &&
 						   $self->peer->{type} eq 'hub';
 
@@ -1994,7 +2005,7 @@ use common::sense;
 				# instead of the uuid on the other end of the socket,
 				# so then the local hub picks up the receipt and routes it to
 				# all connected clients.
-				if($uuid)
+				if($uuid && $msg->{bcast})
 				{
 					# See note above on 'cheating'
 					my $nxthop_uuid = ref $self ? $self->peer_uuid : $uuid;
