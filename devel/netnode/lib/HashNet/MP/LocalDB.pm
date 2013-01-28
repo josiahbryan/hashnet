@@ -60,7 +60,7 @@ use common::sense;
 		my $abs = shift || $DBFILE;
 		my ($path, $file) = $abs =~ /^(.*\/)?([^\/]+)$/;
 		$path = '.' if !$path;
-		opendir(DIR, $path) || die "Cannot read dir '$path': $!";
+		opendir(DIR, $path) || (warn "Cannot read dir '$path': $!" && return 0);
 		my @files = grep  { /^$file.*\.lock$/ } readdir(DIR);
 		closedir(DIR);
 		#use Data::Dumper;

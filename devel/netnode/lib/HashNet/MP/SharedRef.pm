@@ -9,6 +9,7 @@ use common::sense;
 	use Time::HiRes qw/time sleep alarm/;
 	use POSIX;
 	use Cwd qw/abs_path/;
+	use File::Path qw/mkpath/;
 	use Carp;
 
 	sub DEBUG { 0 }
@@ -45,6 +46,9 @@ use common::sense;
 		my $gdb  = $opts{gdb}  || undef;
 
 		$file = $gdb ? "/shared/$0.dat" : "$0.dat" if !$file;
+		
+		my ($dir,$name) = $file =~ /^(.*\/)?([^\/]+)$/;
+		mkpath($dir) if $dir && !-d $dir;
 
 		if($tied)
 		{
